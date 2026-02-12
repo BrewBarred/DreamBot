@@ -1,0 +1,8 @@
+What is an action?
+
+- Actions are the simplest version of a Task there is.
+- Actions have one purpose only, and may consist of 1 to many stages of execution, just like normal tasks.
+- Actions are not submitted to the Task Manager however, they must be joined with other actions into Tasks or explicitly
+    converted to one.
+- Actions can be performed (through urgent queue manipulation) instantly via the bot menu to test the action.
+- Each action has set
