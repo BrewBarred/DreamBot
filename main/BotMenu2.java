@@ -774,7 +774,7 @@
 //                        "\n- BoxLayout about panel\n" +
 //
 //                        "\nNext upgrades:" +
-//                        "\n- theme (FlatLaf), icons, animations, docking sidebar" +
+//                        "\n- theme (FlatLaf), resources.icons, animations, docking sidebar" +
 //                        "\n- persistence (save settings to JSON)" +
 //                        "\n- real-time charts (custom paint or a chart library)\"");
 //        body.setEditable(false);
