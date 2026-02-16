@@ -50,12 +50,16 @@ public class DreamBotMenu extends JFrame {
 
     private final Color COLOR_RED = new Color(100, 0, 0);
     private final Color COLOR_GREEN = new Color(0, 100, 0);
+    private final Color COLOR_GREY = new Color(40,40,40);
 
     // --- Data & Presets ---
     private final DataMan dataMan = new DataMan();
+
     private final Map<Skill, SkillData> skillRegistry = new EnumMap<>(Skill.class);
+
     private final DefaultListModel<Task> modelTaskList = new DefaultListModel<>();
-    
+    private final JList<Task> listTaskList = new JList<>(modelTaskList);
+
     private final DefaultListModel<Task> modelTaskLibrary = new DefaultListModel<>();
     private final JList<Task> listTaskLibrary = new JList<>(modelTaskLibrary);
 
@@ -63,9 +67,12 @@ public class DreamBotMenu extends JFrame {
     private final JList<Action> listTaskBuilder = new JList<>(modelTaskBuilder);
 
     private final DefaultListModel<String> nearbyEntitiesModel = new DefaultListModel<>();
+
+
     private final List<List<Task>> presets = new ArrayList<>(Arrays.asList(new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>()));
 
     // --- UI Components ---
+    private final JTabbedPane mainTabs = new JTabbedPane();
     private final JButton[] presetButtons = new JButton[4];
     private final JPanel trackerList;
     private final JLabel totalXpGainedLabel = new JLabel();
@@ -77,8 +84,8 @@ public class DreamBotMenu extends JFrame {
     private final JSpinner projectionSpinner;
     private final long startTime;
     private JButton btnTaskBuilderCreateTask;
+    private JButton btnTaskBuilderRefreshList;
 
-    private JList<Task> listTaskList;
     private JList<String> nearbyList;
     private JTextArea libraryEditorArea, consoleArea;
     private JTextField taskNameInput, taskDescriptionInput, taskStatusInput, manualTargetInput, consoleSearch;
@@ -88,8 +95,8 @@ public class DreamBotMenu extends JFrame {
     // --- Theme ---
     private final Color BG_BASE = new Color(12, 12, 12);
     private final Color PANEL_SURFACE = new Color(24, 24, 24);
-    private final Color ACCENT_BLOOD = new Color(150, 0, 0);
-    private final Color ACCENT_ORANGE = new Color(220, 80, 0); // Restored from new builder
+    private final Color COLOR_BLOOD = new Color(150, 0, 0);
+    private final Color COLOR_ORANGE = new Color(220, 80, 0); // Restored from new builder
     private final Color BORDER_DIM = new Color(45, 45, 45);
     private final Color TEXT_MAIN = new Color(210, 210, 210);
     private final Color TEXT_DIM = new Color(140, 140, 140);
@@ -112,11 +119,27 @@ public class DreamBotMenu extends JFrame {
     private static final Skill[] OSRS_ORDER = { Skill.ATTACK, Skill.HITPOINTS, Skill.MINING, Skill.STRENGTH, Skill.AGILITY, Skill.SMITHING, Skill.DEFENCE, Skill.HERBLORE, Skill.FISHING, Skill.RANGED, Skill.THIEVING, Skill.COOKING, Skill.PRAYER, Skill.CRAFTING, Skill.FIREMAKING, Skill.MAGIC, Skill.FLETCHING, Skill.WOODCUTTING, Skill.RUNECRAFTING, Skill.SLAYER, Skill.FARMING, Skill.CONSTRUCTION, Skill.HUNTER, Skill.SAILING };
     private static final Set<Skill> F2P_SKILLS = new HashSet<>(Arrays.asList(Skill.ATTACK, Skill.STRENGTH, Skill.DEFENCE, Skill.RANGED, Skill.PRAYER, Skill.MAGIC, Skill.HITPOINTS, Skill.CRAFTING, Skill.MINING, Skill.SMITHING, Skill.FISHING, Skill.COOKING, Skill.FIREMAKING, Skill.WOODCUTTING, Skill.RUNECRAFTING));
 
-    public DreamBotMenu(AbstractScript script) {
+    private final java.util.Queue<ToastRequest> toastQueue = new java.util.LinkedList<>();
+    private boolean isProcessingToasts = false;
 
+    // Inner class to hold the data for each toast
+    private static class ToastRequest {
+        String message;
+        JButton anchor;
+        boolean success;
+
+        ToastRequest(String m, JButton a, boolean s) {
+            this.message = m;
+            this.anchor = a;
+            this.success = s;
+        }
+    }
+
+    public DreamBotMenu(AbstractScript script) {
         this.script = script;
         this.startTime = System.currentTimeMillis();
-        setTitle("DreamBotMan | DreamBot Manager v1");
+        this.setIconImage(Objects.requireNonNull(loadStatusIcon("Hardcore_ironman")).getImage());
+        setTitle("DreamBotMan | OSRS DreamBot Manager v1");
 
         setSize(1400, 950);
         setLocationRelativeTo(null);
@@ -125,7 +148,6 @@ public class DreamBotMenu extends JFrame {
         getContentPane().setBackground(BG_BASE);
 
         JPanel header = createHeaderPanel();
-        JTabbedPane mainTabs = new JTabbedPane();
         mainTabs.setBackground(PANEL_SURFACE);
         mainTabs.setForeground(TEXT_MAIN);
 
@@ -192,7 +214,7 @@ public class DreamBotMenu extends JFrame {
         btnToggleSidePanel.setText(sidePanelContent.isVisible() ? ">" : "<");
         btnToggleSidePanel.setPreferredSize(new Dimension(22, 0));
         btnToggleSidePanel.setBackground(PANEL_SURFACE);
-        btnToggleSidePanel.setForeground(ACCENT_BLOOD);
+        btnToggleSidePanel.setForeground(COLOR_BLOOD);
         btnToggleSidePanel.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 1, BORDER_DIM));
 
         btnToggleSidePanel.addActionListener(e -> {
@@ -241,7 +263,7 @@ public class DreamBotMenu extends JFrame {
 
         // --- Row 1: The Progress Bar (Full Width) ---
         statusProgress.setPreferredSize(new Dimension(0, 18)); // Width 0 is fine because weightx=1.0 stretches it
-        statusProgress.setForeground(ACCENT_BLOOD);
+        statusProgress.setForeground(COLOR_BLOOD);
         statusProgress.setBackground(BG_BASE);
         statusProgress.setBorder(new LineBorder(BORDER_DIM));
         statusProgress.setStringPainted(true); // Shows % text
@@ -275,7 +297,7 @@ public class DreamBotMenu extends JFrame {
     public void setLabelStatus(String text) { SwingUtilities.invokeLater(() -> lblStatus.setText(text)); }
 
     public void incrementExecutionIndex() {
-        if (currentExecutionIndex < modelTaskList.size() - 1) {
+        if (currentExecutionIndex <= modelTaskList.size()) {
             currentExecutionIndex++;
         } else {
             currentExecutionIndex = 0;
@@ -288,9 +310,9 @@ public class DreamBotMenu extends JFrame {
 
     private JLabel createSubtitle(String subtitle) {
         JLabel title = new JLabel(subtitle, SwingConstants.CENTER);
-        title.setForeground(ACCENT_BLOOD);
+        title.setForeground(COLOR_BLOOD);
         title.setFont(new Font("Consolas", Font.BOLD, 22));
-        title.setBorder(BorderFactory.createMatteBorder(0, 5, 0, 0, ACCENT_BLOOD));
+        title.setBorder(BorderFactory.createMatteBorder(0, 5, 0, 0, COLOR_BLOOD));
 
         return title;
     }
@@ -308,7 +330,6 @@ public class DreamBotMenu extends JFrame {
         panelTaskList.setBackground(BG_BASE);
 
         /// CENTER: Add the task queue list display to the center of the task list panel
-        listTaskList = new JList<>(modelTaskList);
         listTaskList.setCellRenderer(new TaskCellRenderer());
         styleJList(listTaskList);
 
@@ -374,6 +395,8 @@ public class DreamBotMenu extends JFrame {
         JButton btnTaskListEdit = createStyledBtn("Edit", new Color(100, 100, 0));
         btnTaskListEdit.addActionListener(e -> {
             loadIntoBuilder(listTaskList.getSelectedValue());
+            // switch to tab 2 (3rd tab = Task Builder) to edit task
+            mainTabs.setSelectedIndex(2);
         });
 
         ///  Create Task List delete button
@@ -384,6 +407,7 @@ public class DreamBotMenu extends JFrame {
             if (selectedIndex != -1) {
                 modelTaskLibrary.remove(selectedIndex);
                 showToast("Removed task!", btnTaskListRemove, true);
+                refreshTaskList();
             } else {
                 showToast("Select a Task to remove!", btnTaskListRemove, false);
             }
@@ -471,11 +495,6 @@ public class DreamBotMenu extends JFrame {
         JButton btnTaskLibraryDelete = createStyledBtn("Delete", new Color(100, 0, 0));
         btnTaskLibraryDelete.setEnabled(listTaskLibrary.getSelectedIndex() != -1);
         btnTaskLibraryDelete.addActionListener(e -> {
-            if (!btnTaskLibraryDelete.isEnabled()) {
-                showToast("Add actions first!", btnTaskLibraryDelete, false);
-                return;
-            }
-
             int selectedIndex = listTaskLibrary.getSelectedIndex();
             if (selectedIndex != -1) {
                 modelTaskLibrary.remove(selectedIndex);
@@ -483,6 +502,9 @@ public class DreamBotMenu extends JFrame {
             } else {
                 showToast("Select an Action to delete!", btnTaskLibraryDelete, false);
             }
+
+
+            refreshTaskLibrary();
         });
 
         listTaskLibrary.addListSelectionListener(e -> {
@@ -490,10 +512,15 @@ public class DreamBotMenu extends JFrame {
         });
 
         ///  Create Task Library save button
-        JButton btnTaskLibrarySave = createStyledBtn("Save", new Color(100, 100, 0));
+        JButton btnTaskLibrarySave = createStyledBtn("Save", new Color(150, 200, 50));
         btnTaskLibrarySave.addActionListener(e -> {
-            dataMan.saveTaskLibrary(listTaskLibrary);
             showToast("Saving...", btnTaskLibrarySave, true);
+            btnTaskLibrarySave.setEnabled(false);
+
+            dataMan.saveTaskLibrary(listTaskLibrary);
+
+            showToast("Save success!", btnTaskLibrarySave, true);
+            btnTaskLibrarySave.setEnabled(true);
         });
 
         ///  Add all buttons
@@ -516,14 +543,28 @@ public class DreamBotMenu extends JFrame {
         panelLibraryTab.addComponentListener(new ComponentAdapter() {
             @Override
             public void componentShown(ComponentEvent e) {
-                scanNearbyTargets();
-                if (listTaskLibrary.getSelectedValue() == null && !modelTaskLibrary.isEmpty())
-                    listTaskLibrary.setSelectedIndex(modelTaskLibrary.getSize() - 1);
+                refreshTaskLibrary();
             }
         });
 
         return panelLibraryTab;
     }
+
+    private void refreshTaskList() {
+        if (listTaskList.getSelectedValue() == null && !modelTaskList.isEmpty())
+            listTaskList.setSelectedIndex(modelTaskList.size() - 1);
+    }
+
+    private void refreshTaskLibrary() {
+        if (listTaskLibrary.getSelectedValue() == null && !modelTaskLibrary.isEmpty())
+            listTaskLibrary.setSelectedIndex(modelTaskLibrary.getSize() - 1);
+    }
+
+    private void refreshTaskBuilder() {
+        if (listTaskBuilder.getSelectedValue() == null && !modelTaskBuilder.isEmpty())
+            listTaskBuilder.setSelectedIndex(modelTaskBuilder.getSize() - 1);
+    }
+
 
     private JPanel createTaskBuilderTab() {
         ///  Create the task builders title
@@ -566,7 +607,7 @@ public class DreamBotMenu extends JFrame {
         g.gridy = 5;
         east.add(taskStatusInput, g);
 
-        btnTaskBuilderCreateTask = createStyledBtn("Create task", new Color(0, 100, 0));
+        btnTaskBuilderCreateTask = createStyledBtn("Create task", COLOR_ORANGE);
         btnTaskBuilderCreateTask.addActionListener(e -> {
             List<Action> actions = new ArrayList<>();
             for(int i = 0; i< modelTaskBuilder.size(); i++)
@@ -584,11 +625,34 @@ public class DreamBotMenu extends JFrame {
                 }
 
                 if (!exists) {
+                    // Standard logic for a new task
                     modelTaskLibrary.addElement(task);
                     resetTaskBuilder();
                     showToast("Added to library!", btnTaskBuilderCreateTask, true);
                 } else {
-                    showToast("Task already exists!", btnTaskBuilderCreateTask, false);
+                    // Task name already exists, trigger the overwrite dialogue
+                    int choice = JOptionPane.showConfirmDialog(
+                            this,
+                            "A task with this name already exists. Would you like to overwrite it?",
+                            "Overwrite Task?",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.QUESTION_MESSAGE
+                    );
+
+                    if (choice == JOptionPane.YES_OPTION) {
+                        // find and replace the existing task
+                        for (int i = 0; i < modelTaskLibrary.getSize(); i++) {
+                            if (modelTaskLibrary.getElementAt(i).toString().equals(task.toString())) {
+                                modelTaskLibrary.set(i, task);
+                                break;
+                            }
+                        }
+                        showToast("Task updated!", btnTaskBuilderCreateTask, true);
+                        resetTaskBuilder();
+                    } else {
+                        // User clicked 'No'
+                        showToast("Action cancelled", btnTaskBuilderCreateTask, false);
+                    }
                 }
             }
         });
@@ -599,7 +663,7 @@ public class DreamBotMenu extends JFrame {
 
         JPanel center = new JPanel(new BorderLayout(5, 5)); center.setOpaque(false);
         JLabel setLabel = new JLabel("Action List:", SwingConstants.CENTER);
-        setLabel.setForeground(ACCENT_BLOOD);
+        setLabel.setForeground(COLOR_BLOOD);
         setLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
         styleJList(listTaskBuilder);
 
@@ -620,7 +684,6 @@ public class DreamBotMenu extends JFrame {
         navButtons.add(btnUp);
         navButtons.add(btnDown);
 
-        // create reset button to reset task builder inputs, ready for next task to be created
         JButton btnTaskBuilderRemove = createStyledBtn("Remove", new Color(100, 0, 0));
         btnTaskBuilderRemove.setEnabled(listTaskBuilder.getSelectedIndex() != -1);
         btnTaskBuilderRemove.addActionListener(e -> {
@@ -628,6 +691,7 @@ public class DreamBotMenu extends JFrame {
             if (selectedIndex != -1) {
                 modelTaskBuilder.remove(selectedIndex);
                 showToast("Removed action!", btnTaskBuilderRemove, true);
+                refreshTaskBuilder();
             } else {
                 showToast("You must select an action first!", btnTaskBuilderRemove, false);
             }
@@ -658,7 +722,8 @@ public class DreamBotMenu extends JFrame {
         left.setOpaque(false);
         JPanel config = new JPanel(new GridLayout(0, 1, 2, 5));
         config.setOpaque(false);
-        actionCombo = new JComboBox<>(ActionType.values()); styleComp(actionCombo);
+        actionCombo = new JComboBox<>(ActionType.values());
+        styleComp(actionCombo);
         actionCombo.addActionListener(e -> scanNearbyTargets());
         manualTargetInput = new JTextField(); styleComp(manualTargetInput);
         config.add(new JLabel("Select Action:"));
@@ -666,7 +731,7 @@ public class DreamBotMenu extends JFrame {
         config.add(new JLabel("Target Name:"));
         config.add(manualTargetInput);
 
-        JButton btnTaskBuilderAdd = createStyledBtn("Add", ACCENT_ORANGE);
+        JButton btnTaskBuilderAdd = createStyledBtn("Add", COLOR_ORANGE);
         btnTaskBuilderAdd.addActionListener(e -> {
             if(!manualTargetInput.getText().isEmpty()) {
                 modelTaskBuilder.addElement(
@@ -699,7 +764,7 @@ public class DreamBotMenu extends JFrame {
         entitiesScroll.setPreferredSize(new Dimension(300, 0)); // 300px width, height 0 (BorderLayout will stretch height)
         entitiesScroll.setMinimumSize(new Dimension(300, 0));
 
-        JButton btnScanNearby = createStyledBtn("Refresh list", new Color(40,40,40));
+        JButton btnScanNearby = createStyledBtn("Refresh list", COLOR_GREY);
         btnScanNearby.addActionListener(e -> {
             showToast("Scanning for nearby targets...",  btnScanNearby, true);
             scanNearbyTargets();
@@ -713,6 +778,16 @@ public class DreamBotMenu extends JFrame {
         panelTaskBuilder.add(left, BorderLayout.WEST);
         panelTaskBuilder.add(center, BorderLayout.CENTER);
         panelTaskBuilder.add(east, BorderLayout.EAST);
+
+        panelTaskBuilder.addComponentListener(new ComponentAdapter() {
+                @Override
+                public void componentShown(ComponentEvent e) {
+                    scanNearbyTargets();
+                    if (listTaskBuilder.getSelectedValue() == null && !modelTaskBuilder.isEmpty())
+                        listTaskBuilder.setSelectedIndex(modelTaskBuilder.getSize() - 1);
+                }
+        });
+
 
         return panelTaskBuilder;
     }
@@ -857,40 +932,58 @@ public class DreamBotMenu extends JFrame {
 
     private void scanNearbyTargets() {
         ActionType type = (ActionType) actionCombo.getSelectedItem();
-        nearbyEntitiesModel.clear();
+        if (type == null)
+            return;
+
+        // Perform the heavy API scanning on the current thread (Script Thread)
         Set<String> names;
 
-        switch (Objects.requireNonNull(type)) {
+        switch (type) {
             case ATTACK:
                 names = NPCs.all().stream()
-                    .filter(n -> n.hasAction("Attack"))
-                    .map(NPC::getName)
-                    .collect(Collectors.toSet());
+                        .filter(n -> n.hasAction("Attack"))
+                        .map(NPC::getName)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet());
                 break;
 
             case CHOP:
                 names = GameObjects.all().stream()
-                    .filter(o -> o.hasAction("Chop down"))
-                    .map(GameObject::getName)
-                    .collect(Collectors.toSet());
+                        .filter(o -> o.hasAction("Chop down"))
+                        .map(GameObject::getName)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet());
                 break;
 
             case MINE:
                 names = GameObjects.all().stream()
-                    .filter(o -> o.hasAction("Mine"))
-                    .map(GameObject::getName)
-                    .collect(Collectors.toSet());
+                        .filter(o -> o.hasAction("Mine"))
+                        .map(GameObject::getName)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet());
                 break;
 
             default:
-                // Fallback for actions like TALK_TO or BANK that aren't explicitly filtered
                 names = NPCs.all().stream()
-                    .map(NPC::getName)
-                    .collect(Collectors.toSet());
+                        .map(NPC::getName)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet());
                 break;
         }
 
-        names.stream().sorted().forEach(nearbyEntitiesModel::addElement);
+        // Copy to a final list for the thread block
+        final List<String> sortedNames = names.stream().sorted().collect(Collectors.toList());
+
+
+        nearbyEntitiesModel.clear();
+
+        for (String name : sortedNames)
+            nearbyEntitiesModel.addElement(name);
+
+        //btnTaskBuilderRefreshList.setEnabled(true);
+
+        // Use your toast logic to confirm it finished
+        showToast("Found " + sortedNames.size() + " targets", btnTaskBuilderRefreshList, true);
     }
 
     // --- Inner Classes ---
@@ -1010,14 +1103,15 @@ public class DreamBotMenu extends JFrame {
         @Override public String toString() { return type.name() + " -> " + target; }
     }
 
-    private boolean saveTaskLibrary(Task... tasks) {
-        Logger.log(Logger.LogType.INFO, "Uploading task library...");
-        Logger.log(Logger.LogType.DEBUG, "Saving:\n");
-        for (Task t: tasks) {
-            Logger.log(Logger.LogType.DEBUG, t.getEditableString());
-        }
-        return true;
-    }
+//    private boolean saveTaskLibrary(Task... tasks) {
+//        btnTaskLibrarySave.setEnabled(false);
+//        Logger.log(Logger.LogType.INFO, "Uploading task library...");
+//        Logger.log(Logger.LogType.DEBUG, "Saving:\n");
+//        for (Task t: tasks) {
+//            Logger.log(Logger.LogType.DEBUG, t.getEditableString());
+//        }
+//        return true;
+//    }
 
     public void showToast(String message, JComponent anchor, boolean success) {
         // 1. Find the location of the button relative to the entire window
@@ -1029,6 +1123,7 @@ public class DreamBotMenu extends JFrame {
 
         ///  Trigger toast visual
         Toast toast = new Toast(message, x, y);
+        Toast activeToast = toast;
         getLayeredPane().add(toast, JLayeredPane.POPUP_LAYER);
         getLayeredPane().revalidate();
 
@@ -1182,7 +1277,7 @@ public class DreamBotMenu extends JFrame {
         header.setPreferredSize(new Dimension(0, 85));
         header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_DIM));
         JLabel titleLabel = new JLabel(" DreamBotMan", SwingConstants.LEFT);
-        titleLabel.setForeground(ACCENT_BLOOD);
+        titleLabel.setForeground(COLOR_BLOOD);
         titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32));
         titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0));
         JPanel rightContainer = new JPanel(new BorderLayout());
@@ -1224,8 +1319,8 @@ public class DreamBotMenu extends JFrame {
     private void stopScript() { if (JOptionPane.showConfirmDialog(this, "Stop?") == JOptionPane.YES_OPTION) { script.stop(); dispose(); } }
     private void toggleUserInput() { isUserInputAllowed = !isUserInputAllowed; Client.getInstance().setMouseInputEnabled(isUserInputAllowed); Client.getInstance().setKeyboardInputEnabled(isUserInputAllowed); btnInputToggle.setText(isUserInputAllowed ? "🖱" : "🚫"); }
     private void styleHeaderLabel(JLabel l) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.BOLD, 15)); l.setHorizontalAlignment(SwingConstants.RIGHT); }
-    private void styleSpinner(JSpinner s) { JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField(); field.setBackground(new Color(30, 30, 30)); field.setForeground(ACCENT_BLOOD); s.setBorder(new LineBorder(BORDER_DIM)); }
-    private JButton createIconButton(String symbol, String tooltip, ActionListener action) { JButton btn = new JButton(symbol); btn.setPreferredSize(new Dimension(40, 40)); btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18)); btn.setBackground(new Color(30, 0, 0)); btn.setForeground(ACCENT_BLOOD); btn.addActionListener(action); return btn; }
+    private void styleSpinner(JSpinner s) { JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField(); field.setBackground(new Color(30, 30, 30)); field.setForeground(COLOR_BLOOD); s.setBorder(new LineBorder(BORDER_DIM)); }
+    private JButton createIconButton(String symbol, String tooltip, ActionListener action) { JButton btn = new JButton(symbol); btn.setPreferredSize(new Dimension(40, 40)); btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18)); btn.setBackground(new Color(30, 0, 0)); btn.setForeground(COLOR_BLOOD); btn.addActionListener(action); return btn; }
     private <T> void shiftQueue(int dir, JList<T> list, DefaultListModel<T> model, boolean isShiftHeld) {
         int idx = list.getSelectedIndex();
         if (idx == -1 || idx + dir < 0 || idx + dir >= model.size())
@@ -1242,7 +1337,7 @@ public class DreamBotMenu extends JFrame {
             list.ensureIndexIsVisible(idx + dir);
         }
     }
-    private void styleComp(JComponent c) { c.setBackground(PANEL_SURFACE); c.setForeground(TEXT_MAIN); if(c instanceof JTextField) ((JTextField)c).setCaretColor(ACCENT_BLOOD); }
+    private void styleComp(JComponent c) { c.setBackground(PANEL_SURFACE); c.setForeground(TEXT_MAIN); if(c instanceof JTextField) ((JTextField)c).setCaretColor(COLOR_BLOOD); }
     private void styleJList(JList<?> l) {
         l.setBackground(PANEL_SURFACE);
         l.setForeground(TEXT_MAIN);
@@ -1314,7 +1409,7 @@ public class DreamBotMenu extends JFrame {
         updateAll();
     }
 
-    private JPanel createInfoCard(String title) { JPanel p = new JPanel(new GridLayout(0, 1, 5, 10)); p.setBackground(PANEL_SURFACE); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + title + " "); b.setTitleColor(ACCENT_BLOOD); b.setTitleFont(new Font("Segoe UI", Font.BOLD, 16)); p.setBorder(BorderFactory.createCompoundBorder(b, new EmptyBorder(15, 15, 15, 15))); return p; }
+    private JPanel createInfoCard(String title) { JPanel p = new JPanel(new GridLayout(0, 1, 5, 10)); p.setBackground(PANEL_SURFACE); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + title + " "); b.setTitleColor(COLOR_BLOOD); b.setTitleFont(new Font("Segoe UI", Font.BOLD, 16)); p.setBorder(BorderFactory.createCompoundBorder(b, new EmptyBorder(15, 15, 15, 15))); return p; }
     private void addInfoRow(JPanel p, String key, JLabel valLabel) { JPanel row = new JPanel(new BorderLayout()); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); valLabel.setForeground(TEXT_MAIN); valLabel.setFont(new Font("Consolas", Font.BOLD, 14)); row.add(k, BorderLayout.WEST); row.add(valLabel, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
     private void addInfoRowWithIcon(JPanel p, String key, JLabel valLabel, JLabel iconLabel) { JPanel row = new JPanel(new BorderLayout(5, 0)); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); JPanel rightSide = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0)); rightSide.setOpaque(false); valLabel.setForeground(TEXT_MAIN); rightSide.add(valLabel); rightSide.add(iconLabel); row.add(k, BorderLayout.WEST); row.add(rightSide, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
     private JPanel createDisplayPanel() { return createSettingsGroup("Display", createSettingCheck("Roofs", !ClientSettings.areRoofsHidden(), e -> ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected())), createSettingCheck("Data orbs", ClientSettings.areDataOrbsEnabled(), e -> ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())), createSettingCheck("Transparent side panel", ClientSettings.isTransparentSidePanelEnabled(), e -> ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))); }
@@ -1324,11 +1419,11 @@ public class DreamBotMenu extends JFrame {
     private JPanel createWarningsPanel() { return createSettingsGroup("Warnings", createSettingCheck("Loot notifications", ClientSettings.areLootNotificationsEnabled(), e -> ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected()))); }
     private JPanel createClientPanel() { return createSettingsGroup("Client", createSettingCheck("Disable Rendering", Client.isRenderingDisabled(), e -> Client.setRenderingDisabled(((JCheckBox)e.getSource()).isSelected()))); }
     private JPanel createActivitiesPanel() { return createSettingsGroup("Activities", createSettingCheck("Level-up interface", ClientSettings.isLevelUpInterfaceEnabled(), e -> ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected()))); }
-    private JPanel createSettingsGroup(String title, Component... comps) { JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10)); p.setBackground(BG_BASE); JPanel list = new JPanel(new GridLayout(0, 1, 5, 5)); list.setBackground(BG_BASE); JLabel header = new JLabel(title); header.setForeground(ACCENT_BLOOD); header.setFont(new Font("Segoe UI", Font.BOLD, 24)); JPanel wrapper = new JPanel(new BorderLayout()); wrapper.setBackground(BG_BASE); wrapper.add(header, BorderLayout.NORTH); for (Component c : comps) list.add(c); wrapper.add(list, BorderLayout.CENTER); return wrapper; }
+    private JPanel createSettingsGroup(String title, Component... comps) { JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10)); p.setBackground(BG_BASE); JPanel list = new JPanel(new GridLayout(0, 1, 5, 5)); list.setBackground(BG_BASE); JLabel header = new JLabel(title); header.setForeground(COLOR_BLOOD); header.setFont(new Font("Segoe UI", Font.BOLD, 24)); JPanel wrapper = new JPanel(new BorderLayout()); wrapper.setBackground(BG_BASE); wrapper.add(header, BorderLayout.NORTH); for (Component c : comps) list.add(c); wrapper.add(list, BorderLayout.CENTER); return wrapper; }
     private JCheckBox createSettingCheck(String text, boolean initialState, ActionListener l) { JCheckBox c = new JCheckBox(text); c.setForeground(TEXT_MAIN); c.setOpaque(false); c.setSelected(initialState); if (l != null) c.addActionListener(l); return c; }
     private JToggleButton createMenuButton(String text) { JToggleButton btn = new JToggleButton(text) { protected void paintComponent(Graphics g) { g.setColor(isSelected() ? TAB_SELECTED : PANEL_SURFACE); g.fillRect(0, 0, getWidth(), getHeight()); super.paintComponent(g); } }; btn.setFocusPainted(false); btn.setContentAreaFilled(false); btn.setForeground(TEXT_MAIN); btn.setFont(new Font("Segoe UI", Font.BOLD, 14)); btn.setHorizontalAlignment(SwingConstants.LEFT); btn.setBorder(new EmptyBorder(0, 20, 0, 0)); return btn; }
 
-    private JPanel createSkillTile(SkillData data) { JPanel tile = new JPanel(new GridBagLayout()); tile.setBackground(PANEL_SURFACE); tile.setBorder(new LineBorder(BORDER_DIM)); GridBagConstraints gbc = new GridBagConstraints(); gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.gridx = 0; JPanel top = new JPanel(new BorderLayout()); top.setOpaque(false); JLabel icon = new JLabel(loadSkillIcon(data.skill)); data.lblLevel.setForeground(ACCENT_BLOOD); data.lblLevel.setFont(new Font("Arial", Font.BOLD, 18)); top.add(icon, BorderLayout.WEST); top.add(data.lblLevel, BorderLayout.EAST); data.lblXpString.setForeground(TEXT_DIM); data.lblXpString.setFont(new Font("Monospaced", Font.PLAIN, 10)); data.mainBar.setForeground(ACCENT_BLOOD); data.mainBar.setBackground(Color.BLACK); gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1; tile.add(data.lblXpString, gbc); gbc.gridy = 2; tile.add(data.mainBar, gbc); tile.addMouseListener(new MouseAdapter() { @Override public void mousePressed(MouseEvent e) { data.isTracking = !data.isTracking; tile.setBorder(new LineBorder(data.isTracking ? ACCENT_BLOOD : BORDER_DIM, 1)); refreshTrackerList(); } }); return tile; }
+    private JPanel createSkillTile(SkillData data) { JPanel tile = new JPanel(new GridBagLayout()); tile.setBackground(PANEL_SURFACE); tile.setBorder(new LineBorder(BORDER_DIM)); GridBagConstraints gbc = new GridBagConstraints(); gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.gridx = 0; JPanel top = new JPanel(new BorderLayout()); top.setOpaque(false); JLabel icon = new JLabel(loadSkillIcon(data.skill)); data.lblLevel.setForeground(COLOR_BLOOD); data.lblLevel.setFont(new Font("Arial", Font.BOLD, 18)); top.add(icon, BorderLayout.WEST); top.add(data.lblLevel, BorderLayout.EAST); data.lblXpString.setForeground(TEXT_DIM); data.lblXpString.setFont(new Font("Monospaced", Font.PLAIN, 10)); data.mainBar.setForeground(COLOR_BLOOD); data.mainBar.setBackground(Color.BLACK); gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1; tile.add(data.lblXpString, gbc); gbc.gridy = 2; tile.add(data.mainBar, gbc); tile.addMouseListener(new MouseAdapter() { @Override public void mousePressed(MouseEvent e) { data.isTracking = !data.isTracking; tile.setBorder(new LineBorder(data.isTracking ? COLOR_BLOOD : BORDER_DIM, 1)); refreshTrackerList(); } }); return tile; }
     private void refreshTrackerList() { trackerList.removeAll(); skillRegistry.values().stream().filter(d -> d.isTracking).forEach(d -> { trackerList.add(d.trackerPanel); trackerList.add(Box.createRigidArea(new Dimension(0, 10))); }); trackerList.add(Box.createVerticalGlue()); trackerList.revalidate(); trackerList.repaint(); }
     private void updateAll() {
         int projH = (int) projectionSpinner.getValue();
@@ -1386,7 +1481,7 @@ public class DreamBotMenu extends JFrame {
     }
 
     private class TaskCellRenderer extends DefaultListCellRenderer { @Override public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) { JLabel l = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus); if (index == currentExecutionIndex) { l.setBackground(TAB_SELECTED); l.setForeground(Color.WHITE); l.setText("▶ " + l.getText()); } return l; } }
-    private class SkillData { final Skill skill; final JProgressBar mainBar = new JProgressBar(0, 100); final JLabel lblLevel = new JLabel("1"), lblXpString = new JLabel("0/0"); final JPanel trackerPanel = new JPanel(new GridLayout(0, 1, 2, 2)); final JLabel lblGained = new JLabel(), lblPerHour = new JLabel(), lblRemaining = new JLabel(), lblTTL = new JLabel(), lblProj = new JLabel(), lblActs = new JLabel(); final int startXP, startLevel; boolean isTracking = false; SkillData(Skill s) { this.skill = s; this.startXP = Skills.getExperience(s); this.startLevel = Skills.getRealLevel(s); trackerPanel.setBackground(new Color(30, 30, 30)); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + s.name() + " "); b.setTitleColor(ACCENT_BLOOD); trackerPanel.setBorder(b); JLabel[] ls = {lblGained, lblPerHour, lblRemaining, lblActs, lblTTL, lblProj}; for (JLabel l : ls) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.PLAIN, 12)); trackerPanel.add(l); } } void update(int curXp, int curLvl, long start, int ph) { int curMin = Skills.getExperienceForLevel(curLvl), curMax = Skills.getExperienceForLevel(curLvl + 1); lblLevel.setText(String.valueOf(curLvl)); lblXpString.setText(String.format("%,d / %,d XP", curXp, curMax)); mainBar.setValue((int) (((double)(curXp - curMin) / Math.max(1, curMax - curMin)) * 100)); long elapsed = System.currentTimeMillis() - start; int xph = (int) (Math.max(0, curXp - startXP) / Math.max(0.0001, elapsed / 3600000.0)); int rem = Math.max(0, curMax - curXp); lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP)); lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph)); lblRemaining.setText(" TO LEVEL: " + String.format("%,d", rem)); if (xph > 0) { lblTTL.setText(String.format(" TIME TO L: %.2f hrs", (double) rem / xph)); lblProj.setText(String.format(" PROJ (%dH): Lvl %d", ph, curLvl + (xph * ph / 100000))); } } }
+    private class SkillData { final Skill skill; final JProgressBar mainBar = new JProgressBar(0, 100); final JLabel lblLevel = new JLabel("1"), lblXpString = new JLabel("0/0"); final JPanel trackerPanel = new JPanel(new GridLayout(0, 1, 2, 2)); final JLabel lblGained = new JLabel(), lblPerHour = new JLabel(), lblRemaining = new JLabel(), lblTTL = new JLabel(), lblProj = new JLabel(), lblActs = new JLabel(); final int startXP, startLevel; boolean isTracking = false; SkillData(Skill s) { this.skill = s; this.startXP = Skills.getExperience(s); this.startLevel = Skills.getRealLevel(s); trackerPanel.setBackground(new Color(30, 30, 30)); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + s.name() + " "); b.setTitleColor(COLOR_BLOOD); trackerPanel.setBorder(b); JLabel[] ls = {lblGained, lblPerHour, lblRemaining, lblActs, lblTTL, lblProj}; for (JLabel l : ls) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.PLAIN, 12)); trackerPanel.add(l); } } void update(int curXp, int curLvl, long start, int ph) { int curMin = Skills.getExperienceForLevel(curLvl), curMax = Skills.getExperienceForLevel(curLvl + 1); lblLevel.setText(String.valueOf(curLvl)); lblXpString.setText(String.format("%,d / %,d XP", curXp, curMax)); mainBar.setValue((int) (((double)(curXp - curMin) / Math.max(1, curMax - curMin)) * 100)); long elapsed = System.currentTimeMillis() - start; int xph = (int) (Math.max(0, curXp - startXP) / Math.max(0.0001, elapsed / 3600000.0)); int rem = Math.max(0, curMax - curXp); lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP)); lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph)); lblRemaining.setText(" TO LEVEL: " + String.format("%,d", rem)); if (xph > 0) { lblTTL.setText(String.format(" TIME TO L: %.2f hrs", (double) rem / xph)); lblProj.setText(String.format(" PROJ (%dH): Lvl %d", ph, curLvl + (xph * ph / 100000))); } } }
 
 //    // Replace your old listToJson with this one-liner approach
 //    private String modelToJson(DefaultListModel<Task> model) {
