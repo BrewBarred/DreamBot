@@ -590,7 +590,7 @@ public class DreamBotMenu extends JFrame {
         styleComp(taskStatusInput);
 
         g.gridy = 0;
-        east.add(new JLabel("Task Name:"), g);
+        east.add(new JLabel("Task name:"), g);
 
         g.gridy = 1;
         east.add(taskNameInput, g);
@@ -627,14 +627,14 @@ public class DreamBotMenu extends JFrame {
                 if (!exists) {
                     // Standard logic for a new task
                     modelTaskLibrary.addElement(task);
-                    resetTaskBuilder();
                     showToast("Added to library!", btnTaskBuilderCreateTask, true);
+                    resetTaskBuilder();
                 } else {
                     // Task name already exists, trigger the overwrite dialogue
                     int choice = JOptionPane.showConfirmDialog(
                             this,
-                            "A task with this name already exists. Would you like to overwrite it?",
-                            "Overwrite Task?",
+                            task.getName() + " task already exists, would you like to overwrite it?",
+                            "Overwrite task?",
                             JOptionPane.YES_NO_OPTION,
                             JOptionPane.QUESTION_MESSAGE
                     );
@@ -651,7 +651,7 @@ public class DreamBotMenu extends JFrame {
                         resetTaskBuilder();
                     } else {
                         // User clicked 'No'
-                        showToast("Action cancelled", btnTaskBuilderCreateTask, false);
+                        showToast("Task creation failed!", btnTaskBuilderCreateTask, false);
                     }
                 }
             }
@@ -726,9 +726,9 @@ public class DreamBotMenu extends JFrame {
         styleComp(actionCombo);
         actionCombo.addActionListener(e -> scanNearbyTargets());
         manualTargetInput = new JTextField(); styleComp(manualTargetInput);
-        config.add(new JLabel("Select Action:"));
+        config.add(new JLabel("Select action:"));
         config.add(actionCombo);
-        config.add(new JLabel("Target Name:"));
+        config.add(new JLabel("Target name:"));
         config.add(manualTargetInput);
 
         JButton btnTaskBuilderAdd = createStyledBtn("Add", COLOR_ORANGE);
@@ -764,7 +764,7 @@ public class DreamBotMenu extends JFrame {
         entitiesScroll.setPreferredSize(new Dimension(300, 0)); // 300px width, height 0 (BorderLayout will stretch height)
         entitiesScroll.setMinimumSize(new Dimension(300, 0));
 
-        JButton btnScanNearby = createStyledBtn("Refresh list", COLOR_GREY);
+        JButton btnScanNearby = createStyledBtn("Scan nearby", COLOR_GREY);
         btnScanNearby.addActionListener(e -> {
             showToast("Scanning for nearby targets...",  btnScanNearby, true);
             scanNearbyTargets();
