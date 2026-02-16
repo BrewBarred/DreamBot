@@ -27,7 +27,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * <h1>ETAbot Nexus Client</h1>
+ * <h1>ETAbot</h1>
  * @author ETAbot Dev
  * @version 14.0.0-Elite
  */
@@ -99,7 +99,7 @@ public class DreamBotMenu2 extends JFrame {
         this.script = script;
         this.startTime = System.currentTimeMillis();
 
-        setTitle("ETAbot | Nexus Client");
+        setTitle("ETAbot | DreamBot Manager v2");
         setSize(1400, 950);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -149,7 +149,8 @@ public class DreamBotMenu2 extends JFrame {
 
     // --- TABS ---
     private JPanel createTaskListTab() {
-        JPanel p = new JPanel(new BorderLayout(10, 10)); p.setBackground(BG_BASE); p.setBorder(new EmptyBorder(15, 15, 15, 15));
+        JPanel p = new JPanel(new BorderLayout(10, 10));
+        p.setBackground(BG_BASE); p.setBorder(new EmptyBorder(15, 15, 15, 15));
         JPanel arrowCol = new JPanel(new GridLayout(2, 1, 0, 5)); arrowCol.setOpaque(false);
         JButton btnUp = createStyledBtn("▲", new Color(40, 40, 40)); btnUp.addActionListener(e -> shiftQueue(-1));
         JButton btnDown = createStyledBtn("▼", new Color(40, 40, 40)); btnDown.addActionListener(e -> shiftQueue(1));
@@ -158,8 +159,6 @@ public class DreamBotMenu2 extends JFrame {
         taskQueueList.setCellRenderer(new TaskCellRenderer());
         styleJList(taskQueueList);
         JPanel south = new JPanel(new BorderLayout(10, 10)); south.setOpaque(false);
-        lblStatus.setForeground(TEXT_MAIN); statusProgress.setForeground(ACCENT_BLOOD);
-        south.add(lblStatus, BorderLayout.NORTH); south.add(statusProgress, BorderLayout.CENTER);
         p.add(arrowCol, BorderLayout.WEST); p.add(new JScrollPane(taskQueueList), BorderLayout.CENTER); p.add(south, BorderLayout.SOUTH);
         return p;
     }
@@ -171,9 +170,12 @@ public class DreamBotMenu2 extends JFrame {
         libraryEditorArea = new JTextArea(); libraryEditorArea.setBackground(new Color(15, 15, 15)); libraryEditorArea.setForeground(TEXT_MAIN);
         libraryList.addListSelectionListener(e -> { Task t = libraryList.getSelectedValue(); if (t != null) libraryEditorArea.setText(t.getEditableString()); });
         JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.RIGHT)); btnRow.setOpaque(false);
-        JButton btnAdd = createStyledBtn("Add to Queue", new Color(0, 100, 0)); btnAdd.addActionListener(e -> { if(libraryList.getSelectedValue() != null) queueModel.addElement(new Task(libraryList.getSelectedValue())); });
+
+        JButton btnAdd = createStyledBtn("Add to Queue", new Color(0, 100, 0));
+        btnAdd.addActionListener(e -> { if(libraryList.getSelectedValue() != null) queueModel.addElement(new Task(libraryList.getSelectedValue())); });
         JButton btnSave = createStyledBtn("Save Changes", new Color(100, 100, 0)); btnSave.addActionListener(e -> { Task t = libraryList.getSelectedValue(); if (t != null) { t.parseFromEditor(libraryEditorArea.getText()); libraryList.repaint(); } });
-        btnRow.add(btnSave); btnRow.add(btnAdd); editPanel.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER); editPanel.add(btnRow, BorderLayout.SOUTH);
+        btnRow.add(btnSave);
+        btnRow.add(btnAdd); editPanel.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER); editPanel.add(btnRow, BorderLayout.SOUTH);
         p.add(new JScrollPane(libraryList)); p.add(editPanel);
         return p;
     }

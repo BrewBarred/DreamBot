@@ -33,7 +33,7 @@
 //            // (Standard Java ProcessBuilder used here)
 //
 //        } catch (Exception e) {
-//            BotMan.Log("Error starting process: " + e.getMessage());
+//            Logger.log("Error starting process: " + e.getMessage());
 //        }
 //    }
 //

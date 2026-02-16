@@ -1,6 +1,5 @@
 package main.menu;
 
-import main.managers.DataMan;
 import org.dreambot.api.Client;
 import org.dreambot.api.ClientSettings;
 import org.dreambot.api.methods.interactive.GameObjects;
@@ -16,6 +15,7 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.border.TitledBorder;
+import javax.swing.text.DefaultCaret;
 import java.awt.*;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
  * @author ETAbot Dev
  * @version 15.0.0-Elite
  */
-public class DreamBotMenu extends JFrame {
+public class DreamBotMenuBEST extends JFrame {
 
     private final AbstractScript script;
 
@@ -40,7 +40,6 @@ public class DreamBotMenu extends JFrame {
     private int currentExecutionIndex = 0;
 
     // --- Data & Presets ---
-    private final DataMan dataMan = new DataMan();
     private final Map<Skill, SkillData> skillRegistry = new EnumMap<>(Skill.class);
     private final DefaultListModel<Task> queueModel = new DefaultListModel<>();
     private final DefaultListModel<Task> libraryModel = new DefaultListModel<>();
@@ -49,7 +48,6 @@ public class DreamBotMenu extends JFrame {
     private final List<List<Task>> presets = new ArrayList<>(Arrays.asList(new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>()));
 
     // --- UI Components ---
-    private final JButton[] presetButtons = new JButton[4];
     private final JPanel trackerList, sidePanel;
     private final JLabel totalXpGainedLabel = new JLabel("Total XP Gained: 0");
     private final JLabel totalLevelsGainedLabel = new JLabel("Total Levels Gained: 0");
@@ -77,23 +75,16 @@ public class DreamBotMenu extends JFrame {
     private final Color TAB_SELECTED = new Color(60, 0, 0);
 
     // --- Labels (Restored) ---
-    private final JLabel lblUsername = new JLabel("...");
-    private final JLabel lblPassword = new JLabel("...");
-    private final JLabel lblAcctId = new JLabel("...");
-    private final JLabel lblAcctStatus = new JLabel("...");
-    private final JLabel lblCharName = new JLabel("...");
-    private final JLabel lblWorld = new JLabel("-");
-    private final JLabel lblCoords = new JLabel("-");
-    private final JLabel lblGameState = new JLabel("-");
-    private final JLabel lblMemberIcon = new JLabel();
-    private final JLabel lblMemberText = new JLabel("-");
+    private final JLabel lblUsername = new JLabel("..."), lblPassword = new JLabel("..."), lblAcctId = new JLabel("...");
+    private final JLabel lblAcctStatus = new JLabel("..."), lblCharName = new JLabel("..."), lblWorld = new JLabel("-");
+    private final JLabel lblCoords = new JLabel("-"), lblGameState = new JLabel("-"), lblMemberIcon = new JLabel(), lblMemberText = new JLabel("-");
 
     public enum ActionType { ATTACK, BANK, BURY, CHOP, COOK, DROP, EXAMINE, FISH, MINE, OPEN, TALK_TO, USE_ON }
 
     private static final Skill[] OSRS_ORDER = { Skill.ATTACK, Skill.HITPOINTS, Skill.MINING, Skill.STRENGTH, Skill.AGILITY, Skill.SMITHING, Skill.DEFENCE, Skill.HERBLORE, Skill.FISHING, Skill.RANGED, Skill.THIEVING, Skill.COOKING, Skill.PRAYER, Skill.CRAFTING, Skill.FIREMAKING, Skill.MAGIC, Skill.FLETCHING, Skill.WOODCUTTING, Skill.RUNECRAFTING, Skill.SLAYER, Skill.FARMING, Skill.CONSTRUCTION, Skill.HUNTER, Skill.SAILING };
     private static final Set<Skill> F2P_SKILLS = new HashSet<>(Arrays.asList(Skill.ATTACK, Skill.STRENGTH, Skill.DEFENCE, Skill.RANGED, Skill.PRAYER, Skill.MAGIC, Skill.HITPOINTS, Skill.CRAFTING, Skill.MINING, Skill.SMITHING, Skill.FISHING, Skill.COOKING, Skill.FIREMAKING, Skill.WOODCUTTING, Skill.RUNECRAFTING));
 
-    public DreamBotMenu(AbstractScript script) {
+    public DreamBotMenuBEST(AbstractScript script) {
         this.script = script;
         this.startTime = System.currentTimeMillis();
         setTitle("ETAbot | DreamBot Manager v1");
@@ -112,6 +103,7 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Task List", createTaskListTab());
         mainTabs.addTab("Task Library", createLibraryTab());
         mainTabs.addTab("Task Builder", createBuilderTab());
+        mainTabs.addTab("Output", createOutputTab());
         mainTabs.addTab("Skill Tracker", loadMiscIcon("Stats_icon"), createSkillsPanel());
         mainTabs.addTab("Player", null, createPlayerPanel());
         mainTabs.addTab("Settings", null, createSettingsInterface());
@@ -174,12 +166,12 @@ public class DreamBotMenu extends JFrame {
         JPanel panelTaskList = new JPanel(new BorderLayout(10, 10));
         panelTaskList.setBackground(BG_BASE);
         panelTaskList.setBorder(new EmptyBorder(15, 15, 15, 15));
-        JLabel title = new JLabel("Task List");
 
         /// CENTER: Add the task queue list display to the center of the task list panel
         taskQueueList = new JList<>(queueModel);
         taskQueueList.setCellRenderer(new TaskCellRenderer());
         styleJList(taskQueueList);
+        panelTaskList.add(new JScrollPane(taskQueueList), BorderLayout.CENTER);
 
         /// WEST: Add up/down buttons to navigate through task list
         // create west panel
@@ -213,60 +205,29 @@ public class DreamBotMenu extends JFrame {
         southTaskList.add(lblStatus);     // Row 1
         southTaskList.add(statusProgress); // Row 2
 
-//        // create the presets panel
-//        JPanel panelPresets = new JPanel(new GridLayout(1, 4, 5, 0));
-//        panelPresets.setOpaque(false);
-//        // create each preset button
-//        for (int i = 0; i < presetButtons.length; i++) {
-//            final int index = i;
-//            // Corrected line: removed "JButton[]" to use the class field
-//            presetButtons[index] = createStyledBtn("Preset " + (index + 1), PANEL_SURFACE);
-//
-//            presetButtons[index].addMouseListener(new MouseAdapter() {
-//                @Override
-//                public void mouseClicked(MouseEvent e) {
-//                    if (e.getClickCount() == 1) {
-//                        loadPreset(index + 1);
-//                    } else if (e.getClickCount() == 2) {
-//                        renamePreset(index);
-//                    }
-//                }
-//            });
-//            panelPresets.add(presetButtons[index]);
-//        }
-//        panelTaskList.add(panelPresets, BorderLayout.NORTH);
-//
-//        // create a panel to store the buttons next to each other
-//        JPanel panelButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-//        panelButtons.setOpaque(false);
-//
-//        // create add load button
-//        JButton btnLoad = createStyledBtn("Load", ACCENT_BLOOD);
-//        btnLoad.addActionListener(e -> loadIntoBuilder(taskQueueList.getSelectedValue()));
-//        // add load button
-//        panelButtons.add(btnLoad);
-//
-//        JPanel panelControls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-//        panelControls.setOpaque(false);
-//        panelControls.setBackground(PANEL_SURFACE);
-//        panelControls.add(panelPresets, BorderLayout.WEST);
-//        panelControls.add(panelButtons, BorderLayout.EAST);
-//
-//        // create remove button
-//        JButton btnRemove = createStyledBtn("Remove", new Color(100, 0, 0));
-//        btnRemove.addActionListener(e -> {
-//            if(taskQueueList.getSelectedIndex() != -1) queueModel.remove(taskQueueList.getSelectedIndex());
-//        });
-//        // add remove button
-//        panelButtons.add(btnRemove);
-//
-//        // add the button row to the bottom of the south panel
-//        southTaskList.add(panelButtons); // Row 3
+        // create a panel to store the buttons next to each other
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        buttonPanel.setOpaque(false);
+
+        // create add load button
+        JButton btnLoad = createStyledBtn("Load", ACCENT_BLOOD);
+        btnLoad.addActionListener(e -> loadIntoBuilder(taskQueueList.getSelectedValue()));
+        // add load button
+        buttonPanel.add(btnLoad);
+
+        // create remove button
+        JButton btnRemove = createStyledBtn("Remove", new Color(100, 0, 0));
+        btnRemove.addActionListener(e -> {
+            if(taskQueueList.getSelectedIndex() != -1) queueModel.remove(taskQueueList.getSelectedIndex());
+        });
+        // add remove button
+        buttonPanel.add(btnRemove);
+
+        // add the button row to the bottom of the south panel
+        southTaskList.add(buttonPanel); // Row 3
 
         // add all panels to the main panel (task list panel)
-        panelTaskList.add(title, BorderLayout.NORTH);
         panelTaskList.add(westTaskList, BorderLayout.WEST);
-        panelTaskList.add(new JScrollPane(taskQueueList), BorderLayout.CENTER);
         panelTaskList.add(southTaskList, BorderLayout.SOUTH);
 
         return panelTaskList;
@@ -274,23 +235,23 @@ public class DreamBotMenu extends JFrame {
 
     private JPanel createBuilderTab() {
         JPanel p = new JPanel(new BorderLayout(15, 15)); p.setBackground(BG_BASE); p.setBorder(new EmptyBorder(15, 15, 15, 15));
-        JLabel title = new JLabel("Task Builder", SwingConstants.CENTER);
+
         JPanel left = new JPanel(new GridBagLayout()); left.setOpaque(false);
         GridBagConstraints g = new GridBagConstraints(); g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0; g.insets = new Insets(5, 5, 5, 5);
         taskNameInput = new JTextField(25); taskDescInput = new JTextField(25); taskStatusInput = new JTextField(25);
         styleComp(taskNameInput); styleComp(taskDescInput); styleComp(taskStatusInput);
-        g.gridy = 0; left.add(new JLabel("Task Name:"), g); g.gridy = 1; left.add(taskNameInput, g);
-        g.gridy = 2; left.add(new JLabel("Description:"), g); g.gridy = 3; left.add(taskDescInput, g);
-        g.gridy = 4; left.add(new JLabel("Status:"), g); g.gridy = 5; left.add(taskStatusInput, g);
-        JButton btnR = createStyledBtn("Reset Task-set", new Color(50, 50, 50));
+        g.gridy = 0; left.add(new JLabel("TASK NAME:"), g); g.gridy = 1; left.add(taskNameInput, g);
+        g.gridy = 2; left.add(new JLabel("DESCRIPTION:"), g); g.gridy = 3; left.add(taskDescInput, g);
+        g.gridy = 4; left.add(new JLabel("STATUS FLAIR:"), g); g.gridy = 5; left.add(taskStatusInput, g);
+        JButton btnR = createStyledBtn("REFRESH CONTROLS", new Color(50, 50, 50));
         btnR.addActionListener(e -> { taskNameInput.setText(""); taskDescInput.setText(""); taskStatusInput.setText(""); builderActionModel.clear(); });
         g.gridy = 6; g.insets = new Insets(20, 5, 5, 5); left.add(btnR, g);
 
         JPanel center = new JPanel(new BorderLayout(5, 5)); center.setOpaque(false);
-        JLabel setLabel = new JLabel("Task-Set", SwingConstants.CENTER);
+        JLabel setLabel = new JLabel("ACTIVE TASK-SET BUILDER", SwingConstants.CENTER);
         setLabel.setForeground(ACCENT_BLOOD); setLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
         JList<Action> bActions = new JList<>(builderActionModel); styleJList(bActions);
-        JButton btnAddLib = createStyledBtn("Add to Library", new Color(0, 100, 0));
+        JButton btnAddLib = createStyledBtn("ADD TO LIBRARY", new Color(0, 100, 0));
         btnAddLib.addActionListener(e -> {
             List<Action> acts = new ArrayList<>(); for(int i=0; i<builderActionModel.size(); i++) acts.add(builderActionModel.get(i));
             libraryModel.addElement(new Task(taskNameInput.getText(), taskDescInput.getText(), acts, taskStatusInput.getText()));
@@ -302,9 +263,9 @@ public class DreamBotMenu extends JFrame {
         actionCombo = new JComboBox<>(ActionType.values()); styleComp(actionCombo);
         actionCombo.addActionListener(e -> fetchDynamicTargets());
         manualTargetInput = new JTextField(); styleComp(manualTargetInput);
-        config.add(new JLabel("Select Action:")); config.add(actionCombo);
-        config.add(new JLabel("Target Name:")); config.add(manualTargetInput);
-        JButton btnAddAct = createStyledBtn("Add", ACCENT_ORANGE);
+        config.add(new JLabel("SELECT ACTION:")); config.add(actionCombo);
+        config.add(new JLabel("TARGET NAME:")); config.add(manualTargetInput);
+        JButton btnAddAct = createStyledBtn("ADD ACTION TO SET", ACCENT_ORANGE);
         btnAddAct.addActionListener(e -> { if(!manualTargetInput.getText().isEmpty()) builderActionModel.addElement(new Action((ActionType)actionCombo.getSelectedItem(), manualTargetInput.getText())); });
         config.add(btnAddAct);
 
@@ -316,20 +277,10 @@ public class DreamBotMenu extends JFrame {
                 else if(e.getClickCount() == 2) builderActionModel.addElement(new Action((ActionType)actionCombo.getSelectedItem(), val));
             }
         });
+        right.add(config, BorderLayout.NORTH); right.add(new JScrollPane(nearbyEntitiesList), BorderLayout.CENTER);
+        right.add(createStyledBtn("FORCE REFRESH", new Color(40,40,40)), BorderLayout.SOUTH);
 
-        // Wrap the list in a scroll pane and LOCK the width
-        JScrollPane entitiesScroll = new JScrollPane(nearbyEntitiesList);
-        entitiesScroll.setPreferredSize(new Dimension(300, 0)); // 300px width, height 0 (BorderLayout will stretch height)
-        entitiesScroll.setMinimumSize(new Dimension(300, 0));
-
-        right.add(config, BorderLayout.NORTH);
-        right.add(entitiesScroll, BorderLayout.CENTER);
-        right.add(createStyledBtn("Scan Nearby", new Color(40,40,40)), BorderLayout.SOUTH);
-
-        p.add(title, BorderLayout.NORTH);
-        p.add(left, BorderLayout.WEST);
-        p.add(center, BorderLayout.CENTER);
-        p.add(right, BorderLayout.EAST);
+        p.add(left, BorderLayout.WEST); p.add(center, BorderLayout.CENTER); p.add(right, BorderLayout.EAST);
         return p;
     }
 
@@ -346,63 +297,15 @@ public class DreamBotMenu extends JFrame {
 
     // --- Inner Classes ---
     public static class Task {
-        public String name;
-        public String description;
-        public String status;
-        public List<Action> actions;
-
-        public Task(String name, String description, List<Action> actions, String status) {
-            this.name = name;
-            this.description = description;
-            this.actions = actions;
-            this.status = (status == null || status.isEmpty()) ? "Ready" : status;
+        public String name, desc, status; public List<Action> actions;
+        private static final String[] HUMAN_FLAIR = {"Thinking...", "Working...", "Analyzing..."};
+        public Task(String n, String d, List<Action> a, String s) {
+            this.name = n; this.desc = d; this.actions = a;
+            this.status = (s == null || s.isEmpty()) ? HUMAN_FLAIR[new Random().nextInt(HUMAN_FLAIR.length)] : s;
         }
-
-        public Task(Task o) {
-            this(o.name, o.description, o.actions, o.status);
-        }
-
-        public String getEditableString() {
-            return "NAME:" + name
-                    + "\nDESC:" + description
-                    + "\nSTATUS:" + status;
-        }
-
-        public void setName(String name) {
-            this.name = name;
-        }
-
-        public String getName() {
-            return name;
-        }
-
-        public void setDescription(String description) {
-            this.description = description;
-        }
-
-        public String getDescription() {
-            return description;
-        }
-
-        public void setActions(List<DreamBotMenu.Action> actions) {
-            this.actions = actions;
-        }
-
-        public List<DreamBotMenu.Action> getActions() {
-            return actions;
-        }
-
-        public void setStatus(String status) {
-            this.status = status;
-        }
-
-        public String getStatus() {
-            return status;
-        }
-
-        @Override public String toString() {
-            return name + " | " + status;
-        }
+        public Task(Task o) { this(o.name, o.desc, o.actions, o.status); }
+        public String getEditableString() { return "NAME:"+name+"\nDESC:"+desc+"\nSTATUS:"+status; }
+        @Override public String toString() { return name + " | " + status; }
     }
 
     public static class Action {
@@ -420,179 +323,26 @@ public class DreamBotMenu extends JFrame {
         @Override public String toString() { return type.name() + " -> " + target; }
     }
 
-    private boolean saveTaskLibrary(Task... tasks) {
-        Logger.log(Logger.LogType.INFO, "Uploading task library...");
-        Logger.log(Logger.LogType.DEBUG, "Saving:\n");
-        for (Task t: tasks) {
-            Logger.log(Logger.LogType.DEBUG, t.getEditableString());
-        }
-        return true;
-    }
-
-    private JPanel createLibraryTab() {
-        ///  create main library tab
-        JPanel panelLibraryTab = new JPanel(new GridLayout(1, 2, 10, 0));
-        panelLibraryTab.setBackground(BG_BASE);
-        panelLibraryTab.setBorder(new EmptyBorder(15, 15, 15, 15));
-
-        ///  create a title
-
-
-        /// CENTER WEST: Library list
-        //  create a library list/model to display the live task library list
-        libraryList = new JList<>(libraryModel);
-        styleJList(libraryList);
-        libraryEditorArea = new JTextArea(); libraryEditorArea.setBackground(new Color(15, 15, 15));
-        libraryEditorArea.setForeground(TEXT_MAIN);
-
-        // add listener to library selections to load them into the editor
-        libraryList.addListSelectionListener(e -> {
-            Task t = libraryList.getSelectedValue();
-            if (t != null)
-                libraryEditorArea.setText(t.getEditableString());
-        });
-
-        /// CENTER EAST: Edit panel + buttons
-        // create the main two panels for this section
-        JPanel panelCenterEastLibraryTab = new JPanel(new BorderLayout(0, 10));
-        JPanel btnSection = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-
-        // make adjustments to these panels
-        panelCenterEastLibraryTab.setOpaque(false);
-        btnSection.setOpaque(false);
-
-        // create queue button
-        JButton btnQueue = createStyledBtn("Queue", new Color(0, 100, 0));
-        btnQueue.addActionListener(e -> {
-            if(libraryList.getSelectedValue() != null)
-                queueModel.addElement(new Task(libraryList.getSelectedValue()));
-        });
-        // add queue button to the button section
-        btnSection.add(btnQueue);
-
-        // create save button
-        JButton btnSave = createStyledBtn("Save", new Color(100, 100, 0));
-        btnSave.addActionListener(e -> dataMan.saveTaskLibrary(libraryList));
-        // add save button to the button section
-        btnSection.add(btnSave);
-
-        // complete the center east section by merging library editor with button section (top/bottom stacked)
-        panelCenterEastLibraryTab.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER);
-        panelCenterEastLibraryTab.add(btnSection, BorderLayout.SOUTH);
-
-        // complete the library list by merging the library list (center-west) with the center-east panel
-        panelLibraryTab.add(new JScrollPane(libraryList));
-        panelLibraryTab.add(panelCenterEastLibraryTab);
-
-        // return the completed library tab
-        return panelLibraryTab;
-    }
+    // --- Restored Original Logic ---
+    private JPanel createLibraryTab() { JPanel p = new JPanel(new GridLayout(1, 2, 10, 0)); p.setBackground(BG_BASE); p.setBorder(new EmptyBorder(15, 15, 15, 15)); libraryList = new JList<>(libraryModel); styleJList(libraryList); JPanel editPanel = new JPanel(new BorderLayout(0, 10)); editPanel.setOpaque(false); libraryEditorArea = new JTextArea(); libraryEditorArea.setBackground(new Color(15, 15, 15)); libraryEditorArea.setForeground(TEXT_MAIN); libraryList.addListSelectionListener(e -> { Task t = libraryList.getSelectedValue(); if (t != null) libraryEditorArea.setText(t.getEditableString()); }); JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.RIGHT)); btnRow.setOpaque(false); JButton btnAdd = createStyledBtn("Add to Queue", new Color(0, 100, 0)); btnAdd.addActionListener(e -> { if(libraryList.getSelectedValue() != null) queueModel.addElement(new Task(libraryList.getSelectedValue())); }); editPanel.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER); editPanel.add(btnRow, BorderLayout.SOUTH); p.add(new JScrollPane(libraryList)); p.add(editPanel); return p; }
     private void initializeGenericLibrary() { libraryModel.addElement(new Task("Woodcutter", "Chops Trees", Arrays.asList(new Action(ActionType.CHOP, "Tree")), "Chopping...")); }
-    private void loadIntoBuilder(Task t) { if(t == null) return; taskNameInput.setText(t.name); taskDescInput.setText(t.description); taskStatusInput.setText(t.status); builderActionModel.clear(); t.actions.forEach(builderActionModel::addElement); }
-
-    private JPanel createHeaderPanel() {
-        JPanel header = new JPanel(new BorderLayout());
-        header.setBackground(PANEL_SURFACE);
-        header.setPreferredSize(new Dimension(0, 85));
-        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_DIM));
-        JLabel titleLabel = new JLabel(" ETAbot", SwingConstants.LEFT);
-        titleLabel.setForeground(ACCENT_BLOOD);
-        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32));
-        titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0));
-        JPanel rightContainer = new JPanel(new BorderLayout());
-        rightContainer.setOpaque(false);
-        rightContainer.setBorder(new EmptyBorder(0, 0, 0, 20));
-        JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 20));
-        controls.setOpaque(false);
-        btnPlayPause = createIconButton("▶", "Play", e -> toggleScriptState());
-        JButton btnStop = createIconButton("■", "Stop", e -> stopScript());
-        btnInputToggle = createIconButton("🖱", "Input", e -> toggleUserInput());
-        controls.add(btnPlayPause);
-        controls.add(btnStop); controls.add(btnInputToggle);
-        JPanel headerStats = new JPanel(new GridLayout(2, 1));
-        headerStats.setOpaque(false);
-        headerStats.setBorder(new EmptyBorder(10, 20, 10, 10));
-        styleHeaderLabel(totalXpGainedLabel);
-        styleHeaderLabel(totalLevelsGainedLabel);
-        headerStats.add(totalXpGainedLabel);
-        headerStats.add(totalLevelsGainedLabel);
-        rightContainer.add(controls, BorderLayout.CENTER);
-        rightContainer.add(headerStats, BorderLayout.EAST);
-        header.add(titleLabel, BorderLayout.WEST);
-        header.add(rightContainer, BorderLayout.EAST);
-
-        return header;
-    }
-
-    private void toggleScriptState() {
-        if (script == null)
-            return;
-
-        if (isScriptPaused) {
-            script.getScriptManager().resume();
-            btnPlayPause.setText("▮▮");
-            isScriptPaused = false;
-        } else {
-            script.getScriptManager().pause();
-            btnPlayPause.setText("▶");
-            isScriptPaused = true;
-        }
-    }
-
+    private void loadIntoBuilder(Task t) { if(t == null) return; taskNameInput.setText(t.name); taskDescInput.setText(t.desc); taskStatusInput.setText(t.status); builderActionModel.clear(); t.actions.forEach(builderActionModel::addElement); }
+    private JPanel createHeaderPanel() { JPanel header = new JPanel(new BorderLayout()); header.setBackground(PANEL_SURFACE); header.setPreferredSize(new Dimension(0, 85)); header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_DIM)); JLabel titleLabel = new JLabel(" ETAbot", SwingConstants.LEFT); titleLabel.setForeground(ACCENT_BLOOD); titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32)); titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0)); JPanel rightContainer = new JPanel(new BorderLayout()); rightContainer.setOpaque(false); rightContainer.setBorder(new EmptyBorder(0, 0, 0, 20)); JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 20)); controls.setOpaque(false); btnPlayPause = createIconButton("▶", "Play", e -> toggleScriptState()); JButton btnStop = createIconButton("■", "Stop", e -> stopScript()); btnInputToggle = createIconButton("🖱", "Input", e -> toggleUserInput()); controls.add(btnPlayPause); controls.add(btnStop); controls.add(btnInputToggle); JPanel headerStats = new JPanel(new GridLayout(2, 1)); headerStats.setOpaque(false); headerStats.setBorder(new EmptyBorder(10, 20, 10, 10)); styleHeaderLabel(totalXpGainedLabel); styleHeaderLabel(totalLevelsGainedLabel); headerStats.add(totalXpGainedLabel); headerStats.add(totalLevelsGainedLabel); rightContainer.add(controls, BorderLayout.CENTER); rightContainer.add(headerStats, BorderLayout.EAST); header.add(titleLabel, BorderLayout.WEST); header.add(rightContainer, BorderLayout.EAST); return header; }
+    private void toggleScriptState() { if (script == null) return; if (isScriptPaused) { script.getScriptManager().resume(); btnPlayPause.setText("▮▮"); isScriptPaused = false; } else { script.getScriptManager().pause(); btnPlayPause.setText("▶"); isScriptPaused = true; } }
     private void stopScript() { if (JOptionPane.showConfirmDialog(this, "Stop?") == JOptionPane.YES_OPTION) { script.stop(); dispose(); } }
     private void toggleUserInput() { isUserInputAllowed = !isUserInputAllowed; Client.getInstance().setMouseInputEnabled(isUserInputAllowed); Client.getInstance().setKeyboardInputEnabled(isUserInputAllowed); btnInputToggle.setText(isUserInputAllowed ? "🖱" : "🚫"); }
     private void styleHeaderLabel(JLabel l) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.BOLD, 15)); l.setHorizontalAlignment(SwingConstants.RIGHT); }
     private void styleSpinner(JSpinner s) { JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField(); field.setBackground(new Color(30, 30, 30)); field.setForeground(ACCENT_BLOOD); s.setBorder(new LineBorder(BORDER_DIM)); }
     private JButton createIconButton(String symbol, String tooltip, ActionListener action) { JButton btn = new JButton(symbol); btn.setPreferredSize(new Dimension(40, 40)); btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18)); btn.setBackground(new Color(30, 0, 0)); btn.setForeground(ACCENT_BLOOD); btn.addActionListener(action); return btn; }
+    private JPanel createOutputTab() { JPanel p = new JPanel(new BorderLayout()); p.setBackground(BG_BASE); consoleArea = new JTextArea(); consoleArea.setBackground(Color.BLACK); consoleArea.setForeground(new Color(0, 255, 0)); consoleArea.setFont(new Font("Consolas", Font.PLAIN, 12)); ((DefaultCaret)consoleArea.getCaret()).setUpdatePolicy(DefaultCaret.ALWAYS_UPDATE); consoleSearch = new JTextField(); styleComp(consoleSearch); btnCaptureToggle = createStyledBtn("Capture: ON", new Color(0, 80, 0)); btnCaptureToggle.addActionListener(e -> { isCaptureEnabled = !isCaptureEnabled; btnCaptureToggle.setText("Capture: " + (isCaptureEnabled ? "ON" : "OFF")); }); JPanel t = new JPanel(new BorderLayout()); t.setOpaque(false); t.add(consoleSearch, BorderLayout.CENTER); t.add(btnCaptureToggle, BorderLayout.EAST); p.add(t, BorderLayout.NORTH); p.add(new JScrollPane(consoleArea), BorderLayout.CENTER); return p; }
     private void shiftQueue(int dir) { int idx = taskQueueList.getSelectedIndex(); if (idx == -1 || idx+dir < 0 || idx+dir >= queueModel.size()) return; Task t = queueModel.remove(idx); queueModel.add(idx+dir, t); taskQueueList.setSelectedIndex(idx+dir); }
     private void styleComp(JComponent c) { c.setBackground(PANEL_SURFACE); c.setForeground(TEXT_MAIN); if(c instanceof JTextField) ((JTextField)c).setCaretColor(ACCENT_BLOOD); }
     private void styleJList(JList<?> l) { l.setBackground(PANEL_SURFACE); l.setForeground(TEXT_MAIN); l.setSelectionBackground(TAB_SELECTED); }
     private JButton createStyledBtn(String t, Color c) { JButton b = new JButton(t); b.setBackground(c); b.setForeground(Color.WHITE); b.setFocusPainted(false); b.setBorder(new LineBorder(BORDER_DIM)); return b; }
-
-    private ImageIcon loadMiscIcon(String name) {
-        try {
-            return new ImageIcon(new ImageIcon(
-                    Objects.requireNonNull(getClass()
-                            .getResource("/resources/icons/misc/" + name + ".png")))
-                            .getImage()
-                            .getScaledInstance(18, 18, Image.SCALE_SMOOTH));
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private ImageIcon loadSkillIcon(Skill skill) {
-        try {
-            return new ImageIcon(new ImageIcon(
-                    Objects.requireNonNull(getClass()
-                            .getResource("/resources/icons/skills/" + skill.name().toLowerCase() + "_icon.png")))
-                            .getImage()
-                            .getScaledInstance(26, 26, Image.SCALE_SMOOTH)
-            );
-
-        } catch (Exception e) {
-            return new ImageIcon();
-        }
-    }
-
-    private ImageIcon loadStatusIcon(String name) {
-        try {
-            return new ImageIcon(new ImageIcon(
-                    Objects.requireNonNull(getClass()
-                            .getResource("/resources/icons/status/" + name + ".png")))
-                            .getImage()
-                            .getScaledInstance(16, 16, Image.SCALE_SMOOTH)
-            );
-
-        } catch (Exception ignored) {}
-
-        return null;
-    }
-
-    private void updateUI() {
-        updateAll();
-    }
-
+    private ImageIcon loadMiscIcon(String name) { try { return new ImageIcon(new ImageIcon(Objects.requireNonNull(getClass().getResource("/resources/icons/misc/" + name + ".png"))).getImage().getScaledInstance(18, 18, Image.SCALE_SMOOTH)); } catch (Exception e) { return null; } }
+    private ImageIcon loadSkillIcon(Skill skill) { try { return new ImageIcon(new ImageIcon(Objects.requireNonNull(getClass().getResource("/resources/icons/skills/" + skill.name().toLowerCase() + "_icon.png"))).getImage().getScaledInstance(26, 26, Image.SCALE_SMOOTH)); } catch (Exception e) { return new ImageIcon(); } }
+    private ImageIcon loadStatusIcon(String name) { try { return new ImageIcon(new ImageIcon(Objects.requireNonNull(getClass().getResource("/resources/icons/status/" + name + ".png"))).getImage().getScaledInstance(16, 16, Image.SCALE_SMOOTH)); } catch (Exception ignored) {} return null; }
+    private void updateUI() { updateAll(); }
     private JPanel createPlayerPanel() { JPanel container = new JPanel(new BorderLayout()); container.setBackground(BG_BASE); container.setBorder(new EmptyBorder(20, 20, 20, 20)); JPanel content = new JPanel(new GridLayout(1, 2, 20, 0)); content.setBackground(BG_BASE); JPanel login = createInfoCard("Login Details"); addInfoRow(login, "Username", lblUsername); addInfoRow(login, "Password", lblPassword); addInfoRow(login, "Identifier", lblAcctId); addInfoRow(login, "Acct Status", lblAcctStatus); JPanel game = createInfoCard("World"); addInfoRow(game, "Character Name", lblCharName); addInfoRowWithIcon(game, "Membership", lblMemberText, lblMemberIcon); addInfoRow(game, "World", lblWorld); addInfoRow(game, "Coordinates", lblCoords); addInfoRow(game, "GameState", lblGameState); content.add(login); content.add(game); container.add(content, BorderLayout.NORTH); return container; }
     private JPanel createInfoCard(String title) { JPanel p = new JPanel(new GridLayout(0, 1, 5, 10)); p.setBackground(PANEL_SURFACE); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + title + " "); b.setTitleColor(ACCENT_BLOOD); b.setTitleFont(new Font("Segoe UI", Font.BOLD, 16)); p.setBorder(BorderFactory.createCompoundBorder(b, new EmptyBorder(15, 15, 15, 15))); return p; }
     private void addInfoRow(JPanel p, String key, JLabel valLabel) { JPanel row = new JPanel(new BorderLayout()); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); valLabel.setForeground(TEXT_MAIN); valLabel.setFont(new Font("Consolas", Font.BOLD, 14)); row.add(k, BorderLayout.WEST); row.add(valLabel, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
@@ -614,144 +364,4 @@ public class DreamBotMenu extends JFrame {
     private void updateAll() { int projH = (int) projectionSpinner.getValue(); long tXp = 0; int tLg = 0; int p2pTotal = 0; int f2pTotal = 0; for (SkillData data : skillRegistry.values()) { int xp = Skills.getExperience(data.skill); int lvl = Skills.getRealLevel(data.skill); data.update(xp, lvl, startTime, projH); p2pTotal += lvl; if (F2P_SKILLS.contains(data.skill)) f2pTotal += lvl; if (data.isTracking) { tXp += Math.max(0, (xp - data.startXP)); tLg += Math.max(0, (lvl - data.startLevel)); } } totalXpGainedLabel.setText("Total XP Gained: " + String.format("%,d", tXp)); totalLevelsGainedLabel.setText("Total Levels Gained: " + tLg); totalLevelLabel.setText(String.format("F2P Total: %d | P2P Total: %d", f2pTotal, p2pTotal)); if (Client.isLoggedIn() && Players.getLocal() != null) { lblUsername.setText(Players.getLocal().getName()); lblPassword.setText(Optional.ofNullable(Client.getPassword()).orElse("null")); lblWorld.setText("World " + (Worlds.getCurrent() != null ? Worlds.getCurrent().getWorld() : "?")); boolean isMember = Client.isMembers(); lblMemberText.setText(isMember ? "Member" : "Free-to-Play"); lblMemberIcon.setIcon(loadStatusIcon(isMember ? "Member_icon" : "Free-to-play_icon")); lblCharName.setText(Players.getLocal().getName()); lblCoords.setText(Players.getLocal().getTile().toString()); lblGameState.setText(Client.getGameState().name()); } }
     private class TaskCellRenderer extends DefaultListCellRenderer { @Override public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) { JLabel l = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus); if (index == currentExecutionIndex) { l.setBackground(TAB_SELECTED); l.setForeground(Color.WHITE); l.setText("▶ " + l.getText()); } return l; } }
     private class SkillData { final Skill skill; final JProgressBar mainBar = new JProgressBar(0, 100); final JLabel lblLevel = new JLabel("1"), lblXpString = new JLabel("0/0"); final JPanel trackerPanel = new JPanel(new GridLayout(0, 1, 2, 2)); final JLabel lblGained = new JLabel(), lblPerHour = new JLabel(), lblRemaining = new JLabel(), lblTTL = new JLabel(), lblProj = new JLabel(), lblActs = new JLabel(); final int startXP, startLevel; boolean isTracking = false; SkillData(Skill s) { this.skill = s; this.startXP = Skills.getExperience(s); this.startLevel = Skills.getRealLevel(s); trackerPanel.setBackground(new Color(30, 30, 30)); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + s.name() + " "); b.setTitleColor(ACCENT_BLOOD); trackerPanel.setBorder(b); JLabel[] ls = {lblGained, lblPerHour, lblRemaining, lblActs, lblTTL, lblProj}; for (JLabel l : ls) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.PLAIN, 12)); trackerPanel.add(l); } } void update(int curXp, int curLvl, long start, int ph) { int curMin = Skills.getExperienceForLevel(curLvl), curMax = Skills.getExperienceForLevel(curLvl + 1); lblLevel.setText(String.valueOf(curLvl)); lblXpString.setText(String.format("%,d / %,d XP", curXp, curMax)); mainBar.setValue((int) (((double)(curXp - curMin) / Math.max(1, curMax - curMin)) * 100)); long elapsed = System.currentTimeMillis() - start; int xph = (int) (Math.max(0, curXp - startXP) / Math.max(0.0001, elapsed / 3600000.0)); int rem = Math.max(0, curMax - curXp); lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP)); lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph)); lblRemaining.setText(" TO LEVEL: " + String.format("%,d", rem)); if (xph > 0) { lblTTL.setText(String.format(" TIME TO L: %.2f hrs", (double) rem / xph)); lblProj.setText(String.format(" PROJ (%dH): Lvl %d", ph, curLvl + (xph * ph / 100000))); } } }
-    /**
-     * Converts the current Task Queue or Library into a JSON string.
-     */
-    private String listToJson(DefaultListModel<Task> model) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < model.size(); i++) {
-            Task t = model.get(i);
-            sb.append("{")
-                    .append("\"name\":\"").append(t.name).append("\",")
-                    .append("\"desc\":\"").append(t.description).append("\",")
-                    .append("\"status\":\"").append(t.status).append("\",")
-                    .append("\"actions\":[");
-            for (int j = 0; j < t.actions.size(); j++) {
-                Action a = t.actions.get(j);
-                sb.append("{\"type\":\"").append(a.type).append("\",\"target\":\"").append(a.target).append("\"}");
-                if (j < t.actions.size() - 1) sb.append(",");
-            }
-            sb.append("]}");
-            if (i < model.size() - 1) sb.append(",");
-        }
-        return sb.append("]").toString();
-    }
-
-    private String packagePreset(int slotIndex) {
-        String name = presetButtons[slotIndex - 1].getText();
-
-        // Safety check: if the queue is empty, package an empty array string
-        String taskData = queueModel.isEmpty() ? "[]" : listToJson(queueModel);
-
-        // We must escape the internal quotes of the taskData so it fits inside the preset object
-        String escapedData = taskData.replace("\"", "\\\"");
-
-        // Construct the JSON slot object
-        return "{\"name\":\"" + name + "\", \"data\":\"" + escapedData + "\"}";
-    }
-
-//    private void savePresets() {
-//        StringBuilder fullJson = new StringBuilder("{");
-//        for (int i = 1; i <= 4; i++) {
-//            fullJson.append("\"p").append(i).append("\":").append(packagePreset(i));
-//            if (i < 4) fullJson.append(",");
-//        }
-//        fullJson.append("}");
-//
-//        // Push the entire object to the "presets" column
-//        dataMan.postThreaded("presets", fullJson.toString(), resp -> {
-//            Logger.log("All 4 Preset Slots synced to server.");
-//        });
-//    }
-
-//    public void saveAllData() {
-//        // 1. Save Presets (Names + Task Data)
-//        StringBuilder sb = new StringBuilder("{");
-//        for (int i = 1; i <= 4; i++) {
-//            sb.append("\"p").append(i).append("\":").append(packagePreset(i));
-//            if (i < 4) sb.append(",");
-//        }
-//
-//        sb.append("}");
-//        dataMan.postThreaded("presets", sb.toString(), resp -> Logger.log("Presets Saved."));
-//
-//        // 2. Save Library (The Library Tab contents)
-//        dataMan.postThreaded("settings", listToJson(libraryModel), resp -> Logger.log("Library Saved."));
-//
-//        lblStatus.setText("Status: All Data Synced");
-//    }
-//
-//    private void renamePreset(int index) {
-//        String currentName = presetButtons[index].getText();
-//        String newName = JOptionPane.showInputDialog(this, "Rename Preset:", currentName);
-//
-//        if (newName != null && !newName.trim().isEmpty()) {
-//            presetButtons[index].setText(newName);
-//            // Optional: Auto-save after renaming
-//            savePresets();
-//        }
-//    }
-
-//    private void loadPreset(int slotIndex) {
-//        DataMan dm = new DataMan();
-//        // Using "presets" column
-//        dm.getThreaded("presets", json -> {
-//            if (json == null || json.isEmpty()) {
-//                Logger.log("No preset data found on server.");
-//                return;
-//            }
-//
-//            String key = "p" + slotIndex;
-//            // Updated regex to be more literal with potential JSON spacing
-//            java.util.regex.Pattern p = java.util.regex.Pattern.compile("\"" + key + "\":\\s*\\{\"name\":\"(.*?)\",\"data\":\"(.*?)\"\\}");
-//            java.util.regex.Matcher m = p.matcher(json);
-//
-//            if (m.find()) {
-//                // Unescape the nested JSON string
-//                String tasksJson = m.group(2).replace("\\\"", "\"");
-//
-//                // Rebuild into the queueModel
-//                rebuildTasksFromJson(tasksJson, queueModel);
-//
-//                // Update UI safely
-//                SwingUtilities.invokeLater(() -> {
-//                    lblStatus.setText("Status: Loaded Preset " + slotIndex);
-//                    taskQueueList.repaint();
-//                });
-//            } else {
-//                Logger.log("Could not find slot " + key + " in the database response.");
-//            }
-//        });
-//    }
-
-    private void rebuildTasksFromJson(String json, DefaultListModel<Task> model) {
-        model.clear();
-        try {
-            // Regex to find each Task block: {"name":"...","desc":"...","status":"...","actions":[...]}
-            java.util.regex.Pattern taskPat = java.util.regex.Pattern.compile("\\{\"name\":\"(.*?)\",\"desc\":\"(.*?)\",\"status\":\"(.*?)\",\"actions\":\\[(.*?)\\]\\}");
-            java.util.regex.Matcher taskMat = taskPat.matcher(json);
-
-            while (taskMat.find()) {
-                String name = taskMat.group(1);
-                String desc = taskMat.group(2);
-                String status = taskMat.group(3);
-                String actionsRaw = taskMat.group(4);
-
-                List<Action> actions = new ArrayList<>();
-                // Regex to find each Action block: {"type":"...","target":"..."}
-                java.util.regex.Pattern actPat = java.util.regex.Pattern.compile("\\{\"type\":\"(.*?)\",\"target\":\"(.*?)\"\\}");
-                java.util.regex.Matcher actMat = actPat.matcher(actionsRaw);
-
-                while (actMat.find()) {
-                    ActionType type = ActionType.valueOf(actMat.group(1));
-                    String target = actMat.group(2);
-                    actions.add(new Action(type, target));
-                }
-
-                model.addElement(new Task(name, desc, actions, status));
-            }
-        } catch (Exception e) {
-            Logger.log("Parsing error: " + e.getMessage());
-        }
-    }
 }

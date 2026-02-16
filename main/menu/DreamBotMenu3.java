@@ -24,8 +24,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * <h1>ETAbot Nexus Client</h1>
- *
+ * <h1>ETAbot</h1>
  * @author ETAbot Dev
  * @version 15.0.0-Elite
  */
@@ -116,7 +115,7 @@ public class DreamBotMenu3 extends JFrame {
         this.script = script;
         this.startTime = System.currentTimeMillis();
 
-        setTitle("ETAbot | Nexus Client");
+        setTitle("ETAbot | DreamBot Manager v3");
         setSize(1400, 950);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
