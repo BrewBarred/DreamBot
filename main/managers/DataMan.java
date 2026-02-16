@@ -47,9 +47,10 @@ public class DataMan {
         new Thread(() -> {
             try {
                 String playerName = getValidPlayerName();
-                if (playerName == null) return;
+                if (playerName == null)
+                    return;
 
-                Logger.log(Logger.LogType.INFO, "Saving " + playerName + "'s library list...");
+                Logger.log(Logger.LogType.INFO, "Saving " + playerName + "'s task list...");
 
                 // Convert JList items into a Map to preserve structure
                 Map<String, DreamBotMenu.Task> taskMap = new LinkedHashMap<>();

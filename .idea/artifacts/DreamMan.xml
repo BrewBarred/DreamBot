@@ -6,7 +6,6 @@
         <element id="file-copy" path="$PROJECT_DIR$/META-INF/MANIFEST.MF" />
       </element>
       <element id="module-output" name="DreamMan" />
-      <element id="extracted-dir" path="$PROJECT_DIR$/../../../../Program Files/BellSoft/LibericaJDK-8-Full/jre/lib/ext/jfxrt.jar" path-in-jar="/" />
     </root>
   </artifact>
 </component>

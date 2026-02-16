@@ -437,8 +437,8 @@ public class DreamBotMenu extends JFrame {
         ///  Create Task List save button
         JButton btnTaskListSave = createStyledBtn("Save", COLOR_GREY);
         btnTaskListSave.addActionListener(e -> {
-            dataMan.saveTaskLibrary(listTaskLibrary);
             showToast("Saving...", btnTaskListSave, true);
+            dataMan.saveTaskList(listTaskList);
         });
 
         ///  Add all buttons
@@ -509,6 +509,14 @@ public class DreamBotMenu extends JFrame {
             }
         });
 
+        ///  Create Task Library edit button
+        JButton btnTaskLibraryEdit = createStyledBtn("Edit", COLOR_GREY);
+        btnTaskLibraryEdit.addActionListener(e -> {
+            loadIntoBuilder(listTaskLibrary.getSelectedValue());
+            // switch to tab 2 (3rd tab = Task Builder) to edit task
+            mainTabs.setSelectedIndex(2);
+        });
+
         ///  Create Task Library delete button
         JButton btnTaskLibraryDelete = createStyledBtn("Delete", new Color(100, 0, 0));
         btnTaskLibraryDelete.setEnabled(listTaskLibrary.getSelectedIndex() != -1);
@@ -543,8 +551,9 @@ public class DreamBotMenu extends JFrame {
 
         ///  Add all buttons
         btnSection.add(btnTaskLibraryAdd);
-        btnSection.add(btnTaskLibraryDelete);
+        btnSection.add(btnTaskLibraryEdit);
         btnSection.add(btnTaskLibrarySave);
+        btnSection.add(btnTaskLibraryDelete);
 
         panelCenterEastLibraryTab.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER);
 
@@ -581,6 +590,7 @@ public class DreamBotMenu extends JFrame {
     private void refreshTaskBuilder() {
         if (listTaskBuilder.getSelectedValue() == null && !modelTaskBuilder.isEmpty())
             listTaskBuilder.setSelectedIndex(modelTaskBuilder.getSize() - 1);
+        //scanNearbyTargets();
     }
 
 
@@ -708,7 +718,7 @@ public class DreamBotMenu extends JFrame {
             int selectedIndex = listTaskBuilder.getSelectedIndex();
             if (selectedIndex != -1) {
                 modelTaskBuilder.remove(selectedIndex);
-                showToast("Removed action!", btnTaskBuilderRemove, true);
+                showToast("Action removed!", btnTaskBuilderRemove, true);
                 refreshTaskBuilder();
             } else {
                 showToast("You must select an action first!", btnTaskBuilderRemove, false);
@@ -722,7 +732,7 @@ public class DreamBotMenu extends JFrame {
         // create reset button to reset task builder inputs, ready for next task to be created
         JButton btnTaskBuilderReset = createStyledBtn("Reset", new Color(50, 50, 50));
         btnTaskBuilderReset.addActionListener(e -> {
-            showToast("Resetting...", btnTaskBuilderReset, true);
+            showToast("Task builder reset!", btnTaskBuilderReset, true);
             resetTaskBuilder();
         });
 
@@ -749,13 +759,14 @@ public class DreamBotMenu extends JFrame {
         config.add(new JLabel("Target name:"));
         config.add(manualTargetInput);
 
-        JButton btnTaskBuilderAdd = createStyledBtn("Add", COLOR_ORANGE);
+        JButton btnTaskBuilderAdd = createStyledBtn("Add to builder...", COLOR_ORANGE);
         btnTaskBuilderAdd.addActionListener(e -> {
             if(!manualTargetInput.getText().isEmpty()) {
                 modelTaskBuilder.addElement(
                         new Action((ActionType) actionCombo.getSelectedItem(), manualTargetInput.getText())
                 );
-                showToast("Added action!", btnTaskBuilderAdd, true);
+                showToast("Added action to builder!", btnTaskBuilderAdd, true);
+                refreshTaskBuilder();
             } else {
                 showToast("Enter a target name!", btnTaskBuilderAdd, false);
             }
@@ -768,12 +779,17 @@ public class DreamBotMenu extends JFrame {
         styleJList(nearbyList);
         nearbyList.addMouseListener(new MouseAdapter() {
             public void mouseClicked(MouseEvent e) {
-                String val = nearbyList.getSelectedValue(); if(val == null)
+                String val = nearbyList.getSelectedValue();
+                if(val == null)
                     return;
-                if(e.getClickCount() == 1)
+                // update target name on single click
+                if(e.getClickCount() == 1) {
                     manualTargetInput.setText(val);
-                else if(e.getClickCount() == 2)
+                }
+                else if(e.getClickCount() == 2) {
                     modelTaskBuilder.addElement(new Action((ActionType) actionCombo.getSelectedItem(), val));
+                    showToast("Added action to builder!", btnTaskBuilderAdd, true);
+                }
             }
         });
 
@@ -782,7 +798,7 @@ public class DreamBotMenu extends JFrame {
         entitiesScroll.setPreferredSize(new Dimension(300, 0)); // 300px width, height 0 (BorderLayout will stretch height)
         entitiesScroll.setMinimumSize(new Dimension(300, 0));
 
-        JButton btnScanNearby = createStyledBtn("Scan nearby", COLOR_GREY);
+        JButton btnScanNearby = createStyledBtn("Scan nearby...", COLOR_GREY);
         btnScanNearby.addActionListener(e -> {
             showToast("Scanning for nearby targets...",  btnScanNearby, true);
             scanNearbyTargets();
@@ -800,9 +816,7 @@ public class DreamBotMenu extends JFrame {
         panelTaskBuilder.addComponentListener(new ComponentAdapter() {
                 @Override
                 public void componentShown(ComponentEvent e) {
-                    scanNearbyTargets();
-                    if (listTaskBuilder.getSelectedValue() == null && !modelTaskBuilder.isEmpty())
-                        listTaskBuilder.setSelectedIndex(modelTaskBuilder.getSize() - 1);
+                    refreshTaskBuilder();
                 }
         });
 
