@@ -39,7 +39,7 @@ public class DreamBot extends AbstractScript {
         }
 
         // 2. Access the queue
-        DefaultListModel<DreamBotMenu.Task> queue = menu.getQueueModel();
+        DefaultListModel<DreamBotMenu.Task> queue = menu.getTaskListModel();
 
         if (queue == null || queue.isEmpty()) {
             menu.setLabelStatus("Status: Queue Empty");

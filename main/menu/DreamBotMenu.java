@@ -1,5 +1,7 @@
 package main.menu;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import main.managers.DataMan;
 import org.dreambot.api.Client;
 import org.dreambot.api.ClientSettings;
@@ -11,6 +13,8 @@ import org.dreambot.api.methods.skills.Skills;
 import org.dreambot.api.methods.world.Worlds;
 import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.utilities.Logger;
+import org.dreambot.api.wrappers.interactive.GameObject;
+import org.dreambot.api.wrappers.interactive.NPC;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -42,7 +46,7 @@ public class DreamBotMenu extends JFrame {
     // --- Data & Presets ---
     private final DataMan dataMan = new DataMan();
     private final Map<Skill, SkillData> skillRegistry = new EnumMap<>(Skill.class);
-    private final DefaultListModel<Task> queueModel = new DefaultListModel<>();
+    private final DefaultListModel<Task> taskListModel = new DefaultListModel<>();
     private final DefaultListModel<Task> libraryModel = new DefaultListModel<>();
     private final DefaultListModel<Action> builderActionModel = new DefaultListModel<>();
     private final DefaultListModel<String> nearbyEntitiesModel = new DefaultListModel<>();
@@ -116,44 +120,112 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Player", null, createPlayerPanel());
         mainTabs.addTab("Settings", null, createSettingsInterface());
 
+        projectionSpinner = new JSpinner(new SpinnerNumberModel(24, 1, 999, 1));
+        styleSpinner(projectionSpinner);
+
+        trackerList = new JPanel();
+        trackerList.setLayout(new BoxLayout(trackerList, BoxLayout.Y_AXIS));
+        trackerList.setBackground(PANEL_SURFACE);
+        JScrollPane sScroll = new JScrollPane(trackerList);
+        sScroll.setBorder(null);
+        sScroll.getViewport().setBackground(PANEL_SURFACE);
+
         sidePanel = new JPanel(new BorderLayout());
         sidePanel.setPreferredSize(new Dimension(360, 0));
         sidePanel.setBackground(PANEL_SURFACE);
         sidePanel.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, BORDER_DIM));
-
-        projectionSpinner = new JSpinner(new SpinnerNumberModel(24, 1, 999, 1));
-        styleSpinner(projectionSpinner);
-        trackerList = new JPanel(); trackerList.setLayout(new BoxLayout(trackerList, BoxLayout.Y_AXIS)); trackerList.setBackground(PANEL_SURFACE);
-        JScrollPane sScroll = new JScrollPane(trackerList); sScroll.setBorder(null); sScroll.getViewport().setBackground(PANEL_SURFACE);
         sidePanel.add(sScroll, BorderLayout.CENTER);
+        sidePanel.setVisible(false);
 
-        JButton tBtn = new JButton(">");
-        tBtn.setPreferredSize(new Dimension(22, 0));
-        tBtn.setBackground(PANEL_SURFACE);
-        tBtn.setForeground(ACCENT_BLOOD);
-        tBtn.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 1, BORDER_DIM));
-        tBtn.addActionListener(e -> { sidePanel.setVisible(!sidePanel.isVisible()); tBtn.setText(sidePanel.isVisible() ? "<" : ">"); revalidate(); });
+        JButton btnToggleSidePanel = new JButton();
+        btnToggleSidePanel.setText(sidePanel.isVisible() ? ">" : "<");
+        btnToggleSidePanel.setPreferredSize(new Dimension(22, 0));
+        btnToggleSidePanel.setBackground(PANEL_SURFACE);
+        btnToggleSidePanel.setForeground(ACCENT_BLOOD);
+        btnToggleSidePanel.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 1, BORDER_DIM));
+        btnToggleSidePanel.addActionListener(e -> {
+            sidePanel.setVisible(!sidePanel.isVisible());
+            btnToggleSidePanel.setText(sidePanel.isVisible() ? ">" : "<");
+            revalidate();
+        });
+
+        JPanel sidePanel = new JPanel(new BorderLayout());
+        sidePanel.setOpaque(false);
+        sidePanel.add(this.sidePanel, BorderLayout.WEST);
+        sidePanel.add(btnToggleSidePanel, BorderLayout.EAST);
+
+
+        // add the toggle button and the side panel contents next to each-other on the side
+        sidePanel.add(this.sidePanel, BorderLayout.WEST);
+        sidePanel.add(btnToggleSidePanel, BorderLayout.EAST);
 
         add(header, BorderLayout.NORTH);
         add(mainTabs, BorderLayout.CENTER);
-        add(tBtn, BorderLayout.EAST);
         add(sidePanel, BorderLayout.EAST);
+        add(createStatusPanel(), BorderLayout.SOUTH);
 
-        initializeGenericLibrary();
+        Logger.log(Logger.LogType.INFO, "Loading task list..");
+        loadTaskList();
+        Logger.log(Logger.LogType.INFO, "Loading task library...");
+        loadTaskLibrary();
         setVisible(true);
-        new javax.swing.Timer(1000, e -> updateUI()).start();
-        new javax.swing.Timer(5000, e -> { if(mainTabs.getSelectedIndex() == 2) fetchDynamicTargets(); }).start();
+
+        SwingUtilities.invokeLater(() -> {
+            new javax.swing.Timer(1000, e -> updateUI()).start();
+            new javax.swing.Timer(5000, e -> {
+                if (mainTabs.getSelectedIndex() == 2)
+                    scanNearbyTargets();
+            }).start();
+        });
+    }
+
+    private JPanel createStatusPanel() {
+        // Use a GridBagLayout for precise control or a 2-row GridLayout
+        JPanel persistentStatus = new JPanel(new GridBagLayout());
+        persistentStatus.setBackground(PANEL_SURFACE);
+
+        // Add a border to separate it from the tabs above
+        persistentStatus.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, BORDER_DIM), // Top line
+                new EmptyBorder(8, 15, 8, 15) // Inner padding
+        ));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        gbc.gridx = 0;
+
+        // --- Row 1: The Progress Bar (Full Width) ---
+        statusProgress.setPreferredSize(new Dimension(0, 18)); // Width 0 is fine because weightx=1.0 stretches it
+        statusProgress.setForeground(ACCENT_BLOOD);
+        statusProgress.setBackground(BG_BASE);
+        statusProgress.setBorder(new LineBorder(BORDER_DIM));
+        statusProgress.setStringPainted(true); // Shows % text
+
+        gbc.gridy = 0;
+        gbc.insets = new Insets(0, 0, 4, 0); // Small gap between bar and text
+        persistentStatus.add(statusProgress, gbc);
+
+        // --- Row 2: The Status Text (Below) ---
+        lblStatus.setForeground(TEXT_DIM);
+        lblStatus.setFont(new Font("Consolas", Font.PLAIN, 12));
+
+        gbc.gridy = 1;
+        gbc.insets = new Insets(0, 2, 0, 0); // Slight left offset for text alignment
+        persistentStatus.add(lblStatus, gbc);
+
+        return persistentStatus;
     }
 
     // --- Bridge Methods for Main Script ---
     public boolean isScriptPaused() { return isScriptPaused; }
-    public DefaultListModel<Task> getQueueModel() { return queueModel; }
+    public DefaultListModel<Task> getTaskListModel() { return taskListModel; }
     public int getCurrentExecutionIndex() { return currentExecutionIndex; }
     public void setCurrentExecutionIndex(int i) { this.currentExecutionIndex = i; if(taskQueueList != null) taskQueueList.repaint(); }
     public void setLabelStatus(String text) { SwingUtilities.invokeLater(() -> lblStatus.setText(text)); }
 
     public void incrementExecutionIndex() {
-        if (currentExecutionIndex < queueModel.size() - 1) {
+        if (currentExecutionIndex < taskListModel.size() - 1) {
             currentExecutionIndex++;
         } else {
             currentExecutionIndex = 0;
@@ -177,7 +249,7 @@ public class DreamBotMenu extends JFrame {
         JLabel title = new JLabel("Task List");
 
         /// CENTER: Add the task queue list display to the center of the task list panel
-        taskQueueList = new JList<>(queueModel);
+        taskQueueList = new JList<>(taskListModel);
         taskQueueList.setCellRenderer(new TaskCellRenderer());
         styleJList(taskQueueList);
 
@@ -204,14 +276,14 @@ public class DreamBotMenu extends JFrame {
         lblStatus.setText("Status: Idle");
         lblStatus.setForeground(TEXT_MAIN);
 
-        statusProgress.setPreferredSize(new Dimension(statusProgress.getPreferredSize().width, 20));
-        statusProgress.setForeground(new Color(0, 120, 120));
-        statusProgress.setBackground(new Color(20, 20, 20));
-        statusProgress.setBorderPainted(false);
-
-        // add status label/progress bar
-        southTaskList.add(lblStatus);     // Row 1
-        southTaskList.add(statusProgress); // Row 2
+//        statusProgress.setPreferredSize(new Dimension(statusProgress.getPreferredSize().width, 20));
+//        statusProgress.setForeground(new Color(0, 120, 120));
+//        statusProgress.setBackground(new Color(20, 20, 20));
+//        statusProgress.setBorderPainted(false);
+//
+//        // add status label/progress bar
+//        southTaskList.add(lblStatus);     // Row 1
+//        southTaskList.add(statusProgress); // Row 2
 
 //        // create the presets panel
 //        JPanel panelPresets = new JPanel(new GridLayout(1, 4, 5, 0));
@@ -279,12 +351,29 @@ public class DreamBotMenu extends JFrame {
         GridBagConstraints g = new GridBagConstraints(); g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0; g.insets = new Insets(5, 5, 5, 5);
         taskNameInput = new JTextField(25); taskDescInput = new JTextField(25); taskStatusInput = new JTextField(25);
         styleComp(taskNameInput); styleComp(taskDescInput); styleComp(taskStatusInput);
-        g.gridy = 0; left.add(new JLabel("Task Name:"), g); g.gridy = 1; left.add(taskNameInput, g);
-        g.gridy = 2; left.add(new JLabel("Description:"), g); g.gridy = 3; left.add(taskDescInput, g);
-        g.gridy = 4; left.add(new JLabel("Status:"), g); g.gridy = 5; left.add(taskStatusInput, g);
-        JButton btnR = createStyledBtn("Reset Task-set", new Color(50, 50, 50));
-        btnR.addActionListener(e -> { taskNameInput.setText(""); taskDescInput.setText(""); taskStatusInput.setText(""); builderActionModel.clear(); });
-        g.gridy = 6; g.insets = new Insets(20, 5, 5, 5); left.add(btnR, g);
+        g.gridy = 0;
+        left.add(new JLabel("Task Name:"), g);
+
+        g.gridy = 1;
+        left.add(taskNameInput, g);
+
+        g.gridy = 2;
+        left.add(new JLabel("Description:"), g);
+
+        g.gridy = 3;
+        left.add(taskDescInput, g);
+
+        g.gridy = 4;
+        left.add(new JLabel("Status:"), g);
+
+        g.gridy = 5;
+        left.add(taskStatusInput, g);
+
+        JButton btnR = createStyledBtn("Reset", new Color(50, 50, 50));
+        btnR.addActionListener(e -> resetTaskBuilder());
+        g.gridy = 6;
+        g.insets = new Insets(20, 5, 5, 5);
+        left.add(btnR, g);
 
         JPanel center = new JPanel(new BorderLayout(5, 5)); center.setOpaque(false);
         JLabel setLabel = new JLabel("Task-Set", SwingConstants.CENTER);
@@ -292,20 +381,33 @@ public class DreamBotMenu extends JFrame {
         JList<Action> bActions = new JList<>(builderActionModel); styleJList(bActions);
         JButton btnAddLib = createStyledBtn("Add to Library", new Color(0, 100, 0));
         btnAddLib.addActionListener(e -> {
-            List<Action> acts = new ArrayList<>(); for(int i=0; i<builderActionModel.size(); i++) acts.add(builderActionModel.get(i));
+            List<Action> acts = new ArrayList<>();
+            for(int i=0; i<builderActionModel.size(); i++)
+                acts.add(builderActionModel.get(i));
             libraryModel.addElement(new Task(taskNameInput.getText(), taskDescInput.getText(), acts, taskStatusInput.getText()));
+            resetTaskBuilder();
         });
         center.add(setLabel, BorderLayout.NORTH); center.add(new JScrollPane(bActions), BorderLayout.CENTER); center.add(btnAddLib, BorderLayout.SOUTH);
 
         JPanel right = new JPanel(new BorderLayout(0, 10)); right.setOpaque(false);
         JPanel config = new JPanel(new GridLayout(0, 1, 2, 5)); config.setOpaque(false);
         actionCombo = new JComboBox<>(ActionType.values()); styleComp(actionCombo);
-        actionCombo.addActionListener(e -> fetchDynamicTargets());
+        actionCombo.addActionListener(e -> scanNearbyTargets());
         manualTargetInput = new JTextField(); styleComp(manualTargetInput);
-        config.add(new JLabel("Select Action:")); config.add(actionCombo);
-        config.add(new JLabel("Target Name:")); config.add(manualTargetInput);
+        config.add(new JLabel("Select Action:"));
+        config.add(actionCombo);
+        config.add(new JLabel("Target Name:"));
+        config.add(manualTargetInput);
+
         JButton btnAddAct = createStyledBtn("Add", ACCENT_ORANGE);
-        btnAddAct.addActionListener(e -> { if(!manualTargetInput.getText().isEmpty()) builderActionModel.addElement(new Action((ActionType)actionCombo.getSelectedItem(), manualTargetInput.getText())); });
+        btnAddAct.addActionListener(e -> {
+            if(!manualTargetInput.getText().isEmpty())
+                builderActionModel.addElement(
+                        new Action((ActionType) actionCombo.getSelectedItem(), manualTargetInput.getText())
+                );
+            else
+                showToast("Invalid target set!", manualTargetInput);
+        });
         config.add(btnAddAct);
 
         nearbyEntitiesList = new JList<>(nearbyEntitiesModel); styleJList(nearbyEntitiesList);
@@ -333,14 +435,49 @@ public class DreamBotMenu extends JFrame {
         return p;
     }
 
-    private void fetchDynamicTargets() {
+    private void resetTaskBuilder() {
+        taskNameInput.setText("");
+        taskDescInput.setText("");
+        taskStatusInput.setText("");
+        builderActionModel.clear();
+        scanNearbyTargets();
+    }
+
+    private void scanNearbyTargets() {
         ActionType type = (ActionType) actionCombo.getSelectedItem();
         nearbyEntitiesModel.clear();
-        Set<String> names = new HashSet<>();
-        if (type == ActionType.ATTACK) names = NPCs.all().stream().filter(n -> n != null && n.hasAction("Attack")).map(n -> n.getName()).collect(Collectors.toSet());
-        else if (type == ActionType.CHOP) names = GameObjects.all().stream().filter(o -> o != null && o.hasAction("Chop down")).map(o -> o.getName()).collect(Collectors.toSet());
-        else if (type == ActionType.MINE) names = GameObjects.all().stream().filter(o -> o != null && o.hasAction("Mine")).map(o -> o.getName()).collect(Collectors.toSet());
-        else names = NPCs.all().stream().filter(Objects::nonNull).map(n -> n.getName()).collect(Collectors.toSet());
+        Set<String> names;
+
+        switch (Objects.requireNonNull(type)) {
+            case ATTACK:
+                names = NPCs.all().stream()
+                    .filter(n -> n.hasAction("Attack"))
+                    .map(NPC::getName)
+                    .collect(Collectors.toSet());
+                break;
+
+            case CHOP:
+                names = GameObjects.all().stream()
+                    .filter(o -> o.hasAction("Chop down"))
+                    .map(GameObject::getName)
+                    .collect(Collectors.toSet());
+                break;
+
+            case MINE:
+                names = GameObjects.all().stream()
+                    .filter(o -> o.hasAction("Mine"))
+                    .map(GameObject::getName)
+                    .collect(Collectors.toSet());
+                break;
+
+            default:
+                // Fallback for actions like TALK_TO or BANK that aren't explicitly filtered
+                names = NPCs.all().stream()
+                    .map(NPC::getName)
+                    .collect(Collectors.toSet());
+                break;
+        }
+
         names.stream().sorted().forEach(nearbyEntitiesModel::addElement);
     }
 
@@ -406,15 +543,56 @@ public class DreamBotMenu extends JFrame {
     }
 
     public static class Action {
-        public ActionType type; public String target;
-        public Action(ActionType t, String target) { this.type = t; this.target = target; }
+        public ActionType type;
+        public String target;
+
+        public Action(ActionType t, String target) {
+            this.type = t;
+            this.target = target;
+        }
+
+        //TODO copy how CHOP has been done then extract out into their own action classes maybe?
         public boolean execute() {
             switch (type) {
-                case CHOP: return GameObjects.closest(target) != null && GameObjects.closest(target).interact("Chop down");
-                case ATTACK: return NPCs.closest(target) != null && NPCs.closest(target).interact("Attack");
-                case BANK: return org.dreambot.api.methods.container.impl.bank.Bank.open();
-                case MINE: return GameObjects.closest(target) != null && GameObjects.closest(target).interact("Mine");
-                default: Logger.log("Action " + type + " not implemented in Action.execute()"); return false;
+                case CHOP:
+                    // find the nearest target tree
+                    GameObject tree = GameObjects.closest(target);
+                    // return early if no nearby trees
+                    if (tree == null) {
+                        Logger.log(Logger.LogType.ERROR, "Unable to find a tree!");
+                        return false;
+                    }
+                    // attempt to chop the tree down
+                    return tree.interact("Chop down");
+
+                case ATTACK:
+                    // find the nearest target npc
+                    NPC npc = NPCs.closest(target);
+
+                    // return early if no npcs found
+                    if (npc == null) {
+                        Logger.log(Logger.LogType.ERROR, "Unable to find a npc!");
+                        return false;
+                    }
+
+                    // attempt to attack the target npc
+                    return  npc.interact("Attack");
+
+                case BANK:
+                    return org.dreambot.api.methods.container.impl.bank.Bank.open();
+
+                case MINE:
+                    return GameObjects.closest(target) != null && GameObjects.closest(target).interact("Mine");
+
+                case TALK_TO:
+                    return NPCs.closest(target) != null && NPCs.closest(target).interact("Talk-to");
+
+                case DROP:
+                    return org.dreambot.api.methods.container.impl.Inventory.dropAll(target);
+
+                default:
+                    Logger.log("Action " + type + " not implemented in Action.execute()");
+                    return false;
             }
         }
         @Override public String toString() { return type.name() + " -> " + target; }
@@ -455,26 +633,29 @@ public class DreamBotMenu extends JFrame {
         /// CENTER EAST: Edit panel + buttons
         // create the main two panels for this section
         JPanel panelCenterEastLibraryTab = new JPanel(new BorderLayout(0, 10));
-        JPanel btnSection = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JPanel btnSection = new JPanel(new BorderLayout());
 
         // make adjustments to these panels
         panelCenterEastLibraryTab.setOpaque(false);
         btnSection.setOpaque(false);
 
         // create queue button
-        JButton btnQueue = createStyledBtn("Queue", new Color(0, 100, 0));
-        btnQueue.addActionListener(e -> {
-            if(libraryList.getSelectedValue() != null)
-                queueModel.addElement(new Task(libraryList.getSelectedValue()));
+        JButton btnAddToQueue = createStyledBtn("Add task", new Color(0, 100, 0));
+        btnAddToQueue.addActionListener(e -> {
+            if(libraryList.getSelectedValue() != null) {
+                taskListModel.addElement(new Task(libraryList.getSelectedValue()));
+                // attach a floating toast to the add button for the users information
+                showToast("Added task to queue!", btnAddToQueue);
+            }
         });
         // add queue button to the button section
-        btnSection.add(btnQueue);
+        btnSection.add(btnAddToQueue, BorderLayout.WEST);
 
         // create save button
         JButton btnSave = createStyledBtn("Save", new Color(100, 100, 0));
         btnSave.addActionListener(e -> dataMan.saveTaskLibrary(libraryList));
         // add save button to the button section
-        btnSection.add(btnSave);
+        btnSection.add(btnSave, BorderLayout.EAST);
 
         // complete the center east section by merging library editor with button section (top/bottom stacked)
         panelCenterEastLibraryTab.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER);
@@ -487,8 +668,134 @@ public class DreamBotMenu extends JFrame {
         // return the completed library tab
         return panelLibraryTab;
     }
-    private void initializeGenericLibrary() { libraryModel.addElement(new Task("Woodcutter", "Chops Trees", Arrays.asList(new Action(ActionType.CHOP, "Tree")), "Chopping...")); }
-    private void loadIntoBuilder(Task t) { if(t == null) return; taskNameInput.setText(t.name); taskDescInput.setText(t.description); taskStatusInput.setText(t.status); builderActionModel.clear(); t.actions.forEach(builderActionModel::addElement); }
+
+    public void showToast(String message, JComponent anchor) {
+        // 1. Find the location of the button relative to the entire window
+        Point location = SwingUtilities.convertPoint(anchor, 0, 0, getLayeredPane());
+
+        // 2. Center the toast horizontally over the button and push it up 30px
+        int x = location.x + (anchor.getWidth() / 2);
+        int y = location.y - 30;
+
+        Toast toast = new Toast(message, x, y);
+        getLayeredPane().add(toast, JLayeredPane.POPUP_LAYER);
+        getLayeredPane().revalidate();
+    }
+
+    public String getPlayerName() {
+        return Players.getLocal().getName();
+    }
+
+    private void loadTaskList() {
+        new Thread(() -> {
+            // Use the method from your DataMan class to get the raw JSON
+            String rawJson = dataMan.loadDataByPlayer("tasks");
+            SwingUtilities.invokeLater(() -> {
+                if (rawJson != null)
+                    unpackTaskList(rawJson);
+            });
+        }).start();
+    }
+
+    private void loadTaskLibrary() {
+//        // load some default tasks as examples
+//        libraryModel.addElement(new Task("Tree Cutter", "Chops Trees", Arrays.asList(new Action(ActionType.CHOP, "Tree")), "Chopping tree..."));
+//        libraryModel.addElement(new Task("Oak Cutter", "Chops Oak Trees", Arrays.asList(new Action(ActionType.CHOP, "Oak tree")), "Chopping oak tree..."));
+//        libraryModel.addElement(new Task("Guard Killer", "Attacks nearby guards", Arrays.asList(new Action(ActionType.ATTACK, "Guard")), "Chopping oak tree..."));
+//        libraryModel.addElement(new Task("Imp Killer", "Attacks nearby imps", Arrays.asList(new Action(ActionType.ATTACK, "Imp")), "Chopping oak tree..."));
+        new Thread(() -> {
+            // Use the method from your DataMan class to get the raw JSON
+            String rawJson = dataMan.loadDataByPlayer("library");
+            SwingUtilities.invokeLater(() -> {
+                if (rawJson != null)
+                    unpackTaskLibrary(rawJson);
+            });
+        }).start();
+    }
+
+    private void unpackTaskList(String json) {
+        if (json == null || json.isEmpty() || json.equals("[]")) {
+            Logger.log("No task list data found to unpack.");
+            return;
+        }
+
+        try {
+            Gson gson = new Gson();
+
+            // 1. Supabase returns a List of Objects. Define that type.
+            // We are looking for: List<Map<String, Map<String, Task>>>
+            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, Map<String, Task>>>>(){}.getType();
+            List<Map<String, Map<String, Task>>> responseList = gson.fromJson(json, wrapperType);
+
+            if (responseList != null && !responseList.isEmpty()) {
+                // 2. Get the "library" map from the first result
+                Map<String, Task> fetchedTasks = responseList.get(0).get("library");
+
+                if (fetchedTasks != null) {
+                    // 3. Update the UI on the Swing thread
+                    SwingUtilities.invokeLater(() -> {
+                        taskListModel.clear();
+                        for (Task task : fetchedTasks.values()) {
+                            // Because GSON uses the Task constructor, these are
+                            // now real objects with executable action lists.
+                            taskListModel.addElement(task);
+                        }
+                        Logger.log("Successfully loaded " + taskListModel.size() + " tasks into the task list.");
+                    });
+                }
+            }
+        } catch (Exception e) {
+            Logger.log(Logger.LogType.ERROR, "Failed to unpack library: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void unpackTaskLibrary(String json) {
+        if (json == null || json.isEmpty() || json.equals("[]")) {
+            Logger.log("No library data found to unpack.");
+            return;
+        }
+
+        try {
+            Gson gson = new Gson();
+
+            // 1. Supabase returns a List of Objects. Define that type.
+            // We are looking for: List<Map<String, Map<String, Task>>>
+            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, Map<String, Task>>>>(){}.getType();
+            List<Map<String, Map<String, Task>>> responseList = gson.fromJson(json, wrapperType);
+
+            if (responseList != null && !responseList.isEmpty()) {
+                // 2. Get the "library" map from the first result
+                Map<String, Task> fetchedLibrary = responseList.get(0).get("library");
+
+                if (fetchedLibrary != null) {
+                    // 3. Update the UI on the Swing thread
+                    SwingUtilities.invokeLater(() -> {
+                        libraryModel.clear();
+                        for (Task task : fetchedLibrary.values()) {
+                            // Because GSON uses the Task constructor, these are
+                            // now real objects with executable action lists.
+                            libraryModel.addElement(task);
+                        }
+                        Logger.log("Successfully loaded " + libraryModel.size() + " tasks into the library.");
+                    });
+                }
+            }
+        } catch (Exception e) {
+            Logger.log(Logger.LogType.ERROR, "Failed to unpack library: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void loadIntoBuilder(Task t) {
+        if(t == null)
+            return;
+
+        taskNameInput.setText(t.name);
+        taskDescInput.setText(t.description);
+        taskStatusInput.setText(t.status);
+        builderActionModel.clear(); t.actions.forEach(builderActionModel::addElement);
+    }
 
     private JPanel createHeaderPanel() {
         JPanel header = new JPanel(new BorderLayout());
@@ -544,7 +851,7 @@ public class DreamBotMenu extends JFrame {
     private void styleHeaderLabel(JLabel l) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.BOLD, 15)); l.setHorizontalAlignment(SwingConstants.RIGHT); }
     private void styleSpinner(JSpinner s) { JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField(); field.setBackground(new Color(30, 30, 30)); field.setForeground(ACCENT_BLOOD); s.setBorder(new LineBorder(BORDER_DIM)); }
     private JButton createIconButton(String symbol, String tooltip, ActionListener action) { JButton btn = new JButton(symbol); btn.setPreferredSize(new Dimension(40, 40)); btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18)); btn.setBackground(new Color(30, 0, 0)); btn.setForeground(ACCENT_BLOOD); btn.addActionListener(action); return btn; }
-    private void shiftQueue(int dir) { int idx = taskQueueList.getSelectedIndex(); if (idx == -1 || idx+dir < 0 || idx+dir >= queueModel.size()) return; Task t = queueModel.remove(idx); queueModel.add(idx+dir, t); taskQueueList.setSelectedIndex(idx+dir); }
+    private void shiftQueue(int dir) { int idx = taskQueueList.getSelectedIndex(); if (idx == -1 || idx+dir < 0 || idx+dir >= taskListModel.size()) return; Task t = taskListModel.remove(idx); taskListModel.add(idx+dir, t); taskQueueList.setSelectedIndex(idx+dir); }
     private void styleComp(JComponent c) { c.setBackground(PANEL_SURFACE); c.setForeground(TEXT_MAIN); if(c instanceof JTextField) ((JTextField)c).setCaretColor(ACCENT_BLOOD); }
     private void styleJList(JList<?> l) { l.setBackground(PANEL_SURFACE); l.setForeground(TEXT_MAIN); l.setSelectionBackground(TAB_SELECTED); }
     private JButton createStyledBtn(String t, Color c) { JButton b = new JButton(t); b.setBackground(c); b.setForeground(Color.WHITE); b.setFocusPainted(false); b.setBorder(new LineBorder(BORDER_DIM)); return b; }
@@ -614,41 +921,25 @@ public class DreamBotMenu extends JFrame {
     private void updateAll() { int projH = (int) projectionSpinner.getValue(); long tXp = 0; int tLg = 0; int p2pTotal = 0; int f2pTotal = 0; for (SkillData data : skillRegistry.values()) { int xp = Skills.getExperience(data.skill); int lvl = Skills.getRealLevel(data.skill); data.update(xp, lvl, startTime, projH); p2pTotal += lvl; if (F2P_SKILLS.contains(data.skill)) f2pTotal += lvl; if (data.isTracking) { tXp += Math.max(0, (xp - data.startXP)); tLg += Math.max(0, (lvl - data.startLevel)); } } totalXpGainedLabel.setText("Total XP Gained: " + String.format("%,d", tXp)); totalLevelsGainedLabel.setText("Total Levels Gained: " + tLg); totalLevelLabel.setText(String.format("F2P Total: %d | P2P Total: %d", f2pTotal, p2pTotal)); if (Client.isLoggedIn() && Players.getLocal() != null) { lblUsername.setText(Players.getLocal().getName()); lblPassword.setText(Optional.ofNullable(Client.getPassword()).orElse("null")); lblWorld.setText("World " + (Worlds.getCurrent() != null ? Worlds.getCurrent().getWorld() : "?")); boolean isMember = Client.isMembers(); lblMemberText.setText(isMember ? "Member" : "Free-to-Play"); lblMemberIcon.setIcon(loadStatusIcon(isMember ? "Member_icon" : "Free-to-play_icon")); lblCharName.setText(Players.getLocal().getName()); lblCoords.setText(Players.getLocal().getTile().toString()); lblGameState.setText(Client.getGameState().name()); } }
     private class TaskCellRenderer extends DefaultListCellRenderer { @Override public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) { JLabel l = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus); if (index == currentExecutionIndex) { l.setBackground(TAB_SELECTED); l.setForeground(Color.WHITE); l.setText("▶ " + l.getText()); } return l; } }
     private class SkillData { final Skill skill; final JProgressBar mainBar = new JProgressBar(0, 100); final JLabel lblLevel = new JLabel("1"), lblXpString = new JLabel("0/0"); final JPanel trackerPanel = new JPanel(new GridLayout(0, 1, 2, 2)); final JLabel lblGained = new JLabel(), lblPerHour = new JLabel(), lblRemaining = new JLabel(), lblTTL = new JLabel(), lblProj = new JLabel(), lblActs = new JLabel(); final int startXP, startLevel; boolean isTracking = false; SkillData(Skill s) { this.skill = s; this.startXP = Skills.getExperience(s); this.startLevel = Skills.getRealLevel(s); trackerPanel.setBackground(new Color(30, 30, 30)); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + s.name() + " "); b.setTitleColor(ACCENT_BLOOD); trackerPanel.setBorder(b); JLabel[] ls = {lblGained, lblPerHour, lblRemaining, lblActs, lblTTL, lblProj}; for (JLabel l : ls) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.PLAIN, 12)); trackerPanel.add(l); } } void update(int curXp, int curLvl, long start, int ph) { int curMin = Skills.getExperienceForLevel(curLvl), curMax = Skills.getExperienceForLevel(curLvl + 1); lblLevel.setText(String.valueOf(curLvl)); lblXpString.setText(String.format("%,d / %,d XP", curXp, curMax)); mainBar.setValue((int) (((double)(curXp - curMin) / Math.max(1, curMax - curMin)) * 100)); long elapsed = System.currentTimeMillis() - start; int xph = (int) (Math.max(0, curXp - startXP) / Math.max(0.0001, elapsed / 3600000.0)); int rem = Math.max(0, curMax - curXp); lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP)); lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph)); lblRemaining.setText(" TO LEVEL: " + String.format("%,d", rem)); if (xph > 0) { lblTTL.setText(String.format(" TIME TO L: %.2f hrs", (double) rem / xph)); lblProj.setText(String.format(" PROJ (%dH): Lvl %d", ph, curLvl + (xph * ph / 100000))); } } }
-    /**
-     * Converts the current Task Queue or Library into a JSON string.
-     */
-    private String listToJson(DefaultListModel<Task> model) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < model.size(); i++) {
-            Task t = model.get(i);
-            sb.append("{")
-                    .append("\"name\":\"").append(t.name).append("\",")
-                    .append("\"desc\":\"").append(t.description).append("\",")
-                    .append("\"status\":\"").append(t.status).append("\",")
-                    .append("\"actions\":[");
-            for (int j = 0; j < t.actions.size(); j++) {
-                Action a = t.actions.get(j);
-                sb.append("{\"type\":\"").append(a.type).append("\",\"target\":\"").append(a.target).append("\"}");
-                if (j < t.actions.size() - 1) sb.append(",");
-            }
-            sb.append("]}");
-            if (i < model.size() - 1) sb.append(",");
-        }
-        return sb.append("]").toString();
-    }
 
-    private String packagePreset(int slotIndex) {
-        String name = presetButtons[slotIndex - 1].getText();
+//    // Replace your old listToJson with this one-liner approach
+//    private String modelToJson(DefaultListModel<Task> model) {
+//        List<Task> list = Collections.list(model.elements());
+//        return new Gson().toJson(list);
+//    }
 
-        // Safety check: if the queue is empty, package an empty array string
-        String taskData = queueModel.isEmpty() ? "[]" : listToJson(queueModel);
-
-        // We must escape the internal quotes of the taskData so it fits inside the preset object
-        String escapedData = taskData.replace("\"", "\\\"");
-
-        // Construct the JSON slot object
-        return "{\"name\":\"" + name + "\", \"data\":\"" + escapedData + "\"}";
-    }
+//    private String packagePreset(int slotIndex) {
+//        String name = presetButtons[slotIndex - 1].getText();
+//
+//        // Safety check: if the queue is empty, package an empty array string
+//        String taskData = queueModel.isEmpty() ? "[]" : modelToJson(queueModel);
+//
+//        // We must escape the internal quotes of the taskData so it fits inside the preset object
+//        String escapedData = taskData.replace("\"", "\\\"");
+//
+//        // Construct the JSON slot object
+//        return "{\"name\":\"" + name + "\", \"data\":\"" + escapedData + "\"}";
+//    }
 
 //    private void savePresets() {
 //        StringBuilder fullJson = new StringBuilder("{");
@@ -723,35 +1014,35 @@ public class DreamBotMenu extends JFrame {
 //            }
 //        });
 //    }
-
-    private void rebuildTasksFromJson(String json, DefaultListModel<Task> model) {
-        model.clear();
-        try {
-            // Regex to find each Task block: {"name":"...","desc":"...","status":"...","actions":[...]}
-            java.util.regex.Pattern taskPat = java.util.regex.Pattern.compile("\\{\"name\":\"(.*?)\",\"desc\":\"(.*?)\",\"status\":\"(.*?)\",\"actions\":\\[(.*?)\\]\\}");
-            java.util.regex.Matcher taskMat = taskPat.matcher(json);
-
-            while (taskMat.find()) {
-                String name = taskMat.group(1);
-                String desc = taskMat.group(2);
-                String status = taskMat.group(3);
-                String actionsRaw = taskMat.group(4);
-
-                List<Action> actions = new ArrayList<>();
-                // Regex to find each Action block: {"type":"...","target":"..."}
-                java.util.regex.Pattern actPat = java.util.regex.Pattern.compile("\\{\"type\":\"(.*?)\",\"target\":\"(.*?)\"\\}");
-                java.util.regex.Matcher actMat = actPat.matcher(actionsRaw);
-
-                while (actMat.find()) {
-                    ActionType type = ActionType.valueOf(actMat.group(1));
-                    String target = actMat.group(2);
-                    actions.add(new Action(type, target));
-                }
-
-                model.addElement(new Task(name, desc, actions, status));
-            }
-        } catch (Exception e) {
-            Logger.log("Parsing error: " + e.getMessage());
-        }
-    }
+//
+//    private void rebuildTasksFromJson(String json, DefaultListModel<Task> model) {
+//        model.clear();
+//        try {
+//            // Regex to find each Task block: {"name":"...","desc":"...","status":"...","actions":[...]}
+//            java.util.regex.Pattern taskPat = java.util.regex.Pattern.compile("\\{\"name\":\"(.*?)\",\"desc\":\"(.*?)\",\"status\":\"(.*?)\",\"actions\":\\[(.*?)\\]\\}");
+//            java.util.regex.Matcher taskMat = taskPat.matcher(json);
+//
+//            while (taskMat.find()) {
+//                String name = taskMat.group(1);
+//                String desc = taskMat.group(2);
+//                String status = taskMat.group(3);
+//                String actionsRaw = taskMat.group(4);
+//
+//                List<Action> actions = new ArrayList<>();
+//                // Regex to find each Action block: {"type":"...","target":"..."}
+//                java.util.regex.Pattern actPat = java.util.regex.Pattern.compile("\\{\"type\":\"(.*?)\",\"target\":\"(.*?)\"\\}");
+//                java.util.regex.Matcher actMat = actPat.matcher(actionsRaw);
+//
+//                while (actMat.find()) {
+//                    ActionType type = ActionType.valueOf(actMat.group(1));
+//                    String target = actMat.group(2);
+//                    actions.add(new Action(type, target));
+//                }
+//
+//                model.addElement(new Task(name, desc, actions, status));
+//            }
+//        } catch (Exception e) {
+//            Logger.log("Parsing error: " + e.getMessage());
+//        }
+//    }
 }

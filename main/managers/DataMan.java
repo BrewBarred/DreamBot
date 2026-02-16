@@ -1,7 +1,6 @@
 package main.managers;
 
 import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 import main.menu.DreamBotMenu;
 import org.dreambot.api.Client;
 import org.dreambot.api.methods.interactive.Players;
@@ -9,13 +8,9 @@ import org.dreambot.api.utilities.Logger;
 
 import javax.swing.*;
 import java.io.*;
-import java.lang.reflect.Type;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * DataMan (Data Manager) handles all HTTP communication with the Supabase database.
@@ -48,10 +43,48 @@ public class DataMan {
 
     // --- Primary Public Methods ---
 
+    public void saveTaskList(JList<DreamBotMenu.Task> taskList) {
+        new Thread(() -> {
+            try {
+                String playerName = getValidPlayerName();
+                if (playerName == null) return;
+
+                Logger.log(Logger.LogType.INFO, "Saving " + playerName + "'s library list...");
+
+                // Convert JList items into a Map to preserve structure
+                Map<String, DreamBotMenu.Task> taskMap = new LinkedHashMap<>();
+                for (int i = 0; i < taskList.getModel().getSize(); i++) {
+                    DreamBotMenu.Task task = taskList.getModel().getElementAt(i);
+                    taskMap.put(task.getName(), task);
+                }
+
+                // Construct the JSON payload for Supabase
+                // Note: The key names must match your database column names exactly
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("username", playerName);
+                payload.put("tasks", taskMap);
+                payload.put("last_accessed", "now()");
+
+                String jsonBody = gson.toJson(payload);
+
+                // POST to Supabase (configured as UPSERT in setPropertiesHTTP)
+                boolean success = executeRequest(REQUEST_METHOD.POST, TABLE_URL, jsonBody);
+
+                if (success)
+                    Logger.log(Logger.LogType.INFO, "Save success!");
+
+            } catch (Exception e) {
+                Logger.log(Logger.LogType.ERROR, "Save error: " + e.getMessage());
+            }
+        }).start();
+    }
+
     /**
      * Uploads the current Task Library (Presets) to the database.
+     * <p>
      * Uses Supabase 'Upsert' logic to update the row if the username already exists.
-     * * @param libraryList The JList containing Task objects from the UI.
+     *
+     * @param libraryList The JList containing task library items
      */
     public void saveTaskLibrary(JList<DreamBotMenu.Task> libraryList) {
         new Thread(() -> {
@@ -89,20 +122,35 @@ public class DataMan {
         }).start();
     }
 
+    public void saveTaskList(DefaultListModel<DreamBotMenu.Task> model) {
+        try {
+            List<DreamBotMenu.Task> tasks = Collections.list(model.elements());
+
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("username", getValidPlayerName());
+            payload.put("tasks", tasks); // Gson handles the List -> JSON Array conversion
+
+            String jsonBody = gson.toJson(payload);
+            executeRequest(REQUEST_METHOD.POST, TABLE_URL, jsonBody);
+
+        } catch (Exception e) {
+            Logger.log(Logger.LogType.ERROR, "Save error: " + e.getMessage());
+        }
+    }
+
     /**
      * Retrieves specific data from the database for the current player.
      * * @param columnName The column to fetch (e.g., "presets", "settings").
      * @return The raw JSON response string or null if not found.
      */
-    public String loadPlayerData(String columnName) {
+    public String loadDataByPlayer(String columnName) {
         try {
             String playerName = getValidPlayerName();
-            if (playerName == null) return null;
+            if (playerName == null)
+                return null;
 
-            // Format: TABLE_URL?username=eq.PlayerName&select=columnName
             String encodedName = URLEncoder.encode(playerName, StandardCharsets.UTF_8.toString());
             String requestUrl = String.format("%s?username=eq.%s&select=%s", TABLE_URL, encodedName, columnName);
-
             return fetchRequest(requestUrl);
 
         } catch (Exception e) {
@@ -209,11 +257,13 @@ public class DataMan {
             Logger.log(Logger.LogType.ERROR, "Action failed: Player is not logged in.");
             return null;
         }
+
         String name = Players.getLocal().getName();
         if (name == null || name.isEmpty()) {
             Logger.log(Logger.LogType.ERROR, "Action failed: Could not retrieve player name.");
             return null;
         }
+
         return name;
     }
 }
