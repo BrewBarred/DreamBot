@@ -18,7 +18,6 @@ import org.dreambot.api.utilities.Logger;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import org.dreambot.api.wrappers.interactive.NPC;
 
-import javax.lang.model.element.Element;
 import javax.swing.*;
 import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
@@ -37,27 +36,33 @@ import java.util.stream.Collectors;
  */
 public class DreamBotMenu extends JFrame {
     //TODO SETTINGS:
+    ///  DEV Settings:
+    // --- Task ---
     boolean isTaskDescriptionRequired = false;
     boolean isTaskStatusRequired = false;
-
+    // --- State ---
+    private boolean isScriptPaused = true;
+    private boolean isUserInputAllowed = true;
+    private int currentExecutionIndex = 0;
 
     private final AbstractScript script;
     private final JPanel sidePanel;
 
-    // --- State ---
-    private boolean isScriptPaused = true;
-    private boolean isUserInputAllowed = true;
-    private boolean isCaptureEnabled = true;
-    private int currentExecutionIndex = 0;
+    private final Color COLOR_RED = new Color(100, 0, 0);
+    private final Color COLOR_GREEN = new Color(0, 100, 0);
 
     // --- Data & Presets ---
     private final DataMan dataMan = new DataMan();
     private final Map<Skill, SkillData> skillRegistry = new EnumMap<>(Skill.class);
-    private final DefaultListModel<Task> taskListModel = new DefaultListModel<>();
-    private final DefaultListModel<Task> libraryModel = new DefaultListModel<>();
+    private final DefaultListModel<Task> modelTaskList = new DefaultListModel<>();
+    
+    private final DefaultListModel<Task> modelTaskLibrary = new DefaultListModel<>();
+    private final JList<Task> listTaskLibrary = new JList<>(modelTaskLibrary);
+
     private final DefaultListModel<Action> modelTaskBuilder = new DefaultListModel<>();
-    private final DefaultListModel<String> nearbyEntitiesModel = new DefaultListModel<>();
     private final JList<Action> listTaskBuilder = new JList<>(modelTaskBuilder);
+
+    private final DefaultListModel<String> nearbyEntitiesModel = new DefaultListModel<>();
     private final List<List<Task>> presets = new ArrayList<>(Arrays.asList(new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>()));
 
     // --- UI Components ---
@@ -71,9 +76,9 @@ public class DreamBotMenu extends JFrame {
     private final JLabel lblStatus = new JLabel("Status: Idle");
     private final JSpinner projectionSpinner;
     private final long startTime;
-    private JButton btnCreateTask;
+    private JButton btnTaskBuilderCreateTask;
 
-    private JList<Task> taskQueueList, libraryList;
+    private JList<Task> listTaskList;
     private JList<String> nearbyList;
     private JTextArea libraryEditorArea, consoleArea;
     private JTextField taskNameInput, taskDescriptionInput, taskStatusInput, manualTargetInput, consoleSearch;
@@ -108,6 +113,7 @@ public class DreamBotMenu extends JFrame {
     private static final Set<Skill> F2P_SKILLS = new HashSet<>(Arrays.asList(Skill.ATTACK, Skill.STRENGTH, Skill.DEFENCE, Skill.RANGED, Skill.PRAYER, Skill.MAGIC, Skill.HITPOINTS, Skill.CRAFTING, Skill.MINING, Skill.SMITHING, Skill.FISHING, Skill.COOKING, Skill.FIREMAKING, Skill.WOODCUTTING, Skill.RUNECRAFTING));
 
     public DreamBotMenu(AbstractScript script) {
+
         this.script = script;
         this.startTime = System.currentTimeMillis();
         setTitle("DreamBotMan | DreamBot Manager v1");
@@ -257,20 +263,27 @@ public class DreamBotMenu extends JFrame {
 
     // --- Bridge Methods for Main Script ---
     public boolean isScriptPaused() { return isScriptPaused; }
-    public DefaultListModel<Task> getTaskListModel() { return taskListModel; }
+    public DefaultListModel<Task> getModelTaskList() { return modelTaskList; }
     public int getCurrentExecutionIndex() { return currentExecutionIndex; }
-    public void setCurrentExecutionIndex(int i) { this.currentExecutionIndex = i; if(taskQueueList != null) taskQueueList.repaint(); }
+
+    public void setCurrentExecutionIndex(int i) {
+        this.currentExecutionIndex = i;
+        if(listTaskList != null)
+            listTaskList.repaint();
+    }
+
     public void setLabelStatus(String text) { SwingUtilities.invokeLater(() -> lblStatus.setText(text)); }
 
     public void incrementExecutionIndex() {
-        if (currentExecutionIndex < taskListModel.size() - 1) {
+        if (currentExecutionIndex < modelTaskList.size() - 1) {
             currentExecutionIndex++;
         } else {
             currentExecutionIndex = 0;
             isScriptPaused = true;
-            if (btnPlayPause != null) btnPlayPause.setText("▶");
+            if (btnPlayPause != null)
+                btnPlayPause.setText("▶");
         }
-        taskQueueList.repaint();
+        listTaskList.repaint();
     }
 
     private JLabel createSubtitle(String subtitle) {
@@ -295,9 +308,9 @@ public class DreamBotMenu extends JFrame {
         panelTaskList.setBackground(BG_BASE);
 
         /// CENTER: Add the task queue list display to the center of the task list panel
-        taskQueueList = new JList<>(taskListModel);
-        taskQueueList.setCellRenderer(new TaskCellRenderer());
-        styleJList(taskQueueList);
+        listTaskList = new JList<>(modelTaskList);
+        listTaskList.setCellRenderer(new TaskCellRenderer());
+        styleJList(listTaskList);
 
         /// WEST: Add up/down buttons to navigate through task list
         // create west panel
@@ -308,12 +321,12 @@ public class DreamBotMenu extends JFrame {
         JButton btnUp = createStyledBtn("▲", new Color(40, 40, 40));
         btnUp.addActionListener(e -> {
             boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
-            shiftQueue(-1, taskQueueList, taskListModel, shiftPressed);
+            shiftQueue(-1, listTaskList, modelTaskList, shiftPressed);
         });
         JButton btnDown = createStyledBtn("▼", new Color(40, 40, 40));
         btnDown.addActionListener(e -> {
             boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
-            shiftQueue(1, taskQueueList, taskListModel, shiftPressed);
+            shiftQueue(1, listTaskList, modelTaskList, shiftPressed);
         });
 
         // add navigation buttons (up/down arrows)
@@ -321,22 +334,13 @@ public class DreamBotMenu extends JFrame {
         west.add(btnDown);
 
         /// SOUTH: Add bottom panel and delete task button
-        // create south panel with 3 rows (Status, Progress, Buttons)
-        JPanel southTaskList = new JPanel(new GridLayout(3, 1, 0, 5));
-        southTaskList.setOpaque(false);
-
         // create status label/progress bar
         lblStatus.setText("Status: Idle");
         lblStatus.setForeground(TEXT_MAIN);
 
-//        statusProgress.setPreferredSize(new Dimension(statusProgress.getPreferredSize().width, 20));
-//        statusProgress.setForeground(new Color(0, 120, 120));
-//        statusProgress.setBackground(new Color(20, 20, 20));
-//        statusProgress.setBorderPainted(false);
-//
-//        // add status label/progress bar
-//        southTaskList.add(lblStatus);     // Row 1
-//        southTaskList.add(statusProgress); // Row 2
+        // create south panel with 3 rows (Status, Progress, Buttons)
+        JPanel southTaskList = new JPanel(new GridLayout(1, 3, 0, 5));
+        southTaskList.setOpaque(false);
 
 //        // create the presets panel
 //        JPanel panelPresets = new JPanel(new GridLayout(1, 4, 5, 0));
@@ -365,33 +369,46 @@ public class DreamBotMenu extends JFrame {
 //        JPanel panelButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
 //        panelButtons.setOpaque(false);
 //
-//        // create add load button
-//        JButton btnLoad = createStyledBtn("Load", ACCENT_BLOOD);
-//        btnLoad.addActionListener(e -> loadIntoBuilder(taskQueueList.getSelectedValue()));
-//        // add load button
-//        panelButtons.add(btnLoad);
-//
-//        JPanel panelControls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-//        panelControls.setOpaque(false);
-//        panelControls.setBackground(PANEL_SURFACE);
-//        panelControls.add(panelPresets, BorderLayout.WEST);
-//        panelControls.add(panelButtons, BorderLayout.EAST);
-//
-//        // create remove button
-//        JButton btnRemove = createStyledBtn("Remove", new Color(100, 0, 0));
-//        btnRemove.addActionListener(e -> {
-//            if(taskQueueList.getSelectedIndex() != -1) queueModel.remove(taskQueueList.getSelectedIndex());
-//        });
-//        // add remove button
-//        panelButtons.add(btnRemove);
-//
-//        // add the button row to the bottom of the south panel
-//        southTaskList.add(panelButtons); // Row 3
+
+        ///  Create Task List edit button
+        JButton btnTaskListEdit = createStyledBtn("Edit", new Color(100, 100, 0));
+        btnTaskListEdit.addActionListener(e -> {
+            loadIntoBuilder(listTaskList.getSelectedValue());
+        });
+
+        ///  Create Task List delete button
+        JButton btnTaskListRemove = createStyledBtn("Remove", new Color(100, 0, 0));
+        btnTaskListRemove.setEnabled(listTaskList.getSelectedIndex() != -1);
+        btnTaskListRemove.addActionListener(e -> {
+            int selectedIndex = listTaskList.getSelectedIndex();
+            if (selectedIndex != -1) {
+                modelTaskLibrary.remove(selectedIndex);
+                showToast("Removed task!", btnTaskListRemove, true);
+            } else {
+                showToast("Select a Task to remove!", btnTaskListRemove, false);
+            }
+        });
+
+        listTaskList.addListSelectionListener(e -> {
+            btnTaskListRemove.setEnabled(!listTaskLibrary.isSelectionEmpty());
+        });
+
+        ///  Create Task List save button
+        JButton btnTaskListSave = createStyledBtn("Save", new Color(100, 100, 0));
+        btnTaskListSave.addActionListener(e -> {
+            dataMan.saveTaskLibrary(listTaskLibrary);
+            showToast("Saving...", btnTaskListSave, true);
+        });
+
+        ///  Add all buttons
+        southTaskList.add(btnTaskListEdit);
+        southTaskList.add(btnTaskListRemove);
+        southTaskList.add(btnTaskListSave);
 
         // add all panels to the main panel (task list panel)
         panelTaskList.add(createSubtitle("Task List"), BorderLayout.NORTH);
         panelTaskList.add(west, BorderLayout.WEST);
-        panelTaskList.add(new JScrollPane(taskQueueList), BorderLayout.CENTER);
+        panelTaskList.add(new JScrollPane(listTaskList), BorderLayout.CENTER);
         panelTaskList.add(southTaskList, BorderLayout.SOUTH);
 
         return panelTaskList;
@@ -406,13 +423,13 @@ public class DreamBotMenu extends JFrame {
         JButton btnUp = createStyledBtn("▲", new Color(40, 40, 40));
         btnUp.addActionListener(e -> {
             boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
-            shiftQueue(-1, libraryList, libraryModel, shiftPressed);
+            shiftQueue(-1, listTaskLibrary, modelTaskLibrary, shiftPressed);
         });
 
         JButton btnDown = createStyledBtn("▼", new Color(40, 40, 40));
         btnDown.addActionListener(e -> {
             boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
-            shiftQueue(1, libraryList, libraryModel, shiftPressed);
+            shiftQueue(1, listTaskLibrary, modelTaskLibrary, shiftPressed);
         });
 
         JPanel panelNavButtons = new JPanel(new GridLayout(0, 1, 0, 5));
@@ -425,43 +442,69 @@ public class DreamBotMenu extends JFrame {
         centerContent.setOpaque(false);
 
         /// CENTER WEST: Library list
-        libraryList = new JList<>(libraryModel);
-        styleJList(libraryList);
+        styleJList(listTaskLibrary);
         libraryEditorArea = new JTextArea();
         libraryEditorArea.setBackground(new Color(15, 15, 15));
         libraryEditorArea.setForeground(TEXT_MAIN);
 
-        libraryList.addListSelectionListener(e -> {
-            Task t = libraryList.getSelectedValue();
+        listTaskLibrary.addListSelectionListener(e -> {
+            Task t = listTaskLibrary.getSelectedValue();
             if (t != null) libraryEditorArea.setText(t.getEditableString());
         });
 
         /// CENTER EAST: Edit panel + buttons
         JPanel panelCenterEastLibraryTab = new JPanel(new BorderLayout(0, 10));
-        JPanel btnSection = new JPanel(new BorderLayout());
+        JPanel btnSection = new JPanel(new FlowLayout(FlowLayout.CENTER, 30, 20));
         panelCenterEastLibraryTab.setOpaque(false);
         btnSection.setOpaque(false);
 
-        JButton btnAddTask = createStyledBtn("Add task", new Color(0, 100, 0));
-        btnAddTask.addActionListener(e -> {
-            if(libraryList.getSelectedValue() != null) {
-                taskListModel.addElement(new Task(libraryList.getSelectedValue()));
-                showToast("Added to index " + libraryModel.size() + " of the queue!", btnAddTask);
+        ///  Create Task Library add button
+        JButton btnTaskLibraryAdd = createStyledBtn("Add", new Color(0, 100, 0));
+        btnTaskLibraryAdd.addActionListener(e -> {
+            if(listTaskLibrary.getSelectedValue() != null) {
+                modelTaskList.addElement(listTaskLibrary.getSelectedValue());
+                showToast("Added to position " + modelTaskList.size() + " of the queue", btnTaskLibraryAdd, true);
             }
         });
-        btnSection.add(btnAddTask, BorderLayout.WEST);
 
-        JButton btnSave = createStyledBtn("Save", new Color(100, 100, 0));
-        btnSave.addActionListener(e -> {
-            dataMan.saveTaskLibrary(libraryList);
-            showToast("Saving...", btnSave);
+        ///  Create Task Library delete button
+        JButton btnTaskLibraryDelete = createStyledBtn("Delete", new Color(100, 0, 0));
+        btnTaskLibraryDelete.setEnabled(listTaskLibrary.getSelectedIndex() != -1);
+        btnTaskLibraryDelete.addActionListener(e -> {
+            if (!btnTaskLibraryDelete.isEnabled()) {
+                showToast("Add actions first!", btnTaskLibraryDelete, false);
+                return;
+            }
+
+            int selectedIndex = listTaskLibrary.getSelectedIndex();
+            if (selectedIndex != -1) {
+                modelTaskLibrary.remove(selectedIndex);
+                showToast("Deleted Task!", btnTaskLibraryDelete, true);
+            } else {
+                showToast("Select an Action to delete!", btnTaskLibraryDelete, false);
+            }
         });
-        btnSection.add(btnSave, BorderLayout.EAST);
+
+        listTaskLibrary.addListSelectionListener(e -> {
+            btnTaskLibraryDelete.setEnabled(!listTaskLibrary.isSelectionEmpty());
+        });
+
+        ///  Create Task Library save button
+        JButton btnTaskLibrarySave = createStyledBtn("Save", new Color(100, 100, 0));
+        btnTaskLibrarySave.addActionListener(e -> {
+            dataMan.saveTaskLibrary(listTaskLibrary);
+            showToast("Saving...", btnTaskLibrarySave, true);
+        });
+
+        ///  Add all buttons
+        btnSection.add(btnTaskLibraryAdd);
+        btnSection.add(btnTaskLibraryDelete);
+        btnSection.add(btnTaskLibrarySave);
 
         panelCenterEastLibraryTab.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER);
 
         // 4. Add both sections to the center wrapper
-        centerContent.add(new JScrollPane(libraryList));
+        centerContent.add(new JScrollPane(listTaskLibrary));
         centerContent.add(panelCenterEastLibraryTab);
 
         panelLibraryTab.add(createSubtitle("Task Library"), BorderLayout.NORTH);
@@ -474,8 +517,8 @@ public class DreamBotMenu extends JFrame {
             @Override
             public void componentShown(ComponentEvent e) {
                 scanNearbyTargets();
-                if (libraryList.getSelectedValue() == null && !modelTaskBuilder.isEmpty())
-                    libraryList.setSelectedIndex(0);
+                if (listTaskLibrary.getSelectedValue() == null && !modelTaskLibrary.isEmpty())
+                    listTaskLibrary.setSelectedIndex(modelTaskLibrary.getSize() - 1);
             }
         });
 
@@ -523,8 +566,8 @@ public class DreamBotMenu extends JFrame {
         g.gridy = 5;
         east.add(taskStatusInput, g);
 
-        btnCreateTask = createStyledBtn("Create task", new Color(0, 100, 0));
-        btnCreateTask.addActionListener(e -> {
+        btnTaskBuilderCreateTask = createStyledBtn("Create task", new Color(0, 100, 0));
+        btnTaskBuilderCreateTask.addActionListener(e -> {
             List<Action> actions = new ArrayList<>();
             for(int i = 0; i< modelTaskBuilder.size(); i++)
                 actions.add(modelTaskBuilder.get(i));
@@ -533,26 +576,26 @@ public class DreamBotMenu extends JFrame {
             if (task != null) {
                 boolean exists = false;
 
-                for (int i = 0; i < libraryModel.getSize(); i++) {
-                    if (libraryModel.getElementAt(i).getName().equalsIgnoreCase(task.getName())) {
+                for (int i = 0; i < modelTaskLibrary.getSize(); i++) {
+                    if (modelTaskLibrary.getElementAt(i).getName().equalsIgnoreCase(task.getName())) {
                         exists = true;
                         break;
                     }
                 }
 
                 if (!exists) {
-                    libraryModel.addElement(task);
+                    modelTaskLibrary.addElement(task);
                     resetTaskBuilder();
-                    showToast("Added to library!", btnCreateTask);
+                    showToast("Added to library!", btnTaskBuilderCreateTask, true);
                 } else {
-                    showToast("Task already exists!", btnCreateTask);
+                    showToast("Task already exists!", btnTaskBuilderCreateTask, false);
                 }
             }
         });
 
         g.gridy = 6;
         g.insets = new Insets(20, 5, 5, 5);
-        east.add(btnCreateTask, g);
+        east.add(btnTaskBuilderCreateTask, g);
 
         JPanel center = new JPanel(new BorderLayout(5, 5)); center.setOpaque(false);
         JLabel setLabel = new JLabel("Action List:", SwingConstants.CENTER);
@@ -579,15 +622,14 @@ public class DreamBotMenu extends JFrame {
 
         // create reset button to reset task builder inputs, ready for next task to be created
         JButton btnTaskBuilderRemove = createStyledBtn("Remove", new Color(100, 0, 0));
-        btnTaskBuilderRemove.setEnabled(false);
+        btnTaskBuilderRemove.setEnabled(listTaskBuilder.getSelectedIndex() != -1);
         btnTaskBuilderRemove.addActionListener(e -> {
             int selectedIndex = listTaskBuilder.getSelectedIndex();
             if (selectedIndex != -1) {
                 modelTaskBuilder.remove(selectedIndex);
-
-                showToast("Removed action!", btnTaskBuilderRemove);
+                showToast("Removed action!", btnTaskBuilderRemove, true);
             } else {
-                showToast("You must select an action first!", btnTaskBuilderRemove);
+                showToast("You must select an action first!", btnTaskBuilderRemove, false);
             }
         });
 
@@ -599,7 +641,7 @@ public class DreamBotMenu extends JFrame {
         JButton btnTaskBuilderReset = createStyledBtn("Reset", new Color(50, 50, 50));
         btnTaskBuilderReset.addActionListener(e -> {
             resetTaskBuilder();
-            showToast("Resetting...", btnTaskBuilderReset);
+            showToast("Resetting...", btnTaskBuilderReset, true);
         });
 
         JPanel panelActionButtons = new JPanel(new GridLayout(1, 2, 5, 5));
@@ -624,19 +666,21 @@ public class DreamBotMenu extends JFrame {
         config.add(new JLabel("Target Name:"));
         config.add(manualTargetInput);
 
-        JButton btnAddAct = createStyledBtn("Add", ACCENT_ORANGE);
-        btnAddAct.addActionListener(e -> {
+        JButton btnTaskBuilderAdd = createStyledBtn("Add", ACCENT_ORANGE);
+        btnTaskBuilderAdd.addActionListener(e -> {
             if(!manualTargetInput.getText().isEmpty()) {
                 modelTaskBuilder.addElement(
                         new Action((ActionType) actionCombo.getSelectedItem(), manualTargetInput.getText())
                 );
-                showToast("Added action!", manualTargetInput);
+                showToast("Added action!", btnTaskBuilderAdd, true);
             } else {
-                showToast("Enter a valid target!", manualTargetInput);
+                showToast("Enter a valid target!", btnTaskBuilderAdd, false);
             }
         });
-        config.add(btnAddAct);
+
+        config.add(btnTaskBuilderAdd);
         config.add(new JLabel("Nearby targets:"));
+
         nearbyList = new JList<>(nearbyEntitiesModel);
         styleJList(nearbyList);
         nearbyList.addMouseListener(new MouseAdapter() {
@@ -657,7 +701,7 @@ public class DreamBotMenu extends JFrame {
 
         JButton btnScanNearby = createStyledBtn("Refresh list", new Color(40,40,40));
         btnScanNearby.addActionListener(e -> {
-            showToast("Scanning...",  btnScanNearby);
+            showToast("Scanning for nearby targets...",  btnScanNearby, true);
             scanNearbyTargets();
         });
 
@@ -679,7 +723,6 @@ public class DreamBotMenu extends JFrame {
             String name = taskNameInput.getText();
             String description = taskDescriptionInput.getText();
             String status = taskStatusInput.getText();
-            String toast = "";
 
             if (actions == null || actions.isEmpty())
                 throw new Exception("Add some actions!");
@@ -696,7 +739,7 @@ public class DreamBotMenu extends JFrame {
             return new Task(name, description, actions, status);
 
         } catch (Exception e) {
-            showToast(e.getMessage(), btnCreateTask);
+            showToast(e.getMessage(), btnTaskBuilderCreateTask, false);
             return null;
         }
     }
@@ -852,10 +895,10 @@ public class DreamBotMenu extends JFrame {
 
     // --- Inner Classes ---
     public static class Task {
-        public String name;
-        public String description;
-        public String status;
-        public List<Action> actions;
+        private String name;
+        private String description;
+        private String status;
+        private List<Action> actions;
 
         public Task(String name, String description, List<Action> actions, String status) {
             this.name = name;
@@ -976,7 +1019,7 @@ public class DreamBotMenu extends JFrame {
         return true;
     }
 
-    public void showToast(String message, JComponent anchor) {
+    public void showToast(String message, JComponent anchor, boolean success) {
         // 1. Find the location of the button relative to the entire window
         Point location = SwingUtilities.convertPoint(anchor, 0, 0, getLayeredPane());
 
@@ -984,9 +1027,14 @@ public class DreamBotMenu extends JFrame {
         int x = location.x + (anchor.getWidth() / 2);
         int y = location.y - 30;
 
+        ///  Trigger toast visual
         Toast toast = new Toast(message, x, y);
         getLayeredPane().add(toast, JLayeredPane.POPUP_LAYER);
         getLayeredPane().revalidate();
+
+        ///  Trigger button flash (red/green)
+        Color flashColor = success ? COLOR_GREEN : COLOR_RED;
+        flashControl(anchor, flashColor);
     }
 
     public String getPlayerName() {
@@ -1041,13 +1089,13 @@ public class DreamBotMenu extends JFrame {
                 if (fetchedTasks != null) {
                     // 3. Update the UI on the Swing thread
                     SwingUtilities.invokeLater(() -> {
-                        taskListModel.clear();
+                        modelTaskList.clear();
                         for (Task task : fetchedTasks.values()) {
                             // Because GSON uses the Task constructor, these are
                             // now real objects with executable action lists.
-                            taskListModel.addElement(task);
+                            modelTaskList.addElement(task);
                         }
-                        Logger.log("Successfully loaded " + taskListModel.size() + " tasks into the task list.");
+                        Logger.log("Successfully loaded " + modelTaskList.size() + " tasks into the task list.");
                     });
                 }
             }
@@ -1056,6 +1104,30 @@ public class DreamBotMenu extends JFrame {
             e.printStackTrace();
         }
     }
+    /**
+     * Flashes a UI component a specific color and displays a message,
+     * then reverts to original state after 2 seconds.
+     *
+     * @param component The JComponent to flash (e.g., btnTriggerBreak).
+     * @param flashColor The color to flash (e.g., new Color(100, 0, 0) for red).
+     */
+    private void flashControl(JComponent component, Color flashColor) {
+        // Capture the original background color to revert to later
+        final Color originalColor = component.getBackground();
+
+        // 1. Apply Flash State
+        component.setBackground(flashColor);
+
+        // 2. Setup Revert Timer
+        Timer revertTimer = new Timer(200, e -> {
+            component.setBackground(originalColor);
+            component.repaint();
+        });
+
+        revertTimer.setRepeats(false); // Ensure it only runs once
+        revertTimer.start();
+    }
+
 
     private void unpackTaskLibrary(String json) {
         if (json == null || json.isEmpty() || json.equals("[]")) {
@@ -1078,13 +1150,13 @@ public class DreamBotMenu extends JFrame {
                 if (fetchedLibrary != null) {
                     // 3. Update the UI on the Swing thread
                     SwingUtilities.invokeLater(() -> {
-                        libraryModel.clear();
+                        modelTaskLibrary.clear();
                         for (Task task : fetchedLibrary.values()) {
                             // Because GSON uses the Task constructor, these are
                             // now real objects with executable action lists.
-                            libraryModel.addElement(task);
+                            modelTaskLibrary.addElement(task);
                         }
-                        Logger.log("Successfully loaded " + libraryModel.size() + " tasks into the library.");
+                        Logger.log("Successfully loaded " + modelTaskLibrary.size() + " tasks into the library.");
                     });
                 }
             }
