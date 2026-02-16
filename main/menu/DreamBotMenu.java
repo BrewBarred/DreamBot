@@ -444,9 +444,9 @@ public class DreamBotMenu extends JFrame {
 
         JButton btnAddTask = createStyledBtn("Add task", new Color(0, 100, 0));
         btnAddTask.addActionListener(e -> {
-            showToast("Adding to queue...", btnAddTask);
             if(libraryList.getSelectedValue() != null) {
                 taskListModel.addElement(new Task(libraryList.getSelectedValue()));
+                showToast("Added to index " + libraryModel.size() + " of the queue!", btnAddTask);
             }
         });
         btnSection.add(btnAddTask, BorderLayout.WEST);
