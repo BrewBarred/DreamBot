@@ -28,7 +28,6 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.lang.reflect.Type;
 import java.util.*;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -39,6 +38,10 @@ import java.util.stream.Collectors;
  * @version 15.0.0-Elite
  */
 public class DreamBotMenu extends JFrame {
+    //TODO SETTINGS:
+    boolean forceTaskDescription = true;
+    boolean forceTaskStatus = true;
+
 
     private final AbstractScript script;
     private final JPanel sidePanel;
@@ -477,23 +480,6 @@ public class DreamBotMenu extends JFrame {
         panelTaskBuilder.setBorder(new EmptyBorder(15, 15, 15, 15));
         panelTaskBuilder.setBackground(BG_BASE);
 
-        JButton btnUp = createStyledBtn("▲", new Color(40, 40, 40));
-        btnUp.addActionListener(e -> {
-            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
-            shiftQueue(-1, listTaskBuilder, modelTaskBuilder, shiftPressed);
-        });
-
-        JButton btnDown = createStyledBtn("▼", new Color(40, 40, 40));
-        btnDown.addActionListener(e -> {
-            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
-            shiftQueue(1, listTaskBuilder, modelTaskBuilder, shiftPressed);
-        });
-
-        JPanel panelButtons = new JPanel(new GridLayout(0, 1, 0, 5));
-        panelButtons.setOpaque(false);
-        panelButtons.add(btnUp);
-        panelButtons.add(btnDown);
-
         ///  Create the task builders right panel
         JPanel east = new JPanel(new GridBagLayout());
         east.setOpaque(false);
@@ -540,7 +526,7 @@ public class DreamBotMenu extends JFrame {
                 libraryModel.addElement(task);
                 resetTaskBuilder();
                 showToast("Added to library!", btnCreateTask);
-            } else showToast("Unable to create task!", btnCreateTask);
+            }
         });
 
         g.gridy = 6;
@@ -553,17 +539,55 @@ public class DreamBotMenu extends JFrame {
         setLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
         styleJList(listTaskBuilder);
 
-        // create reset button to reset task builder inputs, ready for next task to be created
-        JButton btnResetBuilder = createStyledBtn("Reset", new Color(50, 50, 50));
-        btnResetBuilder.addActionListener(e -> {
-            resetTaskBuilder();
-            showToast("Resetting...", btnResetBuilder);
+        JButton btnUp = createStyledBtn("▲", new Color(40, 40, 40));
+        btnUp.addActionListener(e -> {
+            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+            shiftQueue(-1, listTaskBuilder, modelTaskBuilder, shiftPressed);
         });
 
+        JButton btnDown = createStyledBtn("▼", new Color(40, 40, 40));
+        btnDown.addActionListener(e -> {
+            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+            shiftQueue(1, listTaskBuilder, modelTaskBuilder, shiftPressed);
+        });
+
+        JPanel navButtons = new JPanel(new GridLayout(0, 1, 0, 5));
+        navButtons.setOpaque(false);
+        navButtons.add(btnUp);
+        navButtons.add(btnDown);
+
+        // create reset button to reset task builder inputs, ready for next task to be created
+        JButton btnTaskBuilderRemove = createStyledBtn("Remove", new Color(100, 0, 0));
+        btnTaskBuilderRemove.addActionListener(e -> {
+            int selectedIndex = listTaskBuilder.getSelectedIndex();
+            if (selectedIndex != -1) {
+                modelTaskBuilder.remove(selectedIndex);
+                showToast("Removed action!", btnTaskBuilderRemove);
+            } else {
+                showToast("You must select an action first!", btnTaskBuilderRemove);
+            }
+        });
+
+        listTaskBuilder.addListSelectionListener(e -> {
+            btnTaskBuilderRemove.setEnabled(!listTaskBuilder.isSelectionEmpty());
+        });
+
+        // create reset button to reset task builder inputs, ready for next task to be created
+        JButton btnTaskBuilderReset = createStyledBtn("Reset", new Color(50, 50, 50));
+        btnTaskBuilderReset.addActionListener(e -> {
+            resetTaskBuilder();
+            showToast("Resetting...", btnTaskBuilderReset);
+        });
+
+        JPanel panelActionButtons = new JPanel(new GridLayout(1, 2, 5, 5));
+        panelActionButtons.setOpaque(false);
+        panelActionButtons.add(btnTaskBuilderRemove);
+        panelActionButtons.add(btnTaskBuilderReset);
+
         center.add(setLabel, BorderLayout.NORTH);
-        center.add(panelButtons, BorderLayout.WEST);
+        center.add(navButtons, BorderLayout.WEST);
         center.add(new JScrollPane(listTaskBuilder), BorderLayout.CENTER);
-        center.add(btnResetBuilder, BorderLayout.SOUTH);
+        center.add(panelActionButtons, BorderLayout.SOUTH);
 
         JPanel left = new JPanel(new BorderLayout(0, 10));
         left.setOpaque(false);
@@ -583,7 +607,7 @@ public class DreamBotMenu extends JFrame {
                 modelTaskBuilder.addElement(
                         new Action((ActionType) actionCombo.getSelectedItem(), manualTargetInput.getText())
                 );
-                showToast("Added to action list!", manualTargetInput);
+                showToast("Added action!", manualTargetInput);
             } else {
                 showToast("Enter a valid target!", manualTargetInput);
             }
@@ -633,35 +657,30 @@ public class DreamBotMenu extends JFrame {
             String description = taskDescriptionInput.getText();
             String status = taskStatusInput.getText();
 
-            // track if any inputs were invalid to send toasts to users
-            boolean invalid = false;
+            if (actions == null || actions.isEmpty()) {
+                showToast("Add some actions first!", listTaskBuilder);
+                throw new Exception();
+            }
 
             if (name.isEmpty()) {
                 showToast("Enter a valid name!", taskNameInput);
-                invalid = true;
-            }
-
-            if (description.isEmpty()) {
-                showToast("Enter a valid description!", taskDescriptionInput);
-                invalid = true;
-            }
-
-            if (actions == null || actions.isEmpty()) {
-                showToast("Add some actions first!", listTaskBuilder);
-                invalid = true;
-            }
-
-            if (status.isEmpty()) {
-                showToast("Enter a valid status!", taskStatusInput);
-                invalid = true;
-            }
-
-            if (invalid)
                 throw new Exception();
+            }
+
+            if (forceTaskDescription && description.isEmpty()) {
+                showToast("Enter a valid description!", taskDescriptionInput);
+                throw new Exception();
+            }
+
+            if (forceTaskStatus && status.isEmpty()) {
+                showToast("Enter a valid status!", taskStatusInput);
+                throw new Exception();
+            }
 
             return new Task(name, description, actions, status);
 
         } catch (Exception e) {
+            //showToast("Unable to create task!", btnCreateTask); too spammy having two at once?
             return null;
         }
     }
@@ -1136,7 +1155,11 @@ public class DreamBotMenu extends JFrame {
         }
     }
     private void styleComp(JComponent c) { c.setBackground(PANEL_SURFACE); c.setForeground(TEXT_MAIN); if(c instanceof JTextField) ((JTextField)c).setCaretColor(ACCENT_BLOOD); }
-    private void styleJList(JList<?> l) { l.setBackground(PANEL_SURFACE); l.setForeground(TEXT_MAIN); l.setSelectionBackground(TAB_SELECTED); }
+    private void styleJList(JList<?> l) {
+        l.setBackground(PANEL_SURFACE);
+        l.setForeground(TEXT_MAIN);
+        l.setSelectionBackground(TAB_SELECTED);
+    }
 
     private JButton createStyledBtn(String t, Color c) {
         JButton b = new JButton(t);
