@@ -22,7 +22,15 @@ public class TileMan {
         return getPlayer().getY();
     }
 
-    public String getPos() {
+    public int getZ() {
+        return getPlayer().getZ();
+    }
+
+    public String getXY() {
         return getX() + ", " + getY();
+    }
+
+    public String getPos() {
+        return getXY() + ", " + getZ();
     }
 }

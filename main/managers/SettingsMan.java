@@ -23,7 +23,6 @@
 //
 //
 //    ///  Client settings
-//    private boolean isDrawingOverlays = false;
 //
 //    ///  Game settings (in-game settings add urgent tasks and will not be changed on script pause)
 //    private boolean hideRoofs = false;
