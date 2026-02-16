@@ -24,6 +24,7 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.border.TitledBorder;
 import java.awt.*;
+import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -299,18 +300,24 @@ public class DreamBotMenu extends JFrame {
 
         /// WEST: Add up/down buttons to navigate through task list
         // create west panel
-        JPanel westTaskList = new JPanel(new GridLayout(0, 1, 0, 5));
-        westTaskList.setOpaque(false);
+        JPanel west = new JPanel(new GridLayout(0, 1, 0, 5));
+        west.setOpaque(false);
 
         // create navigation buttons (up/down arrows)
         JButton btnUp = createStyledBtn("▲", new Color(40, 40, 40));
-        btnUp.addActionListener(e -> shiftQueue(-1));
+        btnUp.addActionListener(e -> {
+            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+            shiftQueue(-1, taskQueueList, taskListModel, shiftPressed);
+        });
         JButton btnDown = createStyledBtn("▼", new Color(40, 40, 40));
-        btnDown.addActionListener(e -> shiftQueue(1));
+        btnDown.addActionListener(e -> {
+            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+            shiftQueue(1, taskQueueList, taskListModel, shiftPressed);
+        });
 
         // add navigation buttons (up/down arrows)
-        westTaskList.add(btnUp);
-        westTaskList.add(btnDown);
+        west.add(btnUp);
+        west.add(btnDown);
 
         /// SOUTH: Add bottom panel and delete task button
         // create south panel with 3 rows (Status, Progress, Buttons)
@@ -382,7 +389,7 @@ public class DreamBotMenu extends JFrame {
 
         // add all panels to the main panel (task list panel)
         panelTaskList.add(createSubtitle("Task List"), BorderLayout.NORTH);
-        panelTaskList.add(westTaskList, BorderLayout.WEST);
+        panelTaskList.add(west, BorderLayout.WEST);
         panelTaskList.add(new JScrollPane(taskQueueList), BorderLayout.CENTER);
         panelTaskList.add(southTaskList, BorderLayout.SOUTH);
 
@@ -394,6 +401,23 @@ public class DreamBotMenu extends JFrame {
         JPanel panelLibraryTab = new JPanel(new BorderLayout(10, 10));
         panelLibraryTab.setBorder(new EmptyBorder(15, 15, 15, 15));
         panelLibraryTab.setBackground(BG_BASE);
+
+        JButton btnUp = createStyledBtn("▲", new Color(40, 40, 40));
+        btnUp.addActionListener(e -> {
+            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+            shiftQueue(-1, libraryList, libraryModel, shiftPressed);
+        });
+
+        JButton btnDown = createStyledBtn("▼", new Color(40, 40, 40));
+        btnDown.addActionListener(e -> {
+            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+            shiftQueue(1, libraryList, libraryModel, shiftPressed);
+        });
+
+        JPanel panelButtons = new JPanel(new GridLayout(0, 1, 0, 5));
+        panelButtons.setOpaque(false);
+        panelButtons.add(btnUp);
+        panelButtons.add(btnDown);
 
         // 3. Create a wrapper for the center content (List + Editor)
         JPanel centerContent = new JPanel(new GridLayout(1, 2, 10, 0));
@@ -441,6 +465,7 @@ public class DreamBotMenu extends JFrame {
         centerContent.add(panelCenterEastLibraryTab);
 
         panelLibraryTab.add(createSubtitle("Task Library"), BorderLayout.NORTH);
+        panelLibraryTab.add(panelButtons, BorderLayout.WEST);
         panelLibraryTab.add(centerContent, BorderLayout.CENTER);
 
         return panelLibraryTab;
@@ -452,9 +477,26 @@ public class DreamBotMenu extends JFrame {
         panelTaskBuilder.setBorder(new EmptyBorder(15, 15, 15, 15));
         panelTaskBuilder.setBackground(BG_BASE);
 
+        JButton btnUp = createStyledBtn("▲", new Color(40, 40, 40));
+        btnUp.addActionListener(e -> {
+            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+            shiftQueue(-1, listTaskBuilder, modelTaskBuilder, shiftPressed);
+        });
+
+        JButton btnDown = createStyledBtn("▼", new Color(40, 40, 40));
+        btnDown.addActionListener(e -> {
+            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+            shiftQueue(1, listTaskBuilder, modelTaskBuilder, shiftPressed);
+        });
+
+        JPanel panelButtons = new JPanel(new GridLayout(0, 1, 0, 5));
+        panelButtons.setOpaque(false);
+        panelButtons.add(btnUp);
+        panelButtons.add(btnDown);
+
         ///  Create the task builders right panel
-        JPanel right = new JPanel(new GridBagLayout());
-        right.setOpaque(false);
+        JPanel east = new JPanel(new GridBagLayout());
+        east.setOpaque(false);
 
         GridBagConstraints g = new GridBagConstraints();
         g.fill = GridBagConstraints.HORIZONTAL;
@@ -470,22 +512,22 @@ public class DreamBotMenu extends JFrame {
         styleComp(taskStatusInput);
 
         g.gridy = 0;
-        right.add(new JLabel("Task Name:"), g);
+        east.add(new JLabel("Task Name:"), g);
 
         g.gridy = 1;
-        right.add(taskNameInput, g);
+        east.add(taskNameInput, g);
 
         g.gridy = 2;
-        right.add(new JLabel("Description:"), g);
+        east.add(new JLabel("Description:"), g);
 
         g.gridy = 3;
-        right.add(taskDescriptionInput, g);
+        east.add(taskDescriptionInput, g);
 
         g.gridy = 4;
-        right.add(new JLabel("Status:"), g);
+        east.add(new JLabel("Status:"), g);
 
         g.gridy = 5;
-        right.add(taskStatusInput, g);
+        east.add(taskStatusInput, g);
 
         btnCreateTask = createStyledBtn("Create task", new Color(0, 100, 0));
         btnCreateTask.addActionListener(e -> {
@@ -503,7 +545,7 @@ public class DreamBotMenu extends JFrame {
 
         g.gridy = 6;
         g.insets = new Insets(20, 5, 5, 5);
-        right.add(btnCreateTask, g);
+        east.add(btnCreateTask, g);
 
         JPanel center = new JPanel(new BorderLayout(5, 5)); center.setOpaque(false);
         JLabel setLabel = new JLabel("Action List:", SwingConstants.CENTER);
@@ -519,6 +561,7 @@ public class DreamBotMenu extends JFrame {
         });
 
         center.add(setLabel, BorderLayout.NORTH);
+        center.add(panelButtons, BorderLayout.WEST);
         center.add(new JScrollPane(listTaskBuilder), BorderLayout.CENTER);
         center.add(btnResetBuilder, BorderLayout.SOUTH);
 
@@ -556,7 +599,7 @@ public class DreamBotMenu extends JFrame {
                 if(e.getClickCount() == 1)
                     manualTargetInput.setText(val);
                 else if(e.getClickCount() == 2)
-                    modelTaskBuilder.addElement(new Action((ActionType)actionCombo.getSelectedItem(), val));
+                    modelTaskBuilder.addElement(new Action((ActionType) actionCombo.getSelectedItem(), val));
             }
         });
 
@@ -565,7 +608,7 @@ public class DreamBotMenu extends JFrame {
         entitiesScroll.setPreferredSize(new Dimension(300, 0)); // 300px width, height 0 (BorderLayout will stretch height)
         entitiesScroll.setMinimumSize(new Dimension(300, 0));
 
-        JButton btnScanNearby = createStyledBtn("Scan Nearby", new Color(40,40,40));
+        JButton btnScanNearby = createStyledBtn("Refresh list", new Color(40,40,40));
         btnScanNearby.addActionListener(e -> {
             showToast("Scanning...",  btnScanNearby);
             scanNearbyTargets();
@@ -578,7 +621,7 @@ public class DreamBotMenu extends JFrame {
         panelTaskBuilder.add(createSubtitle("Task Builder"), BorderLayout.NORTH);
         panelTaskBuilder.add(left, BorderLayout.WEST);
         panelTaskBuilder.add(center, BorderLayout.CENTER);
-        panelTaskBuilder.add(right, BorderLayout.EAST);
+        panelTaskBuilder.add(east, BorderLayout.EAST);
 
         return panelTaskBuilder;
     }
@@ -1076,7 +1119,22 @@ public class DreamBotMenu extends JFrame {
     private void styleHeaderLabel(JLabel l) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.BOLD, 15)); l.setHorizontalAlignment(SwingConstants.RIGHT); }
     private void styleSpinner(JSpinner s) { JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField(); field.setBackground(new Color(30, 30, 30)); field.setForeground(ACCENT_BLOOD); s.setBorder(new LineBorder(BORDER_DIM)); }
     private JButton createIconButton(String symbol, String tooltip, ActionListener action) { JButton btn = new JButton(symbol); btn.setPreferredSize(new Dimension(40, 40)); btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18)); btn.setBackground(new Color(30, 0, 0)); btn.setForeground(ACCENT_BLOOD); btn.addActionListener(action); return btn; }
-    private void shiftQueue(int dir) { int idx = taskQueueList.getSelectedIndex(); if (idx == -1 || idx+dir < 0 || idx+dir >= taskListModel.size()) return; Task t = taskListModel.remove(idx); taskListModel.add(idx+dir, t); taskQueueList.setSelectedIndex(idx+dir); }
+    private <T> void shiftQueue(int dir, JList<T> list, DefaultListModel<T> model, boolean isShiftHeld) {
+        int idx = list.getSelectedIndex();
+        if (idx == -1 || idx + dir < 0 || idx + dir >= model.size())
+            return;
+
+        if (isShiftHeld) {
+            // Shift + Click: Move the actual data
+            T item = model.remove(idx);
+            model.add(idx + dir, item);
+            list.setSelectedIndex(idx + dir);
+        } else {
+            // Regular Click: Just move the visual selection
+            list.setSelectedIndex(idx + dir);
+            list.ensureIndexIsVisible(idx + dir);
+        }
+    }
     private void styleComp(JComponent c) { c.setBackground(PANEL_SURFACE); c.setForeground(TEXT_MAIN); if(c instanceof JTextField) ((JTextField)c).setCaretColor(ACCENT_BLOOD); }
     private void styleJList(JList<?> l) { l.setBackground(PANEL_SURFACE); l.setForeground(TEXT_MAIN); l.setSelectionBackground(TAB_SELECTED); }
 
