@@ -90,7 +90,8 @@ public class DataMan {
         new Thread(() -> {
             try {
                 String playerName = getValidPlayerName();
-                if (playerName == null) return;
+                if (playerName == null)
+                    return;
 
                 Logger.log(Logger.LogType.INFO, "Saving " + playerName + "'s library list...");
 

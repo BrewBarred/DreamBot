@@ -64,7 +64,7 @@ public class DreamBotMenu extends JFrame {
     private final long startTime;
 
     private JList<Task> taskQueueList, libraryList;
-    private JList<String> nearbyEntitiesList;
+    private JList<String> nearbyList;
     private JTextArea libraryEditorArea, consoleArea;
     private JTextField taskNameInput, taskDescInput, taskStatusInput, manualTargetInput, consoleSearch;
     private JComboBox<ActionType> actionCombo;
@@ -114,11 +114,11 @@ public class DreamBotMenu extends JFrame {
         mainTabs.setForeground(TEXT_MAIN);
 
         mainTabs.addTab("Task List", createTaskListTab());
-        mainTabs.addTab("Task Library", createLibraryTab());
-        mainTabs.addTab("Task Builder", createBuilderTab());
-        mainTabs.addTab("Skill Tracker", loadMiscIcon("Stats_icon"), createSkillsPanel());
-        mainTabs.addTab("Player", null, createPlayerPanel());
-        mainTabs.addTab("Settings", null, createSettingsInterface());
+        mainTabs.addTab("Task Library", createTaskLibraryTab());
+        mainTabs.addTab("Task Builder", createTaskBuilderTab());
+        mainTabs.addTab("Skill Tracker", loadTabIcon("skills_icon"), createSkillTrackerTab());
+        mainTabs.addTab("Status", null, createStatusTab());
+        mainTabs.addTab("Settings", null, createSettingsTab());
 
         projectionSpinner = new JSpinner(new SpinnerNumberModel(24, 1, 999, 1));
         styleSpinner(projectionSpinner);
@@ -162,7 +162,7 @@ public class DreamBotMenu extends JFrame {
         add(header, BorderLayout.NORTH);
         add(mainTabs, BorderLayout.CENTER);
         add(sidePanel, BorderLayout.EAST);
-        add(createStatusPanel(), BorderLayout.SOUTH);
+        add(createProgressPanel(), BorderLayout.SOUTH);
 
         Logger.log(Logger.LogType.INFO, "Loading task list..");
         loadTaskList();
@@ -179,7 +179,7 @@ public class DreamBotMenu extends JFrame {
         });
     }
 
-    private JPanel createStatusPanel() {
+    private JPanel createProgressPanel() {
         // Use a GridBagLayout for precise control or a 2-row GridLayout
         JPanel persistentStatus = new JPanel(new GridBagLayout());
         persistentStatus.setBackground(PANEL_SURFACE);
@@ -235,6 +235,15 @@ public class DreamBotMenu extends JFrame {
         taskQueueList.repaint();
     }
 
+    private JLabel createSubtitle(String subtitle) {
+        JLabel title = new JLabel(subtitle, SwingConstants.CENTER);
+        title.setForeground(ACCENT_BLOOD);
+        title.setFont(new Font("Consolas", Font.BOLD, 22));
+        title.setBorder(BorderFactory.createMatteBorder(0, 5, 0, 0, ACCENT_BLOOD));
+
+        return title;
+    }
+
     /**
      * Creates the 'Task List' tab which may be used to view and manipulate the current task queue.
      *
@@ -246,7 +255,6 @@ public class DreamBotMenu extends JFrame {
         JPanel panelTaskList = new JPanel(new BorderLayout(10, 10));
         panelTaskList.setBackground(BG_BASE);
         panelTaskList.setBorder(new EmptyBorder(15, 15, 15, 15));
-        JLabel title = new JLabel("Task List");
 
         /// CENTER: Add the task queue list display to the center of the task list panel
         taskQueueList = new JList<>(taskListModel);
@@ -336,7 +344,7 @@ public class DreamBotMenu extends JFrame {
 //        southTaskList.add(panelButtons); // Row 3
 
         // add all panels to the main panel (task list panel)
-        panelTaskList.add(title, BorderLayout.NORTH);
+        panelTaskList.add(createSubtitle("Task List"), BorderLayout.NORTH);
         panelTaskList.add(westTaskList, BorderLayout.WEST);
         panelTaskList.add(new JScrollPane(taskQueueList), BorderLayout.CENTER);
         panelTaskList.add(southTaskList, BorderLayout.SOUTH);
@@ -344,53 +352,134 @@ public class DreamBotMenu extends JFrame {
         return panelTaskList;
     }
 
-    private JPanel createBuilderTab() {
-        JPanel p = new JPanel(new BorderLayout(15, 15)); p.setBackground(BG_BASE); p.setBorder(new EmptyBorder(15, 15, 15, 15));
-        JLabel title = new JLabel("Task Builder", SwingConstants.CENTER);
-        JPanel left = new JPanel(new GridBagLayout()); left.setOpaque(false);
-        GridBagConstraints g = new GridBagConstraints(); g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0; g.insets = new Insets(5, 5, 5, 5);
-        taskNameInput = new JTextField(25); taskDescInput = new JTextField(25); taskStatusInput = new JTextField(25);
-        styleComp(taskNameInput); styleComp(taskDescInput); styleComp(taskStatusInput);
+    private JPanel createTaskLibraryTab() {
+        // 1. Changed to BorderLayout to allow title to span the top
+        JPanel panelLibraryTab = new JPanel(new BorderLayout(10, 10));
+        panelLibraryTab.setBackground(BG_BASE);
+        panelLibraryTab.setBorder(new EmptyBorder(15, 15, 15, 15));
+
+        // 3. Create a wrapper for the center content (List + Editor)
+        JPanel centerContent = new JPanel(new GridLayout(1, 2, 10, 0));
+        centerContent.setOpaque(false);
+
+        /// CENTER WEST: Library list
+        libraryList = new JList<>(libraryModel);
+        styleJList(libraryList);
+        libraryEditorArea = new JTextArea();
+        libraryEditorArea.setBackground(new Color(15, 15, 15));
+        libraryEditorArea.setForeground(TEXT_MAIN);
+
+        libraryList.addListSelectionListener(e -> {
+            Task t = libraryList.getSelectedValue();
+            if (t != null) libraryEditorArea.setText(t.getEditableString());
+        });
+
+        /// CENTER EAST: Edit panel + buttons
+        JPanel panelCenterEastLibraryTab = new JPanel(new BorderLayout(0, 10));
+        JPanel btnSection = new JPanel(new BorderLayout());
+        panelCenterEastLibraryTab.setOpaque(false);
+        btnSection.setOpaque(false);
+
+        JButton btnAddToQueue = createStyledBtn("Add task", new Color(0, 100, 0));
+        btnAddToQueue.addActionListener(e -> {
+            if(libraryList.getSelectedValue() != null) {
+                taskListModel.addElement(new Task(libraryList.getSelectedValue()));
+                showToast("Added task to queue!", btnAddToQueue);
+            }
+        });
+        btnSection.add(btnAddToQueue, BorderLayout.WEST);
+
+        JButton btnSave = createStyledBtn("Save", new Color(100, 100, 0));
+        btnSave.addActionListener(e -> {
+            dataMan.saveTaskLibrary(libraryList);
+            showToast("Saving...", btnSave);
+        });
+        btnSection.add(btnSave, BorderLayout.EAST);
+
+        panelCenterEastLibraryTab.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER);
+        panelCenterEastLibraryTab.add(btnSection, BorderLayout.SOUTH);
+
+        // 4. Add both sections to the center wrapper
+        centerContent.add(new JScrollPane(libraryList));
+        centerContent.add(panelCenterEastLibraryTab);
+
+        panelLibraryTab.add(createSubtitle("Task Library"), BorderLayout.NORTH);
+        panelLibraryTab.add(centerContent, BorderLayout.CENTER);
+
+        return panelLibraryTab;
+    }
+
+    private JPanel createTaskBuilderTab() {
+        ///  Create the task builders title
+        JPanel panelTaskBuilder = new JPanel(new BorderLayout(15, 15));
+        panelTaskBuilder.setBackground(BG_BASE);
+        panelTaskBuilder.setBorder(new EmptyBorder(15, 15, 15, 15));
+
+        ///  Create the task builders right panel
+        JPanel right = new JPanel(new GridBagLayout());
+        right.setOpaque(false);
+
+        GridBagConstraints g = new GridBagConstraints();
+        g.fill = GridBagConstraints.HORIZONTAL;
+        g.weightx = 1.0;
+        g.insets = new Insets(5, 5, 5, 5);
+
+        taskNameInput = new JTextField(25);
+        taskDescInput = new JTextField(25);
+        taskStatusInput = new JTextField(25);
+
+        styleComp(taskNameInput);
+        styleComp(taskDescInput);
+        styleComp(taskStatusInput);
+
         g.gridy = 0;
-        left.add(new JLabel("Task Name:"), g);
+        right.add(new JLabel("Task Name:"), g);
 
         g.gridy = 1;
-        left.add(taskNameInput, g);
+        right.add(taskNameInput, g);
 
         g.gridy = 2;
-        left.add(new JLabel("Description:"), g);
+        right.add(new JLabel("Description:"), g);
 
         g.gridy = 3;
-        left.add(taskDescInput, g);
+        right.add(taskDescInput, g);
 
         g.gridy = 4;
-        left.add(new JLabel("Status:"), g);
+        right.add(new JLabel("Status:"), g);
 
         g.gridy = 5;
-        left.add(taskStatusInput, g);
+        right.add(taskStatusInput, g);
 
-        JButton btnR = createStyledBtn("Reset", new Color(50, 50, 50));
-        btnR.addActionListener(e -> resetTaskBuilder());
-        g.gridy = 6;
-        g.insets = new Insets(20, 5, 5, 5);
-        left.add(btnR, g);
-
-        JPanel center = new JPanel(new BorderLayout(5, 5)); center.setOpaque(false);
-        JLabel setLabel = new JLabel("Task-Set", SwingConstants.CENTER);
-        setLabel.setForeground(ACCENT_BLOOD); setLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        JList<Action> bActions = new JList<>(builderActionModel); styleJList(bActions);
-        JButton btnAddLib = createStyledBtn("Add to Library", new Color(0, 100, 0));
-        btnAddLib.addActionListener(e -> {
+        JButton btnCreateTask = createStyledBtn("Create task", new Color(0, 100, 0));
+        btnCreateTask.addActionListener(e -> {
             List<Action> acts = new ArrayList<>();
             for(int i=0; i<builderActionModel.size(); i++)
                 acts.add(builderActionModel.get(i));
             libraryModel.addElement(new Task(taskNameInput.getText(), taskDescInput.getText(), acts, taskStatusInput.getText()));
             resetTaskBuilder();
+            showToast("Added to library!", btnCreateTask);
         });
-        center.add(setLabel, BorderLayout.NORTH); center.add(new JScrollPane(bActions), BorderLayout.CENTER); center.add(btnAddLib, BorderLayout.SOUTH);
+        g.gridy = 6;
+        g.insets = new Insets(20, 5, 5, 5);
+        right.add(btnCreateTask, g);
 
-        JPanel right = new JPanel(new BorderLayout(0, 10)); right.setOpaque(false);
-        JPanel config = new JPanel(new GridLayout(0, 1, 2, 5)); config.setOpaque(false);
+        JPanel center = new JPanel(new BorderLayout(5, 5)); center.setOpaque(false);
+        JLabel setLabel = new JLabel("Action List:", SwingConstants.CENTER);
+        setLabel.setForeground(ACCENT_BLOOD); setLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        JList<Action> bActions = new JList<>(builderActionModel); styleJList(bActions);
+
+        // create reset button to reset task builder inputs, ready for next task to be created
+        JButton btnResetBuilder = createStyledBtn("Reset", new Color(50, 50, 50));
+        btnResetBuilder.addActionListener(e -> resetTaskBuilder());
+
+        center.add(setLabel, BorderLayout.NORTH);
+        center.add(new JScrollPane(bActions), BorderLayout.CENTER);
+        center.add(btnResetBuilder, BorderLayout.SOUTH);
+
+        JPanel left = new JPanel(new BorderLayout(0, 10));
+        left.setOpaque(false);
+        JPanel config = new JPanel(new GridLayout(0, 1, 2, 5));
+        config.setOpaque(false);
         actionCombo = new JComboBox<>(ActionType.values()); styleComp(actionCombo);
         actionCombo.addActionListener(e -> scanNearbyTargets());
         manualTargetInput = new JTextField(); styleComp(manualTargetInput);
@@ -406,41 +495,145 @@ public class DreamBotMenu extends JFrame {
                         new Action((ActionType) actionCombo.getSelectedItem(), manualTargetInput.getText())
                 );
             else
-                showToast("Invalid target set!", manualTargetInput);
+                showToast("Set a valid target!", manualTargetInput);
         });
         config.add(btnAddAct);
-
-        nearbyEntitiesList = new JList<>(nearbyEntitiesModel); styleJList(nearbyEntitiesList);
-        nearbyEntitiesList.addMouseListener(new MouseAdapter() {
+        config.add(new JLabel("Nearby targets:"));
+        nearbyList = new JList<>(nearbyEntitiesModel);
+        styleJList(nearbyList);
+        nearbyList.addMouseListener(new MouseAdapter() {
             public void mouseClicked(MouseEvent e) {
-                String val = nearbyEntitiesList.getSelectedValue(); if(val == null) return;
-                if(e.getClickCount() == 1) manualTargetInput.setText(val);
-                else if(e.getClickCount() == 2) builderActionModel.addElement(new Action((ActionType)actionCombo.getSelectedItem(), val));
+                String val = nearbyList.getSelectedValue(); if(val == null)
+                    return;
+                if(e.getClickCount() == 1)
+                    manualTargetInput.setText(val);
+                else if(e.getClickCount() == 2)
+                    builderActionModel.addElement(new Action((ActionType)actionCombo.getSelectedItem(), val));
             }
         });
 
         // Wrap the list in a scroll pane and LOCK the width
-        JScrollPane entitiesScroll = new JScrollPane(nearbyEntitiesList);
+        JScrollPane entitiesScroll = new JScrollPane(nearbyList);
         entitiesScroll.setPreferredSize(new Dimension(300, 0)); // 300px width, height 0 (BorderLayout will stretch height)
         entitiesScroll.setMinimumSize(new Dimension(300, 0));
 
-        right.add(config, BorderLayout.NORTH);
-        right.add(entitiesScroll, BorderLayout.CENTER);
-        right.add(createStyledBtn("Scan Nearby", new Color(40,40,40)), BorderLayout.SOUTH);
+        left.add(config, BorderLayout.NORTH);
+        left.add(entitiesScroll, BorderLayout.CENTER);
+        left.add(createStyledBtn("Scan Nearby", new Color(40,40,40)), BorderLayout.SOUTH);
 
-        p.add(title, BorderLayout.NORTH);
-        p.add(left, BorderLayout.WEST);
-        p.add(center, BorderLayout.CENTER);
-        p.add(right, BorderLayout.EAST);
-        return p;
+        panelTaskBuilder.add(createSubtitle("Task Builder"), BorderLayout.NORTH);
+        panelTaskBuilder.add(left, BorderLayout.WEST);
+        panelTaskBuilder.add(center, BorderLayout.CENTER);
+        panelTaskBuilder.add(right, BorderLayout.EAST);
+
+        return panelTaskBuilder;
+    }
+
+    private JPanel createSkillTrackerTab() {
+        JPanel panelSkillTracker = new JPanel(new BorderLayout());
+        panelSkillTracker.setBackground(BG_BASE);
+        JPanel grid = new JPanel(new GridLayout(0, 3, 3, 3));
+        grid.setBackground(BG_BASE);
+        grid.setBorder(new EmptyBorder(8, 8, 8, 8));
+
+        for (Skill skill : OSRS_ORDER) {
+            SkillData data = new SkillData(skill);
+            skillRegistry.put(skill, data);
+            grid.add(createSkillTile(data));
+        }
+
+        panelSkillTracker.add(createSubtitle("Skill Tracker"), BorderLayout.NORTH);
+        panelSkillTracker.add(new JScrollPane(grid), BorderLayout.CENTER);
+        totalLevelLabel.setForeground(TEXT_MAIN);
+        panelSkillTracker.add(totalLevelLabel, BorderLayout.SOUTH);
+        return panelSkillTracker;
+    }
+
+    private JPanel createStatusTab() {
+        JPanel panelStatus = new JPanel(new BorderLayout());
+        panelStatus.setBackground(BG_BASE);
+        panelStatus.setBorder(new EmptyBorder(20, 20, 20, 20));
+
+        JPanel content = new JPanel(new GridLayout(1, 2, 20, 0));
+        content.setBackground(BG_BASE);
+
+        ///  create status 'Player' section
+        JPanel login = createInfoCard("Player");
+        addInfoRow(login, "Username", lblUsername);
+        addInfoRow(login, "Password", lblPassword);
+        addInfoRow(login, "Identifier", lblAcctId);
+        addInfoRow(login, "Acct Status", lblAcctStatus);
+
+        JPanel game = createInfoCard("World");
+        addInfoRow(game, "Character Name", lblCharName);
+        addInfoRowWithIcon(game, "Membership", lblMemberText, lblMemberIcon);
+        addInfoRow(game, "World", lblWorld); addInfoRow(game, "Coordinates", lblCoords);
+        addInfoRow(game, "GameState", lblGameState);
+
+        content.add(login);
+        content.add(game);
+
+        panelStatus.add(createSubtitle("Status"),  BorderLayout.NORTH);
+        panelStatus.add(content, BorderLayout.CENTER);
+        return panelStatus;
+    }
+
+    private JPanel createSettingsTab() {
+        ///  Create the main settings panel
+        JPanel panelSettings = new JPanel(new BorderLayout());
+        panelSettings.setBackground(BG_BASE);
+        // add a card layout to the settings panel to switch between setting groups
+        CardLayout cardLayout = new CardLayout();
+
+        ///  Create a panel to group similar settings
+        JPanel settingGroup = new JPanel(cardLayout);
+        settingGroup.setBackground(BG_BASE);
+        settingGroup.setBorder(new EmptyBorder(20, 20, 20, 20));
+
+        ///  Define each setting group
+        settingGroup.add(createClientPanel(), "Client");
+        settingGroup.add(createActivitiesPanel(), "Activities");
+        settingGroup.add(createAudioPanel(), "Audio");
+        settingGroup.add(createChatPanel(), "Chat");
+        settingGroup.add(createDisplayPanel(), "Display");
+        settingGroup.add(createControlsPanel(), "Controls");
+        settingGroup.add(createWarningsPanel(), "Warnings");
+
+        JPanel menuPanel = new JPanel(new GridLayout(10, 1, 0, 2));
+        menuPanel.setPreferredSize(new Dimension(180, 0));
+        menuPanel.setBackground(PANEL_SURFACE); menuPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, BORDER_DIM));
+
+        String[] groups = {"Client", "Display", "Audio", "Chat", "Controls", "Activities", "Warnings"};
+        ButtonGroup btnGroup = new ButtonGroup();
+
+        for (String cat : groups) {
+            JToggleButton btn = createMenuButton(cat);
+            btn.addActionListener(e -> cardLayout.show(settingGroup, cat));
+            btnGroup.add(btn);
+            menuPanel.add(btn);
+            if (cat.equals("Client"))
+                btn.setSelected(true);
+        }
+
+        panelSettings.add(createSubtitle("Settings"));
+        panelSettings.add(menuPanel, BorderLayout.WEST);
+        panelSettings.add(settingGroup, BorderLayout.CENTER);
+
+        return panelSettings;
     }
 
     private void resetTaskBuilder() {
+        // clear/refresh target inputs
+        scanNearbyTargets();
+        manualTargetInput.setText("");
+
+        // clear task attribute inputs
         taskNameInput.setText("");
         taskDescInput.setText("");
         taskStatusInput.setText("");
+
+        // clear the action list display
         builderActionModel.clear();
-        scanNearbyTargets();
     }
 
     private void scanNearbyTargets() {
@@ -605,68 +798,6 @@ public class DreamBotMenu extends JFrame {
             Logger.log(Logger.LogType.DEBUG, t.getEditableString());
         }
         return true;
-    }
-
-    private JPanel createLibraryTab() {
-        ///  create main library tab
-        JPanel panelLibraryTab = new JPanel(new GridLayout(1, 2, 10, 0));
-        panelLibraryTab.setBackground(BG_BASE);
-        panelLibraryTab.setBorder(new EmptyBorder(15, 15, 15, 15));
-
-        ///  create a title
-
-
-        /// CENTER WEST: Library list
-        //  create a library list/model to display the live task library list
-        libraryList = new JList<>(libraryModel);
-        styleJList(libraryList);
-        libraryEditorArea = new JTextArea(); libraryEditorArea.setBackground(new Color(15, 15, 15));
-        libraryEditorArea.setForeground(TEXT_MAIN);
-
-        // add listener to library selections to load them into the editor
-        libraryList.addListSelectionListener(e -> {
-            Task t = libraryList.getSelectedValue();
-            if (t != null)
-                libraryEditorArea.setText(t.getEditableString());
-        });
-
-        /// CENTER EAST: Edit panel + buttons
-        // create the main two panels for this section
-        JPanel panelCenterEastLibraryTab = new JPanel(new BorderLayout(0, 10));
-        JPanel btnSection = new JPanel(new BorderLayout());
-
-        // make adjustments to these panels
-        panelCenterEastLibraryTab.setOpaque(false);
-        btnSection.setOpaque(false);
-
-        // create queue button
-        JButton btnAddToQueue = createStyledBtn("Add task", new Color(0, 100, 0));
-        btnAddToQueue.addActionListener(e -> {
-            if(libraryList.getSelectedValue() != null) {
-                taskListModel.addElement(new Task(libraryList.getSelectedValue()));
-                // attach a floating toast to the add button for the users information
-                showToast("Added task to queue!", btnAddToQueue);
-            }
-        });
-        // add queue button to the button section
-        btnSection.add(btnAddToQueue, BorderLayout.WEST);
-
-        // create save button
-        JButton btnSave = createStyledBtn("Save", new Color(100, 100, 0));
-        btnSave.addActionListener(e -> dataMan.saveTaskLibrary(libraryList));
-        // add save button to the button section
-        btnSection.add(btnSave, BorderLayout.EAST);
-
-        // complete the center east section by merging library editor with button section (top/bottom stacked)
-        panelCenterEastLibraryTab.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER);
-        panelCenterEastLibraryTab.add(btnSection, BorderLayout.SOUTH);
-
-        // complete the library list by merging the library list (center-west) with the center-east panel
-        panelLibraryTab.add(new JScrollPane(libraryList));
-        panelLibraryTab.add(panelCenterEastLibraryTab);
-
-        // return the completed library tab
-        return panelLibraryTab;
     }
 
     public void showToast(String message, JComponent anchor) {
@@ -882,6 +1013,18 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
+    private ImageIcon loadTabIcon(String name) {
+        try {
+            return new ImageIcon(new ImageIcon(
+                    Objects.requireNonNull(getClass()
+                            .getResource("/resources/icons/tabs/" + name + ".png")))
+                    .getImage()
+                    .getScaledInstance(18, 18, Image.SCALE_SMOOTH));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private ImageIcon loadStatusIcon(String name) {
         try {
             return new ImageIcon(new ImageIcon(
@@ -900,11 +1043,9 @@ public class DreamBotMenu extends JFrame {
         updateAll();
     }
 
-    private JPanel createPlayerPanel() { JPanel container = new JPanel(new BorderLayout()); container.setBackground(BG_BASE); container.setBorder(new EmptyBorder(20, 20, 20, 20)); JPanel content = new JPanel(new GridLayout(1, 2, 20, 0)); content.setBackground(BG_BASE); JPanel login = createInfoCard("Login Details"); addInfoRow(login, "Username", lblUsername); addInfoRow(login, "Password", lblPassword); addInfoRow(login, "Identifier", lblAcctId); addInfoRow(login, "Acct Status", lblAcctStatus); JPanel game = createInfoCard("World"); addInfoRow(game, "Character Name", lblCharName); addInfoRowWithIcon(game, "Membership", lblMemberText, lblMemberIcon); addInfoRow(game, "World", lblWorld); addInfoRow(game, "Coordinates", lblCoords); addInfoRow(game, "GameState", lblGameState); content.add(login); content.add(game); container.add(content, BorderLayout.NORTH); return container; }
     private JPanel createInfoCard(String title) { JPanel p = new JPanel(new GridLayout(0, 1, 5, 10)); p.setBackground(PANEL_SURFACE); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + title + " "); b.setTitleColor(ACCENT_BLOOD); b.setTitleFont(new Font("Segoe UI", Font.BOLD, 16)); p.setBorder(BorderFactory.createCompoundBorder(b, new EmptyBorder(15, 15, 15, 15))); return p; }
     private void addInfoRow(JPanel p, String key, JLabel valLabel) { JPanel row = new JPanel(new BorderLayout()); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); valLabel.setForeground(TEXT_MAIN); valLabel.setFont(new Font("Consolas", Font.BOLD, 14)); row.add(k, BorderLayout.WEST); row.add(valLabel, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
     private void addInfoRowWithIcon(JPanel p, String key, JLabel valLabel, JLabel iconLabel) { JPanel row = new JPanel(new BorderLayout(5, 0)); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); JPanel rightSide = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0)); rightSide.setOpaque(false); valLabel.setForeground(TEXT_MAIN); rightSide.add(valLabel); rightSide.add(iconLabel); row.add(k, BorderLayout.WEST); row.add(rightSide, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
-    private JPanel createSettingsInterface() { JPanel container = new JPanel(new BorderLayout()); container.setBackground(BG_BASE); CardLayout cardLayout = new CardLayout(); JPanel contentPanel = new JPanel(cardLayout); contentPanel.setBackground(BG_BASE); contentPanel.setBorder(new EmptyBorder(20, 20, 20, 20)); contentPanel.add(createClientPanel(), "Client"); contentPanel.add(createActivitiesPanel(), "Activities"); contentPanel.add(createAudioPanel(), "Audio"); contentPanel.add(createChatPanel(), "Chat"); contentPanel.add(createDisplayPanel(), "Display"); contentPanel.add(createControlsPanel(), "Controls"); contentPanel.add(createWarningsPanel(), "Warnings"); JPanel menuPanel = new JPanel(new GridLayout(10, 1, 0, 2)); menuPanel.setPreferredSize(new Dimension(180, 0)); menuPanel.setBackground(PANEL_SURFACE); menuPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, BORDER_DIM)); String[] cats = {"Client", "Display", "Audio", "Chat", "Controls", "Activities", "Warnings"}; ButtonGroup btnGroup = new ButtonGroup(); for (String cat : cats) { JToggleButton btn = createMenuButton(cat); btn.addActionListener(e -> cardLayout.show(contentPanel, cat)); btnGroup.add(btn); menuPanel.add(btn); if (cat.equals("Client")) btn.setSelected(true); } container.add(menuPanel, BorderLayout.WEST); container.add(contentPanel, BorderLayout.CENTER); return container; }
     private JPanel createDisplayPanel() { return createSettingsGroup("Display", createSettingCheck("Roofs", !ClientSettings.areRoofsHidden(), e -> ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected())), createSettingCheck("Data orbs", ClientSettings.areDataOrbsEnabled(), e -> ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())), createSettingCheck("Transparent side panel", ClientSettings.isTransparentSidePanelEnabled(), e -> ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))); }
     private JPanel createAudioPanel() { return createSettingsGroup("Audio", createSettingCheck("Game Audio", ClientSettings.isGameAudioOn(), e -> ClientSettings.toggleGameAudio(((JCheckBox)e.getSource()).isSelected()))); }
     private JPanel createChatPanel() { return createSettingsGroup("Chat", createSettingCheck("Transparent chatbox", ClientSettings.isTransparentChatboxEnabled(), e -> ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected())), createSettingCheck("Click through chatbox", ClientSettings.isClickThroughChatboxEnabled(), e -> ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected()))); }
@@ -915,7 +1056,7 @@ public class DreamBotMenu extends JFrame {
     private JPanel createSettingsGroup(String title, Component... comps) { JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10)); p.setBackground(BG_BASE); JPanel list = new JPanel(new GridLayout(0, 1, 5, 5)); list.setBackground(BG_BASE); JLabel header = new JLabel(title); header.setForeground(ACCENT_BLOOD); header.setFont(new Font("Segoe UI", Font.BOLD, 24)); JPanel wrapper = new JPanel(new BorderLayout()); wrapper.setBackground(BG_BASE); wrapper.add(header, BorderLayout.NORTH); for (Component c : comps) list.add(c); wrapper.add(list, BorderLayout.CENTER); return wrapper; }
     private JCheckBox createSettingCheck(String text, boolean initialState, ActionListener l) { JCheckBox c = new JCheckBox(text); c.setForeground(TEXT_MAIN); c.setOpaque(false); c.setSelected(initialState); if (l != null) c.addActionListener(l); return c; }
     private JToggleButton createMenuButton(String text) { JToggleButton btn = new JToggleButton(text) { protected void paintComponent(Graphics g) { g.setColor(isSelected() ? TAB_SELECTED : PANEL_SURFACE); g.fillRect(0, 0, getWidth(), getHeight()); super.paintComponent(g); } }; btn.setFocusPainted(false); btn.setContentAreaFilled(false); btn.setForeground(TEXT_MAIN); btn.setFont(new Font("Segoe UI", Font.BOLD, 14)); btn.setHorizontalAlignment(SwingConstants.LEFT); btn.setBorder(new EmptyBorder(0, 20, 0, 0)); return btn; }
-    private JPanel createSkillsPanel() { JPanel panel = new JPanel(new BorderLayout()); panel.setBackground(BG_BASE); JPanel grid = new JPanel(new GridLayout(0, 3, 3, 3)); grid.setBackground(BG_BASE); grid.setBorder(new EmptyBorder(8, 8, 8, 8)); for (Skill skill : OSRS_ORDER) { SkillData data = new SkillData(skill); skillRegistry.put(skill, data); grid.add(createSkillTile(data)); } panel.add(new JScrollPane(grid), BorderLayout.CENTER); totalLevelLabel.setForeground(TEXT_MAIN); panel.add(totalLevelLabel, BorderLayout.SOUTH); return panel; }
+
     private JPanel createSkillTile(SkillData data) { JPanel tile = new JPanel(new GridBagLayout()); tile.setBackground(PANEL_SURFACE); tile.setBorder(new LineBorder(BORDER_DIM)); GridBagConstraints gbc = new GridBagConstraints(); gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.gridx = 0; JPanel top = new JPanel(new BorderLayout()); top.setOpaque(false); JLabel icon = new JLabel(loadSkillIcon(data.skill)); data.lblLevel.setForeground(ACCENT_BLOOD); data.lblLevel.setFont(new Font("Arial", Font.BOLD, 18)); top.add(icon, BorderLayout.WEST); top.add(data.lblLevel, BorderLayout.EAST); data.lblXpString.setForeground(TEXT_DIM); data.lblXpString.setFont(new Font("Monospaced", Font.PLAIN, 10)); data.mainBar.setForeground(ACCENT_BLOOD); data.mainBar.setBackground(Color.BLACK); gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1; tile.add(data.lblXpString, gbc); gbc.gridy = 2; tile.add(data.mainBar, gbc); tile.addMouseListener(new MouseAdapter() { @Override public void mousePressed(MouseEvent e) { data.isTracking = !data.isTracking; tile.setBorder(new LineBorder(data.isTracking ? ACCENT_BLOOD : BORDER_DIM, 1)); refreshTrackerList(); } }); return tile; }
     private void refreshTrackerList() { trackerList.removeAll(); skillRegistry.values().stream().filter(d -> d.isTracking).forEach(d -> { trackerList.add(d.trackerPanel); trackerList.add(Box.createRigidArea(new Dimension(0, 10))); }); trackerList.add(Box.createVerticalGlue()); trackerList.revalidate(); trackerList.repaint(); }
     private void updateAll() { int projH = (int) projectionSpinner.getValue(); long tXp = 0; int tLg = 0; int p2pTotal = 0; int f2pTotal = 0; for (SkillData data : skillRegistry.values()) { int xp = Skills.getExperience(data.skill); int lvl = Skills.getRealLevel(data.skill); data.update(xp, lvl, startTime, projH); p2pTotal += lvl; if (F2P_SKILLS.contains(data.skill)) f2pTotal += lvl; if (data.isTracking) { tXp += Math.max(0, (xp - data.startXP)); tLg += Math.max(0, (lvl - data.startLevel)); } } totalXpGainedLabel.setText("Total XP Gained: " + String.format("%,d", tXp)); totalLevelsGainedLabel.setText("Total Levels Gained: " + tLg); totalLevelLabel.setText(String.format("F2P Total: %d | P2P Total: %d", f2pTotal, p2pTotal)); if (Client.isLoggedIn() && Players.getLocal() != null) { lblUsername.setText(Players.getLocal().getName()); lblPassword.setText(Optional.ofNullable(Client.getPassword()).orElse("null")); lblWorld.setText("World " + (Worlds.getCurrent() != null ? Worlds.getCurrent().getWorld() : "?")); boolean isMember = Client.isMembers(); lblMemberText.setText(isMember ? "Member" : "Free-to-Play"); lblMemberIcon.setIcon(loadStatusIcon(isMember ? "Member_icon" : "Free-to-play_icon")); lblCharName.setText(Players.getLocal().getName()); lblCoords.setText(Players.getLocal().getTile().toString()); lblGameState.setText(Client.getGameState().name()); } }
