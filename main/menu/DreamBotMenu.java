@@ -18,16 +18,14 @@ import org.dreambot.api.utilities.Logger;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import org.dreambot.api.wrappers.interactive.NPC;
 
+import javax.lang.model.element.Element;
 import javax.swing.*;
 import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.border.TitledBorder;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
+import java.awt.event.*;
 import java.util.*;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -39,8 +37,8 @@ import java.util.stream.Collectors;
  */
 public class DreamBotMenu extends JFrame {
     //TODO SETTINGS:
-    boolean forceTaskDescription = true;
-    boolean forceTaskStatus = true;
+    boolean isTaskDescriptionRequired = false;
+    boolean isTaskStatusRequired = false;
 
 
     private final AbstractScript script;
@@ -125,12 +123,12 @@ public class DreamBotMenu extends JFrame {
         mainTabs.setBackground(PANEL_SURFACE);
         mainTabs.setForeground(TEXT_MAIN);
 
-        mainTabs.addTab("Task List", createTaskListTab());
-        mainTabs.addTab("Task Library", createTaskLibraryTab());
-        mainTabs.addTab("Task Builder", createTaskBuilderTab());
-        mainTabs.addTab("Skill Tracker", loadTabIcon("skills_icon"), createSkillTrackerTab());
-        mainTabs.addTab("Status", null, createStatusTab());
-        mainTabs.addTab("Settings", null, createSettingsTab());
+        mainTabs.addTab("Task List", loadTabIcon("task_list_tab"), createTaskListTab());
+        mainTabs.addTab("Task Library", loadTabIcon("task_library_tab"),createTaskLibraryTab());
+        mainTabs.addTab("Task Builder", loadTabIcon("task_builder_tab"),createTaskBuilderTab());
+        mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
+        mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
+        mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
 
         projectionSpinner = new JSpinner(new SpinnerNumberModel(24, 1, 999, 1));
         styleSpinner(projectionSpinner);
@@ -417,10 +415,10 @@ public class DreamBotMenu extends JFrame {
             shiftQueue(1, libraryList, libraryModel, shiftPressed);
         });
 
-        JPanel panelButtons = new JPanel(new GridLayout(0, 1, 0, 5));
-        panelButtons.setOpaque(false);
-        panelButtons.add(btnUp);
-        panelButtons.add(btnDown);
+        JPanel panelNavButtons = new JPanel(new GridLayout(0, 1, 0, 5));
+        panelNavButtons.setOpaque(false);
+        panelNavButtons.add(btnUp);
+        panelNavButtons.add(btnDown);
 
         // 3. Create a wrapper for the center content (List + Editor)
         JPanel centerContent = new JPanel(new GridLayout(1, 2, 10, 0));
@@ -444,14 +442,14 @@ public class DreamBotMenu extends JFrame {
         panelCenterEastLibraryTab.setOpaque(false);
         btnSection.setOpaque(false);
 
-        JButton btnAddToQueue = createStyledBtn("Add task", new Color(0, 100, 0));
-        btnAddToQueue.addActionListener(e -> {
-            showToast("Adding to queue...", btnAddToQueue);
+        JButton btnAddTask = createStyledBtn("Add task", new Color(0, 100, 0));
+        btnAddTask.addActionListener(e -> {
+            showToast("Adding to queue...", btnAddTask);
             if(libraryList.getSelectedValue() != null) {
                 taskListModel.addElement(new Task(libraryList.getSelectedValue()));
             }
         });
-        btnSection.add(btnAddToQueue, BorderLayout.WEST);
+        btnSection.add(btnAddTask, BorderLayout.WEST);
 
         JButton btnSave = createStyledBtn("Save", new Color(100, 100, 0));
         btnSave.addActionListener(e -> {
@@ -461,15 +459,25 @@ public class DreamBotMenu extends JFrame {
         btnSection.add(btnSave, BorderLayout.EAST);
 
         panelCenterEastLibraryTab.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER);
-        panelCenterEastLibraryTab.add(btnSection, BorderLayout.SOUTH);
 
         // 4. Add both sections to the center wrapper
         centerContent.add(new JScrollPane(libraryList));
         centerContent.add(panelCenterEastLibraryTab);
 
         panelLibraryTab.add(createSubtitle("Task Library"), BorderLayout.NORTH);
-        panelLibraryTab.add(panelButtons, BorderLayout.WEST);
+        panelLibraryTab.add(panelNavButtons, BorderLayout.WEST);
         panelLibraryTab.add(centerContent, BorderLayout.CENTER);
+        panelLibraryTab.add(btnSection, BorderLayout.SOUTH);
+
+        // add listener to scan for nearby targets and select the first item if none selected on show
+        panelLibraryTab.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentShown(ComponentEvent e) {
+                scanNearbyTargets();
+                if (libraryList.getSelectedValue() == null && !modelTaskBuilder.isEmpty())
+                    libraryList.setSelectedIndex(0);
+            }
+        });
 
         return panelLibraryTab;
     }
@@ -523,9 +531,22 @@ public class DreamBotMenu extends JFrame {
 
             Task task = createTask(actions);
             if (task != null) {
-                libraryModel.addElement(task);
-                resetTaskBuilder();
-                showToast("Added to library!", btnCreateTask);
+                boolean exists = false;
+
+                for (int i = 0; i < libraryModel.getSize(); i++) {
+                    if (libraryModel.getElementAt(i).getName().equalsIgnoreCase(task.getName())) {
+                        exists = true;
+                        break;
+                    }
+                }
+
+                if (!exists) {
+                    libraryModel.addElement(task);
+                    resetTaskBuilder();
+                    showToast("Added to library!", btnCreateTask);
+                } else {
+                    showToast("Task already exists!", btnCreateTask);
+                }
             }
         });
 
@@ -558,10 +579,12 @@ public class DreamBotMenu extends JFrame {
 
         // create reset button to reset task builder inputs, ready for next task to be created
         JButton btnTaskBuilderRemove = createStyledBtn("Remove", new Color(100, 0, 0));
+        btnTaskBuilderRemove.setEnabled(false);
         btnTaskBuilderRemove.addActionListener(e -> {
             int selectedIndex = listTaskBuilder.getSelectedIndex();
             if (selectedIndex != -1) {
                 modelTaskBuilder.remove(selectedIndex);
+
                 showToast("Removed action!", btnTaskBuilderRemove);
             } else {
                 showToast("You must select an action first!", btnTaskBuilderRemove);
@@ -656,31 +679,24 @@ public class DreamBotMenu extends JFrame {
             String name = taskNameInput.getText();
             String description = taskDescriptionInput.getText();
             String status = taskStatusInput.getText();
+            String toast = "";
 
-            if (actions == null || actions.isEmpty()) {
-                showToast("Add some actions first!", listTaskBuilder);
-                throw new Exception();
-            }
+            if (actions == null || actions.isEmpty())
+                throw new Exception("Add some actions!");
 
-            if (name.isEmpty()) {
-                showToast("Enter a valid name!", taskNameInput);
-                throw new Exception();
-            }
+            if (name.isEmpty())
+                throw new Exception("Enter a valid name!");
 
-            if (forceTaskDescription && description.isEmpty()) {
-                showToast("Enter a valid description!", taskDescriptionInput);
-                throw new Exception();
-            }
+            if (isTaskDescriptionRequired && description.isEmpty())
+                throw new Exception("Enter a valid description!");
 
-            if (forceTaskStatus && status.isEmpty()) {
-                showToast("Enter a valid status!", taskStatusInput);
-                throw new Exception();
-            }
+            if (isTaskStatusRequired && status.isEmpty())
+                throw new Exception("Enter a valid status!");
 
             return new Task(name, description, actions, status);
 
         } catch (Exception e) {
-            //showToast("Unable to create task!", btnCreateTask); too spammy having two at once?
+            showToast(e.getMessage(), btnCreateTask);
             return null;
         }
     }
@@ -843,9 +859,9 @@ public class DreamBotMenu extends JFrame {
 
         public Task(String name, String description, List<Action> actions, String status) {
             this.name = name;
-            this.description = description;
+            this.description = (description == null || description.isEmpty()) ? "No description provided by Author." : description;
             this.actions = actions;
-            this.status = (status == null || status.isEmpty()) ? "Ready" : status;
+            this.status = (status == null || status.isEmpty()) ? "Executing task..." : status;
         }
 
         public Task(Task o) {
@@ -891,7 +907,7 @@ public class DreamBotMenu extends JFrame {
         }
 
         @Override public String toString() {
-            return name + " | " + status;
+            return name;
         }
     }
 
@@ -1202,7 +1218,7 @@ public class DreamBotMenu extends JFrame {
                     Objects.requireNonNull(getClass()
                             .getResource("/resources/icons/tabs/" + name + ".png")))
                     .getImage()
-                    .getScaledInstance(18, 18, Image.SCALE_SMOOTH));
+                    .getScaledInstance(16, 16, Image.SCALE_SMOOTH));
         } catch (Exception e) {
             return null;
         }
