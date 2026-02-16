@@ -132,7 +132,7 @@ public final class ExplvsMapOG {
 
             // create a data file to store webview credentials for users to prevent manual logins each launch.
             System.out.println("Creating data file...");
-            File data = new File(System.getProperty("user.home"), "ETAbot/javaFX");
+            File data = new File(System.getProperty("user.home"), "DreamBotMan/javaFX");
 
             System.out.println("Setting up data file...");
             System.setProperty("javafx.user.data.dir", data.getAbsolutePath());

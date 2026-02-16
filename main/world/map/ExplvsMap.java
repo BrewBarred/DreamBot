@@ -56,7 +56,7 @@ public final class ExplvsMap {
         System.out.println("Initializing EXPLV's map...");
         try {
             Platform.setImplicitExit(false);
-            File data = new File(System.getProperty("user.home"), "ETAbot/javaFX");
+            File data = new File(System.getProperty("user.home"), "DreamBotMan/javaFX");
             System.setProperty("javafx.user.data.dir", data.getAbsolutePath());
 
             MAP_FRAME = new JFrame("Explv Map (Stand-alone)");

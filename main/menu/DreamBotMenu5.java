@@ -28,8 +28,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * <h1>ETAbot Nexus Client</h1>
- * @author ETAbot Dev
+ * <h1>DreamBotMan Nexus Client</h1>
+ * @author DreamBotMan Dev
  * @version 15.0.0-Elite
  */
 public class DreamBotMenu5 extends JFrame {
@@ -101,7 +101,7 @@ public class DreamBotMenu5 extends JFrame {
         this.script = script;
         this.startTime = System.currentTimeMillis();
 
-        setTitle("ETAbot | Nexus Client");
+        setTitle("DreamBotMan | Nexus Client");
         setSize(1400, 950);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -431,7 +431,7 @@ public class DreamBotMenu5 extends JFrame {
         header.setPreferredSize(new Dimension(0, 85));
         header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_DIM));
 
-        JLabel titleLabel = new JLabel(" ETAbot", SwingConstants.LEFT);
+        JLabel titleLabel = new JLabel(" DreamBotMan", SwingConstants.LEFT);
         titleLabel.setForeground(ACCENT_BLOOD);
         titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32));
         titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0));
@@ -831,8 +831,8 @@ public class DreamBotMenu5 extends JFrame {
             lblPassword.setText(Optional.ofNullable(Client.getPassword()).orElse("null"));
             lblWorld.setText("World " + (Worlds.getCurrent() != null ? Worlds.getCurrent().getWorld() : "?"));
             boolean isMember = Client.isMembers();
-            lblMemberText.setText(isMember ? "Member" : "Free-to-Play");
-            lblMemberIcon.setIcon(loadStatusIcon(isMember ? "Member_icon" : "Free-to-play_icon"));
+            lblMemberText.setText(isMember ? "P2P" : "F2P");
+            lblMemberIcon.setIcon(loadStatusIcon(isMember ? "P_icon" : "Free-to-play_icon"));
             lblCharName.setText(Players.getLocal().getName());
             lblCoords.setText(Players.getLocal().getTile().toString());
             lblGameState.setText(Client.getGameState().name());

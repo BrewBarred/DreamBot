@@ -19,7 +19,7 @@
 //import java.util.*;
 //
 ///**
-// * The ETAbot Nexus Client.
+// * The DreamBotMan Nexus Client.
 // * * UPDATES:
 // * - Linked UI Controls to actual API methods (ClientSettings, Client.getInstance()).
 // * - Added logic for FPS sliders, Mouse Speed, and Toggles.
@@ -67,7 +67,7 @@
 //        this.script = script;
 //        this.startTime = System.currentTimeMillis();
 //
-//        setTitle("ETAbot | Nexus Client");
+//        setTitle("DreamBotMan | Nexus Client");
 //        setSize(1350, 850);
 //        setLocationRelativeTo(null);
 //        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -342,7 +342,7 @@
 //    // --- OTHER UI METHODS (Header, Skills, Sidebar - Same as before) ---
 //    private JPanel createHeaderPanel() {
 //        JPanel header = new JPanel(new BorderLayout()); header.setBackground(PANEL_SURFACE); header.setPreferredSize(new Dimension(0, 85)); header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_DIM));
-//        JLabel titleLabel = new JLabel(" ETAbot", SwingConstants.LEFT); titleLabel.setForeground(ACCENT_BLOOD); titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32)); titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0));
+//        JLabel titleLabel = new JLabel(" DreamBotMan", SwingConstants.LEFT); titleLabel.setForeground(ACCENT_BLOOD); titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32)); titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0));
 //        JPanel rightContainer = new JPanel(new BorderLayout()); rightContainer.setOpaque(false); rightContainer.setBorder(new EmptyBorder(0, 0, 0, 20));
 //        JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 20)); controls.setOpaque(false);
 //        btnPlayPause = createIconButton("▶", "Pause/Resume Script", e -> toggleScriptState()); JButton btnStop = createIconButton("■", "Stop Script", e -> stopScript());

@@ -45,7 +45,7 @@ public class SkillsTab_SickTabs extends JFrame {
 
     public SkillsTab_SickTabs() {
         this.startTime = System.currentTimeMillis();
-        setTitle("ETAbot | Nexus Client");
+        setTitle("DreamBotMan | Nexus Client");
         setSize(1300, 850);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -58,7 +58,7 @@ public class SkillsTab_SickTabs extends JFrame {
         header.setPreferredSize(new Dimension(0, 85));
         header.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, BLOOD_RED));
 
-        JLabel titleLabel = new JLabel(" ETAbot", SwingConstants.LEFT);
+        JLabel titleLabel = new JLabel(" DreamBotMan", SwingConstants.LEFT);
         titleLabel.setForeground(BLOOD_RED);
         titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32));
         titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0));

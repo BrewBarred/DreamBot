@@ -21,12 +21,12 @@
 //import java.util.function.Supplier;
 //
 ///**
-// * <h1>ETAbot Nexus Client</h1>
+// * <h1>DreamBotMan Nexus Client</h1>
 // * <p>
-// * The central command dashboard for the ETAbot script suite.
+// * The central command dashboard for the DreamBotMan script suite.
 // * </p>
 // *
-// * @author ETAbot Dev
+// * @author DreamBotMan Dev
 // * @version 5.7.0-Elite
 // */
 //public class DreamBotMenu extends JFrame {
@@ -93,7 +93,7 @@
 //            script.getScriptManager().pause();
 //        }
 //
-//        setTitle("ETAbot | Nexus Client");
+//        setTitle("DreamBotMan | Nexus Client");
 //        setSize(1350, 850);
 //        setLocationRelativeTo(null);
 //        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -171,7 +171,7 @@
 //        header.setPreferredSize(new Dimension(0, 85));
 //        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_DIM));
 //
-//        JLabel titleLabel = new JLabel(" ETAbot", SwingConstants.LEFT);
+//        JLabel titleLabel = new JLabel(" DreamBotMan", SwingConstants.LEFT);
 //        titleLabel.setForeground(ACCENT_BLOOD);
 //        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32));
 //        titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0));
@@ -434,7 +434,7 @@
 //
 //            // Membership logic with icons
 //            boolean isMember = Client.isMembers();
-//            lblMemberText.setText(isMember ? "Member" : "Free-to-Play");
+//            lblMemberText.setText(isMember ? P2P : "F2P");
 //            lblMemberIcon.setIcon(loadStatusIcon(isMember ? "Member_icon" : "Free-to-play_icon"));
 //
 //            if (Players.getLocal() != null) {

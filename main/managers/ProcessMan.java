@@ -8,7 +8,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Launcher class for ETAbot.
+ * Launcher class for DreamBotMan.
  * Handles the hand-off between Java and the Windows Batch environment.
  */
 public class ProcessMan {
@@ -51,7 +51,7 @@ public class ProcessMan {
         command.add("cmd.exe");
         command.add("/c");
         command.add("start");
-        command.add("\"ETAbot External Process\"");
+        command.add("\"DreamBotMan External Process\"");
         command.add(batchFilePath);
 
         for (String arg : args) {

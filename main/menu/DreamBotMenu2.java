@@ -27,8 +27,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * <h1>ETAbot</h1>
- * @author ETAbot Dev
+ * <h1>DreamBotMan</h1>
+ * @author DreamBotMan Dev
  * @version 14.0.0-Elite
  */
 public class DreamBotMenu2 extends JFrame {
@@ -99,7 +99,7 @@ public class DreamBotMenu2 extends JFrame {
         this.script = script;
         this.startTime = System.currentTimeMillis();
 
-        setTitle("ETAbot | DreamBot Manager v2");
+        setTitle("DreamBotMan | DreamBot Manager v2");
         setSize(1400, 950);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -152,8 +152,10 @@ public class DreamBotMenu2 extends JFrame {
         JPanel p = new JPanel(new BorderLayout(10, 10));
         p.setBackground(BG_BASE); p.setBorder(new EmptyBorder(15, 15, 15, 15));
         JPanel arrowCol = new JPanel(new GridLayout(2, 1, 0, 5)); arrowCol.setOpaque(false);
-        JButton btnUp = createStyledBtn("▲", new Color(40, 40, 40)); btnUp.addActionListener(e -> shiftQueue(-1));
-        JButton btnDown = createStyledBtn("▼", new Color(40, 40, 40)); btnDown.addActionListener(e -> shiftQueue(1));
+        JButton btnUp = createStyledBtn("▲", new Color(40, 40, 40));
+        btnUp.addActionListener(e -> shiftQueue(-1));
+        JButton btnDown = createStyledBtn("▼", new Color(40, 40, 40));
+        btnDown.addActionListener(e -> shiftQueue(1));
         arrowCol.add(btnUp); arrowCol.add(btnDown);
         taskQueueList = new JList<>(queueModel);
         taskQueueList.setCellRenderer(new TaskCellRenderer());
@@ -254,7 +256,7 @@ public class DreamBotMenu2 extends JFrame {
     // --- ORIGINAL METHODS RESTORED ---
     private JPanel createHeaderPanel() {
         JPanel header = new JPanel(new BorderLayout()); header.setBackground(PANEL_SURFACE); header.setPreferredSize(new Dimension(0, 85)); header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_DIM));
-        JLabel titleLabel = new JLabel(" ETAbot", SwingConstants.LEFT); titleLabel.setForeground(ACCENT_BLOOD); titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32)); titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0));
+        JLabel titleLabel = new JLabel(" DreamBotMan", SwingConstants.LEFT); titleLabel.setForeground(ACCENT_BLOOD); titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32)); titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0));
         JPanel rightContainer = new JPanel(new BorderLayout()); rightContainer.setOpaque(false); rightContainer.setBorder(new EmptyBorder(0, 0, 0, 20));
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 20)); controls.setOpaque(false);
         btnPlayPause = createIconButton("▶", "Resume Script", e -> toggleScriptState()); JButton btnStop = createIconButton("■", "Stop Script", e -> stopScript()); btnInputToggle = createIconButton("🖱", "Block User Input", e -> toggleUserInput());
@@ -302,9 +304,15 @@ public class DreamBotMenu2 extends JFrame {
             lblUsername.setText(Optional.ofNullable(Players.getLocal().getName()).orElse("null")); // Adjusted for typical DreamBot calls
             lblPassword.setText(Optional.ofNullable(Client.getPassword()).orElse("null"));
             lblWorld.setText("World " + (Worlds.getCurrent() != null ? Worlds.getCurrent().getWorld() : "?"));
-            boolean isMember = Client.isMembers(); lblMemberText.setText(isMember ? "Member" : "Free-to-Play");
+            boolean isMember = Client.isMembers();
+            lblMemberText.setText(isMember ? "P2P" : "F2P");
             lblMemberIcon.setIcon(loadStatusIcon(isMember ? "Member_icon" : "Free-to-play_icon"));
-            if (Players.getLocal() != null) { lblCharName.setText(Players.getLocal().getName()); lblCoords.setText(Players.getLocal().getTile().toString()); }
+
+            if (Players.getLocal() != null) {
+                lblCharName.setText(Players.getLocal().getName());
+                lblCoords.setText(Players.getLocal().getTile().toString());
+            }
+
             lblGameState.setText(Client.getGameState().name());
         }
     }

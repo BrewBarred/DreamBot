@@ -20,7 +20,7 @@
 //            File baseDir = new File(System.getProperty("user.dir")).getAbsoluteFile();
 //
 //            // BAT stored alongside your map launcher code (relative to baseDir)
-//            File bat = new File(baseDir, "ETAbot\\scripts\\main\\world\\map\\run_map.bat").getAbsoluteFile();
+//            File bat = new File(baseDir, "DreamBotMan\\scripts\\main\\world\\map\\run_map.bat").getAbsoluteFile();
 //
 //            log("baseDir=" + baseDir);
 //            log("bat=" + bat);

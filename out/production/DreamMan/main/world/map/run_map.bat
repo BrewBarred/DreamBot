@@ -4,11 +4,11 @@ setlocal EnableExtensions EnableDelayedExpansion
 REM Folder containing this bat (ends with \)
 set "HERE=%~dp0"
 
-REM ETAbot root is 4 levels up from ...\scripts\main\world\map\
+REM DreamBotMan root is 4 levels up from ...\scripts\main\world\map\
 for %%I in ("%HERE%..\..\..\..") do set "ETABOT=%%~fI"
 
 REM Classpath (IntelliJ default output)
-set "CP=%ETABOT%\out\production\ETAbot"
+set "CP=%ETABOT%\out\production\DreamBotMan"
 
 REM Use java (not javaw) to show the real error
 set "JAVA_EXE=java"
