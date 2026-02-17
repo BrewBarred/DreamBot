@@ -406,6 +406,13 @@ public class DreamBotMenu extends JFrame {
 //        JPanel panelButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
 //        panelButtons.setOpaque(false);
 //
+        ///  Create Task List save button
+        JButton btnTaskListSave = createStyledBtn("Save", COLOR_GREY);
+        btnTaskListSave.addActionListener(e -> {
+            showToast("Saving...", btnTaskListSave, true);
+            dataMan.saveTaskList(listTaskList);
+        });
+
         ///  Create Task List duplicate button
         JButton btnTaskListDuplicate = createStyledBtn("Duplicate", COLOR_GREY);
         btnTaskListDuplicate.addActionListener(e -> {
@@ -426,15 +433,6 @@ public class DreamBotMenu extends JFrame {
             showToast("Duplication complete! Size: " + modelTaskList.size(), btnTaskListDuplicate, true);
         });
 
-        ///  Create Task List edit button
-        JButton btnTaskListEdit = createStyledBtn("Edit", COLOR_GREY);
-        btnTaskListEdit.addActionListener(e -> {
-            loadIntoBuilder(listTaskList.getSelectedValue());
-            showToast("Moving to...", btnTaskListEdit, true);
-            // switch to tab 2 (3rd tab = Task Builder) to edit task
-            mainTabs.setSelectedIndex(2);
-        });
-
         ///  Create Task List remove button
         JButton btnTaskListRemove = createStyledBtn("Remove", COLOR_RED);
         btnTaskListRemove.setEnabled(listTaskList.getSelectedIndex() != -1);
@@ -449,28 +447,39 @@ public class DreamBotMenu extends JFrame {
             }
         });
 
+        ///  Create Task List edit button
+        JButton btnTaskListView = createStyledBtn("View in builder...", COLOR_GREY);
+        btnTaskListView.addActionListener(e -> {
+            loadIntoBuilder(listTaskList.getSelectedValue());
+            showToast("Moving to builder for viewing...", btnTaskListView, true);
+            // switch to tab 2 (3rd tab = Task Builder) to edit task
+            mainTabs.setSelectedIndex(2);
+        });
+
         listTaskList.addListSelectionListener(e -> {
             btnTaskListRemove.setEnabled(!listTaskList.isSelectionEmpty());
         });
 
-        ///  Create Task List save button
-        JButton btnTaskListSave = createStyledBtn("Save", COLOR_GREY);
-        btnTaskListSave.addActionListener(e -> {
-            showToast("Saving...", btnTaskListSave, true);
-            dataMan.saveTaskList(listTaskList);
-        });
-
         ///  Add all buttons
-        southTaskList.add(btnTaskListDuplicate);
-        southTaskList.add(btnTaskListEdit);
-        southTaskList.add(btnTaskListRemove);
         southTaskList.add(btnTaskListSave);
+        southTaskList.add(btnTaskListDuplicate);
+        southTaskList.add(btnTaskListRemove);
+        southTaskList.add(btnTaskListView);
 
         // add all panels to the main panel (task list panel)
         panelTaskList.add(createSubtitle("Task List"), BorderLayout.NORTH);
         panelTaskList.add(west, BorderLayout.WEST);
         panelTaskList.add(new JScrollPane(listTaskList), BorderLayout.CENTER);
         panelTaskList.add(southTaskList, BorderLayout.SOUTH);
+
+        // add listener to scan for nearby targets and select the first item if none selected on show
+        panelTaskList.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentShown(ComponentEvent e) {
+                refreshTaskList();
+            }
+        });
+
 
         return panelTaskList;
     }
@@ -510,11 +519,6 @@ public class DreamBotMenu extends JFrame {
         libraryEditorArea = new JTextArea();
         libraryEditorArea.setBackground(new Color(15, 15, 15));
         libraryEditorArea.setForeground(TEXT_MAIN);
-
-        listTaskLibrary.addListSelectionListener(e -> {
-            Task t = listTaskLibrary.getSelectedValue();
-            if (t != null) libraryEditorArea.setText(t.getEditableString());
-        });
 
         /// CENTER EAST: Edit panel + buttons
         JPanel panelCenterEastLibraryTab = new JPanel(new BorderLayout(0, 10));
@@ -557,6 +561,9 @@ public class DreamBotMenu extends JFrame {
 
         listTaskLibrary.addListSelectionListener(e -> {
             btnTaskLibraryDelete.setEnabled(!listTaskLibrary.isSelectionEmpty());
+            Task t = listTaskLibrary.getSelectedValue();
+            if (t != null)
+                libraryEditorArea.setText(t.getEditableString());
         });
 
         ///  Create Task Library save button
@@ -609,10 +616,18 @@ public class DreamBotMenu extends JFrame {
             listTaskLibrary.setSelectedIndex(modelTaskLibrary.getSize() - 1);
     }
 
-    private void refreshTaskBuilder() {
-        if (listTaskBuilder.getSelectedValue() == null && !modelTaskBuilder.isEmpty())
+    private void refreshTaskBuilder(boolean forceSelectLast) {
+        // if the list is empty or an invalid item is selected OR if force selecting the last item...
+        if (listTaskBuilder.getSelectedValue() == null && !modelTaskBuilder.isEmpty() || forceSelectLast)
+            // temp fix the index error by setting the index to the last item in the list (likely most relevant)
             listTaskBuilder.setSelectedIndex(modelTaskBuilder.getSize() - 1);
-        //scanNearbyTargets();
+
+        // scan for nearby targets to update the nearby targets list
+        scanNearbyTargets();
+    }
+
+    private void refreshTaskBuilder() {
+        refreshTaskBuilder(false);
     }
 
     private JPanel createTaskBuilderTab() {
@@ -790,7 +805,7 @@ public class DreamBotMenu extends JFrame {
                         new Action((ActionType) actionCombo.getSelectedItem(), manualTargetInput.getText())
                 );
                 showToast("Added action to builder!", btnTaskBuilderAdd, true);
-                refreshTaskBuilder();
+                refreshTaskBuilder(true);
             } else {
                 showToast("Enter a target name!", btnTaskBuilderAdd, false);
             }
@@ -813,7 +828,7 @@ public class DreamBotMenu extends JFrame {
                 else if(e.getClickCount() == 2) {
                     modelTaskBuilder.addElement(new Action((ActionType) actionCombo.getSelectedItem(), val));
                     showToast("Added action to builder!", btnTaskBuilderAdd, true);
-                    refreshTaskBuilder();
+                    refreshTaskBuilder(true);
                 }
             }
         });
@@ -838,11 +853,19 @@ public class DreamBotMenu extends JFrame {
         panelTaskBuilder.add(center, BorderLayout.CENTER);
         panelTaskBuilder.add(east, BorderLayout.EAST);
 
+        ///  Add listeners
+        // add component listener to update task builder on show
         panelTaskBuilder.addComponentListener(new ComponentAdapter() {
                 @Override
                 public void componentShown(ComponentEvent e) {
                     refreshTaskBuilder();
                 }
+        });
+
+        listTaskLibrary.addListSelectionListener(e -> {
+            Task t = listTaskLibrary.getSelectedValue();
+            if (t != null)
+                libraryEditorArea.setText(t.getEditableString());
         });
 
 
@@ -1660,13 +1683,13 @@ public class DreamBotMenu extends JFrame {
     private class TaskCellRenderer extends DefaultListCellRenderer {
         @Override
         public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
-            JLabel l = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+            JLabel selectedTask = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
             if (currentExecutionIndex != -1 && index == currentExecutionIndex) {
-                l.setBackground(TAB_SELECTED);
-                l.setForeground(Color.WHITE);
-                l.setText("▶ " + l.getText());
+                selectedTask.setForeground(Color.YELLOW);
+                selectedTask.setText("→ " + selectedTask.getText());
+                selectedTask.setFont(new Font("Consolas", Font.BOLD, 12));
             }
-            return l;
+            return selectedTask;
         }
     }
 
