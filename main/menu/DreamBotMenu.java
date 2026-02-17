@@ -48,7 +48,7 @@ public class DreamBotMenu extends JFrame {
     private int currentExecutionIndex = 0;
 
     // --- Script ---
-    private final int TOAST_DELAY = 600;
+    private final int TOAST_DELAY = 150;
 
     private final AbstractScript script;
     private final JPanel sidePanel;
@@ -101,6 +101,7 @@ public class DreamBotMenu extends JFrame {
     private JButton btnPlayPause, btnInputToggle, btnCaptureToggle;
 
     // --- Theme ---
+    private final Map<JComponent, Color> originalColors = new WeakHashMap<>();
     private final Color BG_BASE = new Color(12, 12, 12);
     private final Color PANEL_SURFACE = new Color(24, 24, 24);
     private final Color COLOR_BLOOD = new Color(150, 0, 0);
@@ -232,9 +233,11 @@ public class DreamBotMenu extends JFrame {
         setVisible(true);
 
         SwingUtilities.invokeLater(() -> {
+            // scan for nearby targets to populate task builder menu in advance (saves the user a short wait)
+            scanNearbyTargets();
             new Timer(1000, e -> updateUI()).start();
             // every 5 seconds scan for nearby targets if task builder is active
-            new Timer(5000, e -> {
+            new Timer(4000, e -> {
                 if (mainTabs.getSelectedIndex() == 2)
                     scanNearbyTargets();
             }).start();
@@ -351,8 +354,12 @@ public class DreamBotMenu extends JFrame {
         JButton btnUp = createStyledBtn("▲", new Color(40, 40, 40));
         btnUp.addActionListener(e -> {
             boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
-            shiftQueue(-1, listTaskList, modelTaskList, shiftPressed);
+            if (listTaskList.getSelectedIndex() > 0) {
+                shiftQueue(-1, listTaskList, modelTaskList, shiftPressed);
+                showToast(null, btnUp, true);
+            } showToast(null, btnUp, false);
         });
+
         JButton btnDown = createStyledBtn("▼", new Color(40, 40, 40));
         btnDown.addActionListener(e -> {
             boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
@@ -414,20 +421,23 @@ public class DreamBotMenu extends JFrame {
             Task task = new Task(selected);
             // add the duplicated task to the task list
             modelTaskList.addElement(task);
-            // refresh the display list
+            // refresh the task list display
             listTaskList.repaint();
+            showToast("Duplication complete! Size: " + modelTaskList.size(), btnTaskListDuplicate, true);
         });
 
         ///  Create Task List edit button
         JButton btnTaskListEdit = createStyledBtn("Edit", COLOR_GREY);
         btnTaskListEdit.addActionListener(e -> {
             loadIntoBuilder(listTaskList.getSelectedValue());
+            showToast("Moving to...", btnTaskListEdit, true);
             // switch to tab 2 (3rd tab = Task Builder) to edit task
             mainTabs.setSelectedIndex(2);
         });
 
         ///  Create Task List remove button
         JButton btnTaskListRemove = createStyledBtn("Remove", COLOR_RED);
+        btnTaskListRemove.setEnabled(listTaskList.getSelectedIndex() != -1);
         btnTaskListRemove.addActionListener(e -> {
             int selectedIndex = listTaskList.getSelectedIndex();
             if (selectedIndex != -1) {
@@ -440,7 +450,7 @@ public class DreamBotMenu extends JFrame {
         });
 
         listTaskList.addListSelectionListener(e -> {
-            btnTaskListRemove.setEnabled(!listTaskLibrary.isSelectionEmpty());
+            btnTaskListRemove.setEnabled(!listTaskList.isSelectionEmpty());
         });
 
         ///  Create Task List save button
@@ -1043,7 +1053,18 @@ public class DreamBotMenu extends JFrame {
         }
 
         public Task(Task o) {
-            this(o.name, o.description, o.actions, o.status);
+            this.name = o.name;
+            this.description = o.description;
+            this.status = o.status;
+
+            // DEEP COPY logic:
+            this.actions = new ArrayList<>();
+            if (o.actions != null) {
+                for (Action originalAction : o.actions) {
+                    // Create a brand new action object for the new list
+                    this.actions.add(new Action(originalAction));
+                }
+            }
         }
 
         public String getEditableString() {
@@ -1181,6 +1202,9 @@ public class DreamBotMenu extends JFrame {
 
         isToastProcessing = true;
         ToastRequest request = toastQueue.poll();
+
+        if (request == null)
+            return;
 
         // Calculate position
         Point location = SwingUtilities.convertPoint(request.anchor, 0, 0, getLayeredPane());
@@ -1327,22 +1351,18 @@ public class DreamBotMenu extends JFrame {
         try {
             Gson gson = new Gson();
 
-            // 1. Supabase returns a List of Objects. Define that type.
-            // We are looking for: List<Map<String, Map<String, Task>>>
-            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, Map<String, Task>>>>(){}.getType();
-            List<Map<String, Map<String, Task>>> responseList = gson.fromJson(json, wrapperType);
+            // Supabase wraps the response in an outer array: [ { "tasks": [...] } ]
+            // "tasks" is now a List, not a Map
+            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, List<DreamBotMenu.Task>>>>(){}.getType();
+            List<Map<String, List<Task>>> responseList = gson.fromJson(json, wrapperType);
 
             if (responseList != null && !responseList.isEmpty()) {
-                // 2. Get the "library" map from the first result
-                Map<String, Task> fetchedTasks = responseList.get(0).get("tasks");
+                List<Task> fetchedTasks = responseList.get(0).get("tasks");
 
                 if (fetchedTasks != null) {
-                    // 3. Update the UI on the Swing thread
                     SwingUtilities.invokeLater(() -> {
                         modelTaskList.clear();
-                        for (Task task : fetchedTasks.values()) {
-                            // Because GSON uses the Task constructor, these are
-                            // now real objects with executable action lists.
+                        for (Task task : fetchedTasks) {
                             modelTaskList.addElement(task);
                         }
                         Logger.log("Successfully loaded " + modelTaskList.size() + " tasks into the task list.");
@@ -1363,19 +1383,18 @@ public class DreamBotMenu extends JFrame {
      * @param flashColor The color to flash (e.g., new Color(100, 0, 0) for red).
      */
     private void flashControl(JComponent component, Color flashColor) {
-        // Capture the original background color to revert to later
-        final Color originalColor = component.getBackground();
+        // Store the original color only once — before any flash has occurred
+        originalColors.putIfAbsent(component, component.getBackground());
 
-        // 1. Apply Flash State
         component.setBackground(flashColor);
+        component.repaint();
 
-        // 2. Setup Revert Timer
         Timer revertTimer = new Timer(200, e -> {
-            component.setBackground(originalColor);
+            component.setBackground(originalColors.get(component));
             component.repaint();
         });
 
-        revertTimer.setRepeats(false); // Ensure it only runs once
+        revertTimer.setRepeats(false);
         revertTimer.start();
     }
 

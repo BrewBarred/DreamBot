@@ -43,6 +43,43 @@ public class DataMan {
 
     // --- Primary Public Methods ---
 
+//    public void saveTaskList(JList<DreamBotMenu.Task> taskList) {
+//        new Thread(() -> {
+//            try {
+//                String playerName = getValidPlayerName();
+//                if (playerName == null)
+//                    return;
+//
+//                Logger.log(Logger.LogType.INFO, "Saving " + playerName + "'s task list...");
+//
+//                // Convert JList items into a Map to preserve structure
+//                Map<String, DreamBotMenu.Task> taskMap = new LinkedHashMap<>();
+//                for (int i = 0; i < taskList.getModel().getSize(); i++) {
+//                    DreamBotMenu.Task task = taskList.getModel().getElementAt(i);
+//                    taskMap.put(task.getName(), task);
+//                }
+//
+//                // Construct the JSON payload for Supabase
+//                // Note: The key names must match your database column names exactly
+//                Map<String, Object> payload = new HashMap<>();
+//                payload.put("username", playerName);
+//                payload.put("tasks", taskMap);
+//                payload.put("last_accessed", "now()");
+//
+//                String jsonBody = gson.toJson(payload);
+//
+//                // POST to Supabase (configured as UPSERT in setPropertiesHTTP)
+//                boolean success = executeRequest(REQUEST_METHOD.POST, TABLE_URL, jsonBody);
+//
+//                if (success)
+//                    Logger.log(Logger.LogType.INFO, "Save success!");
+//
+//            } catch (Exception e) {
+//                Logger.log(Logger.LogType.ERROR, "Save error: " + e.getMessage());
+//            }
+//        }).start();
+//    }
+
     public void saveTaskList(JList<DreamBotMenu.Task> taskList) {
         new Thread(() -> {
             try {
@@ -52,27 +89,26 @@ public class DataMan {
 
                 Logger.log(Logger.LogType.INFO, "Saving " + playerName + "'s task list...");
 
-                // Convert JList items into a Map to preserve structure
-                Map<String, DreamBotMenu.Task> taskMap = new LinkedHashMap<>();
+                // Use a List instead of a Map to preserve duplicates
+                List<DreamBotMenu.Task> taskListData = new ArrayList<>();
                 for (int i = 0; i < taskList.getModel().getSize(); i++) {
-                    DreamBotMenu.Task task = taskList.getModel().getElementAt(i);
-                    taskMap.put(task.getName(), task);
+                    taskListData.add(taskList.getModel().getElementAt(i));
                 }
 
-                // Construct the JSON payload for Supabase
-                // Note: The key names must match your database column names exactly
                 Map<String, Object> payload = new HashMap<>();
                 payload.put("username", playerName);
-                payload.put("tasks", taskMap);
+                payload.put("tasks", taskListData);
                 payload.put("last_accessed", "now()");
 
                 String jsonBody = gson.toJson(payload);
+                Logger.log(Logger.LogType.INFO, "Sending Payload: " + jsonBody);
 
-                // POST to Supabase (configured as UPSERT in setPropertiesHTTP)
                 boolean success = executeRequest(REQUEST_METHOD.POST, TABLE_URL, jsonBody);
 
                 if (success)
                     Logger.log(Logger.LogType.INFO, "Save success!");
+                else
+                    Logger.log(Logger.LogType.ERROR, "Save failed: Server rejected the request.");
 
             } catch (Exception e) {
                 Logger.log(Logger.LogType.ERROR, "Save error: " + e.getMessage());
