@@ -1,9 +1,13 @@
 package main.scripts;
 
 import main.menu.DreamBotMenu;
+import org.dreambot.api.Client;
+import org.dreambot.api.data.GameState;
+import org.dreambot.api.methods.interactive.Players;
 import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.script.Category;
 import org.dreambot.api.script.ScriptManifest;
+import org.dreambot.api.script.listener.GameStateListener;
 
 import javax.swing.*;
 
@@ -13,8 +17,9 @@ import javax.swing.*;
         version = 1.0,
         category = Category.MISC
 )
-public class DreamBot extends AbstractScript {
+public class DreamBot extends AbstractScript implements GameStateListener {
     private DreamBotMenu menu;
+    private String lastPlayerName = "";
 
     @Override
     public void onStart() {
@@ -81,5 +86,28 @@ public class DreamBot extends AbstractScript {
         }
 
         return 600;
+    }
+
+    /**
+     * This triggers whenever the game state changes (e.g., LOGIN_SCREEN -> LOGGED_IN)
+     */
+    @Override
+    public void onGameStateChange(GameState gameState) {
+        if (gameState == GameState.LOGGED_IN) {
+            // Give the client a moment to fully load the player object
+            Players.getLocal();
+            String currentPlayer = Players.getLocal().getName();
+
+            if (currentPlayer != null && !currentPlayer.equals(lastPlayerName)) {
+                log("New login detected for: " + currentPlayer);
+                updateAccountData(currentPlayer);
+                lastPlayerName = currentPlayer;
+            }
+        }
+    }
+
+    private void updateAccountData(String name) {
+        // Update your specific configs here
+        log("Fetching data for " + name);
     }
 }
