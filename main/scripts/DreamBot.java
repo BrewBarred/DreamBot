@@ -135,6 +135,7 @@ public class DreamBot extends AbstractScript implements GameStateListener {
         return super.isUserVIP();
     }
 
+    @Override
     public boolean isUserSponsor() {
         // TODO enable special features for those supporting DreamBot or me
         // TODO add to status tab
@@ -151,9 +152,11 @@ public class DreamBot extends AbstractScript implements GameStateListener {
         return super.isPaused();
     }
 
-
     private void updateAccountData(String name) {
         // Update your specific configs here
         log("Fetching data for " + name);
+        menu.loadTaskList();
+        menu.loadTaskLibrary();
+        menu.loadTaskBuilder();
     }
 }

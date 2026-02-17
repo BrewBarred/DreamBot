@@ -1295,7 +1295,7 @@ public class DreamBotMenu extends JFrame {
         return Players.getLocal().getName();
     }
 
-    private void loadTaskList() {
+    public void loadTaskList() {
         new Thread(() -> {
             // Use the method from your DataMan class to get the raw JSON
             String rawJson = dataMan.loadDataByPlayer("tasks");
@@ -1307,7 +1307,7 @@ public class DreamBotMenu extends JFrame {
         }).start();
     }
 
-    private void loadTaskLibrary() {
+    public void loadTaskLibrary() {
         new Thread(() -> {
             // Use the method from your DataMan class to get the raw JSON
             String rawJson = dataMan.loadDataByPlayer("library");
