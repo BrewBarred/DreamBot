@@ -170,24 +170,29 @@ public class DataMan {
             String playerName = getValidPlayerName();
 
             if (playerName != null) {
-                // First attempt: try loading the real player's data
-                String encodedName = URLEncoder.encode(playerName, StandardCharsets.UTF_8.toString());
+                String encodedName = URLEncoder.encode(playerName, StandardCharsets.UTF_8.toString()).replace("+", "%20");
                 String requestUrl = String.format("%s?username=eq.%s&select=%s", TABLE_URL, encodedName, columnName);
                 String result = fetchRequest(requestUrl);
 
-                // If the player exists in the database, return their data
-                if (result != null && !result.equals("[]"))
+                if (result != null && !result.trim().equals("[]"))
                     return result;
 
-                // Player exists in game but has no saved data — fall through to Zezima defaults
                 Logger.log(Logger.LogType.INFO, playerName + " has no saved data, loading defaults...");
             }
 
-            // Either no valid player name, or player had no data — load Zezima's defaults
             Logger.log(Logger.LogType.INFO, "Loading default data from Zezima...");
             String encodedDefault = URLEncoder.encode("Zezima", StandardCharsets.UTF_8.toString());
+
+            // Restored exactly to eq. to fix the "failed to parse filter" error
             String defaultUrl = String.format("%s?username=eq.%s&select=%s", TABLE_URL, encodedDefault, columnName);
-            return fetchRequest(defaultUrl);
+            String result = fetchRequest(defaultUrl);
+
+            if (result == null || result.trim().equals("[]")) {
+                Logger.log(Logger.LogType.ERROR, "CRITICAL: Zezima fallback returned empty! Check your Supabase table for the exact spelling of Zezima.");
+                return null;
+            }
+
+            return result;
 
         } catch (Exception e) {
             Logger.log(Logger.LogType.ERROR, "Load Error: " + e.getMessage());
@@ -221,18 +226,31 @@ public class DataMan {
         HttpURLConnection conn = setPropertiesHTTP(REQUEST_METHOD.GET, urlString);
         int code = conn.getResponseCode();
 
-        InputStream stream = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
-        if (stream == null) return null;
+        // If Supabase throws an error (like a bad URL), catch it and return null
+        // so Gson doesn't try to parse an error message and crash the client.
+        if (code < 200 || code >= 300) {
+            if (conn.getErrorStream() != null) {
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getErrorStream(), StandardCharsets.UTF_8))) {
+                    StringBuilder error = new StringBuilder();
+                    String line;
+                    while ((line = br.readLine()) != null) error.append(line);
+                    Logger.log(Logger.LogType.ERROR, "Supabase GET Error: " + error.toString());
+                }
+            }
+            conn.disconnect();
+            return null;
+        }
 
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
             StringBuilder response = new StringBuilder();
             String line;
-            while ((line = br.readLine()) != null) response.append(line);
+            while ((line = br.readLine()) != null)
+                response.append(line);
 
             String result = response.toString();
+
             // Supabase returns an array for selects; check if empty
-            if (result.equals("[]")) {
-                Logger.log("No existing record found in database.");
+            if (result.trim().equals("[]")) {
                 return null;
             }
             return result;
@@ -301,5 +319,71 @@ public class DataMan {
         }
 
         return name;
+    }
+
+    /**
+     * Unified save method to package all user data into a single, clean JSON payload.
+     * This relies on Supabase's 'resolution=merge-duplicates' to overwrite the single row
+     * identified by the player's username.
+     */
+    public void saveEverything(
+            JList<DreamBotMenu.Task> taskList,
+            JList<DreamBotMenu.Task> libraryList,
+            DreamBotMenu.BuilderSnapshot builder,
+            DreamBotMenu.SettingsSnapshot settings,
+            int[] loc,
+            int[] inv,
+            int[] worn,
+            int[] skills,
+            Runnable onComplete) {
+
+        new Thread(() -> {
+            try {
+                String playerName = getValidPlayerName();
+                if (playerName == null) return;
+
+                // 1. Pack the Task List
+                List<DreamBotMenu.Task> taskListData = new ArrayList<>();
+                for (int i = 0; i < taskList.getModel().getSize(); i++) {
+                    taskListData.add(taskList.getModel().getElementAt(i));
+                }
+
+                // 2. Pack the Library Map
+                Map<String, DreamBotMenu.Task> libraryMap = new LinkedHashMap<>();
+                for (int i = 0; i < libraryList.getModel().getSize(); i++) {
+                    DreamBotMenu.Task task = libraryList.getModel().getElementAt(i);
+                    libraryMap.put(task.getName(), task);
+                }
+
+                // 3. Construct the massive unified payload
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("username", playerName);
+                payload.put("tasks", taskListData);
+                payload.put("library", libraryMap);
+                payload.put("builder", builder);
+                payload.put("settings", settings);
+                payload.put("last_known_location", loc);
+                payload.put("inventory", inv);
+                payload.put("worn", worn);
+                payload.put("skills", skills);
+                payload.put("last_accessed", "now()");
+
+                // 4. Send exactly ONE request to the database
+                String jsonBody = gson.toJson(payload);
+                boolean success = executeRequest(REQUEST_METHOD.POST, TABLE_URL, jsonBody);
+
+                if (success) {
+                    Logger.log(Logger.LogType.INFO, "All player data saved in a single unified request.");
+                    if (onComplete != null) {
+                        onComplete.run();
+                    }
+                } else {
+                    Logger.log(Logger.LogType.ERROR, "Failed to save unified player data.");
+                }
+
+            } catch (Exception e) {
+                Logger.log(Logger.LogType.ERROR, "saveEverything error: " + e.getMessage());
+            }
+        }).start();
     }
 }

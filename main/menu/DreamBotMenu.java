@@ -1,6 +1,9 @@
 package main.menu;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import com.google.gson.reflect.TypeToken;
 import main.managers.DataMan;
 import org.dreambot.api.Client;
@@ -18,6 +21,9 @@ import org.dreambot.api.utilities.AccountManager;
 import org.dreambot.api.utilities.Logger;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import org.dreambot.api.wrappers.interactive.NPC;
+import org.dreambot.api.methods.container.impl.equipment.Equipment;
+import org.dreambot.api.wrappers.items.Item;
+import org.dreambot.api.methods.map.Tile;
 
 import javax.swing.*;
 import javax.swing.Timer;
@@ -110,6 +116,20 @@ public class DreamBotMenu extends JFrame {
     private JTextField taskNameInput, taskDescriptionInput, taskStatusInput, manualTargetInput, consoleSearch;
     private JComboBox<ActionType> actionCombo;
     private JButton btnPlayPause, btnInputToggle, btnCaptureToggle;
+
+    // --- Client Checkboxes ---
+    private JCheckBox chkAutoSave;
+    private JCheckBox chkDisableRendering;
+    private JCheckBox chkRoofs;
+    private JCheckBox chkDataOrbs;
+    private JCheckBox chkTransparentSidePanel;
+    private JCheckBox chkGameAudio;
+    private JCheckBox chkTransparentChatbox;
+    private JCheckBox chkClickThroughChatbox;
+    private JCheckBox chkShiftClickDrop;
+    private JCheckBox chkEscClosesInterface;
+    private JCheckBox chkLevelUpInterface;
+    private JCheckBox chkLootNotifications;
 
     // --- Theme ---
     private final Map<JComponent, Color> originalColors = new WeakHashMap<>();
@@ -234,12 +254,6 @@ public class DreamBotMenu extends JFrame {
         add(mainTabs, BorderLayout.CENTER);
         add(this.sidePanel, BorderLayout.EAST);
         add(createProgressPanel(), BorderLayout.SOUTH);
-
-        Logger.log(Logger.LogType.INFO, "Loading task library...");
-        loadTaskLibrary();
-        Logger.log(Logger.LogType.INFO, "Loading task list..");
-        loadTaskList();
-        //TODO load task builder like these two above then remove refreshTaskBuilder() below
 
         updateAll();
 
@@ -392,38 +406,11 @@ public class DreamBotMenu extends JFrame {
         JPanel south = new JPanel(new GridLayout(1, 3, 0, 5));
         south.setOpaque(false);
 
-//        // create the presets panel
-//        JPanel panelPresets = new JPanel(new GridLayout(1, 4, 5, 0));
-//        panelPresets.setOpaque(false);
-//        // create each preset button
-//        for (int i = 0; i < presetButtons.length; i++) {
-//            final int index = i;
-//            // Corrected line: removed "JButton[]" to use the class field
-//            presetButtons[index] = createStyledBtn("Preset " + (index + 1), PANEL_SURFACE);
-//
-//            presetButtons[index].addMouseListener(new MouseAdapter() {
-//                @Override
-//                public void mouseClicked(MouseEvent e) {
-//                    if (e.getClickCount() == 1) {
-//                        loadPreset(index + 1);
-//                    } else if (e.getClickCount() == 2) {
-//                        renamePreset(index);
-//                    }
-//                }
-//            });
-//            panelPresets.add(presetButtons[index]);
-//        }
-//        panelTaskList.add(panelPresets, BorderLayout.NORTH);
-//
-//        // create a panel to store the buttons next to each other
-//        JPanel panelButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-//        panelButtons.setOpaque(false);
-//
         ///  Create Task List save button
         JButton btnTaskListSave = createStyledBtn("Save", COLOR_GREY);
         btnTaskListSave.addActionListener(e -> {
             showToast("Saving...", btnTaskListSave, true);
-            dataMan.saveTaskList(listTaskList);
+            saveAll();
         });
 
         ///  Create Task List duplicate button
@@ -494,7 +481,6 @@ public class DreamBotMenu extends JFrame {
             }
         });
 
-
         return panelTaskList;
     }
 
@@ -546,7 +532,7 @@ public class DreamBotMenu extends JFrame {
             showToast("Saving...", btnTaskLibrarySave, true);
             btnTaskLibrarySave.setEnabled(false);
 
-            dataMan.saveTaskLibrary(listTaskLibrary);
+            saveAll();
 
             showToast("Save success!", btnTaskLibrarySave, true);
             btnTaskLibrarySave.setEnabled(true);
@@ -883,10 +869,10 @@ public class DreamBotMenu extends JFrame {
         ///  Add listeners
         // add component listener to update task builder on show
         panelTaskBuilder.addComponentListener(new ComponentAdapter() {
-                @Override
-                public void componentShown(ComponentEvent e) {
-                    refreshTaskBuilderTab();
-                }
+            @Override
+            public void componentShown(ComponentEvent e) {
+                refreshTaskBuilderTab();
+            }
         });
 
         listTaskLibrary.addListSelectionListener(e -> {
@@ -1228,16 +1214,6 @@ public class DreamBotMenu extends JFrame {
         @Override public String toString() { return type.name() + " -> " + target; }
     }
 
-//    private boolean saveTaskLibrary(Task... tasks) {
-//        btnTaskLibrarySave.setEnabled(false);
-//        Logger.log(Logger.LogType.INFO, "Uploading task library...");
-//        Logger.log(Logger.LogType.DEBUG, "Saving:\n");
-//        for (Task t: tasks) {
-//            Logger.log(Logger.LogType.DEBUG, t.getEditableString());
-//        }
-//        return true;
-//    }
-
     public void showToast(String message, JComponent anchor, boolean success) {
         // 1. Visual feedback for the button (still happens immediately)
         Color flashColor = success ? COLOR_GREEN : COLOR_RED;
@@ -1327,7 +1303,14 @@ public class DreamBotMenu extends JFrame {
     }
 
     public void loadTaskBuilder() {
-        // TODO
+        new Thread(() -> {
+            String rawJson = dataMan.loadDataByPlayer("builder");
+            SwingUtilities.invokeLater(() -> {
+                if (rawJson != null)
+                    unpackTaskBuilder(rawJson);
+                refreshTaskBuilderTab();
+            });
+        }).start();
     }
 
     private void unpackTaskLibrary(String json) {
@@ -1380,7 +1363,7 @@ public class DreamBotMenu extends JFrame {
 
             // Supabase wraps the response in an outer array: [ { "tasks": [...] } ]
             // "tasks" is now a List, not a Map
-            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, List<DreamBotMenu.Task>>>>(){}.getType();
+            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, List<Task>>>>(){}.getType();
             List<Map<String, List<Task>>> responseList = gson.fromJson(json, wrapperType);
 
             if (responseList != null && !responseList.isEmpty()) {
@@ -1400,6 +1383,42 @@ public class DreamBotMenu extends JFrame {
             listTaskList.repaint();
         } catch (Exception e) {
             Logger.log(Logger.LogType.ERROR, "Failed to unpack task list data: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void unpackTaskBuilder(String json) {
+        if (json == null || json.isEmpty() || json.equals("[]")) return;
+
+        try {
+            Gson gson = new Gson();
+            JsonArray outerArray = JsonParser.parseString(json).getAsJsonArray();
+            if (outerArray.isEmpty()) return;
+
+            JsonElement columnData = outerArray.get(0).getAsJsonObject().get("builder");
+            if (columnData == null || columnData.isJsonNull()) return;
+
+            BuilderSnapshot snap = gson.fromJson(columnData, BuilderSnapshot.class);
+            if (snap != null) {
+                SwingUtilities.invokeLater(() -> {
+                    modelTaskBuilder.clear();
+                    if (snap.actions != null) {
+                        snap.actions.forEach(modelTaskBuilder::addElement);
+                    }
+                    taskNameInput.setText(snap.taskName != null ? snap.taskName : "");
+                    taskDescriptionInput.setText(snap.taskDescription != null ? snap.taskDescription : "");
+                    taskStatusInput.setText(snap.taskStatus != null ? snap.taskStatus : "");
+                    manualTargetInput.setText(snap.targetName != null ? snap.targetName : "");
+                    if (snap.selectedAction != null && !snap.selectedAction.isEmpty()) {
+                        try {
+                            actionCombo.setSelectedItem(ActionType.valueOf(snap.selectedAction));
+                        } catch (Exception ignored) {}
+                    }
+                    Logger.log(Logger.LogType.SCRIPT, "Unpacked builder snapshot successfully.");
+                });
+            }
+        } catch (Exception e) {
+            Logger.log(Logger.LogType.ERROR, "Failed to unpack builder: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -1523,8 +1542,8 @@ public class DreamBotMenu extends JFrame {
             return new ImageIcon(new ImageIcon(
                     Objects.requireNonNull(getClass()
                             .getResource("/resources/icons/misc/" + name + ".png")))
-                            .getImage()
-                            .getScaledInstance(18, 18, Image.SCALE_SMOOTH));
+                    .getImage()
+                    .getScaledInstance(18, 18, Image.SCALE_SMOOTH));
         } catch (Exception e) {
             return null;
         }
@@ -1535,8 +1554,8 @@ public class DreamBotMenu extends JFrame {
             return new ImageIcon(new ImageIcon(
                     Objects.requireNonNull(getClass()
                             .getResource("/resources/icons/skills/" + skill.name().toLowerCase() + "_icon.png")))
-                            .getImage()
-                            .getScaledInstance(26, 26, Image.SCALE_SMOOTH)
+                    .getImage()
+                    .getScaledInstance(26, 26, Image.SCALE_SMOOTH)
             );
 
         } catch (Exception e) {
@@ -1561,8 +1580,8 @@ public class DreamBotMenu extends JFrame {
             return new ImageIcon(new ImageIcon(
                     Objects.requireNonNull(getClass()
                             .getResource("/resources/icons/status/" + name + ".png")))
-                            .getImage()
-                            .getScaledInstance(16, 16, Image.SCALE_SMOOTH)
+                    .getImage()
+                    .getScaledInstance(16, 16, Image.SCALE_SMOOTH)
             );
 
         } catch (Exception ignored) {}
@@ -1655,22 +1674,41 @@ public class DreamBotMenu extends JFrame {
     private void refreshTrackerList() { trackerList.removeAll(); skillRegistry.values().stream().filter(d -> d.isTracking).forEach(d -> { trackerList.add(d.trackerPanel); trackerList.add(Box.createRigidArea(new Dimension(0, 10))); }); trackerList.add(Box.createVerticalGlue()); trackerList.revalidate(); trackerList.repaint(); }
 
     public void updateAll() {
-       updateUI();
-            ///  Update Task List
-            loadTaskList();
+        updateUI();
+        ///  Update Task List
+        Logger.log("Loading task list...");
+        loadTaskList();
 
-            ///  Update Task Library
-            loadTaskLibrary();
+        ///  Update Task Library
+        Logger.log("Loading task library...");
+        loadTaskLibrary();
 
-            ///  update Task Builder
-            loadTaskBuilder();
-
-            ///  Update Skill Tracker?
+        ///  update Task Builder
+        Logger.log("Loading task builder...");
+        loadTaskBuilder();
     }
 
     public void saveAll() {
-        //TODO need to somehow save task list, library builder and every other column in the server here.
-        // Columns = username, timestamp, tasks, presets, library, builder, settings, last_known_location, last_accessed
+        new Thread(() -> {
+            if (!Client.isLoggedIn())
+                return;
+
+            setLabelStatus("Status: Autosaving...");
+
+            dataMan.saveEverything(
+                    listTaskList,
+                    listTaskLibrary,
+                    captureBuilderSnapshot(),
+                    captureSettingsSnapshot(),
+                    captureLocation(),
+                    captureInventory(),
+                    captureWorn(),
+                    captureSkills(),
+                    () -> setLabelStatus("Status: Autosave complete!")
+            );
+
+            Logger.log(Logger.LogType.INFO, "Autosave sequence initiated.");
+        }).start();
     }
 
     /**
@@ -1691,90 +1729,87 @@ public class DreamBotMenu extends JFrame {
 
     private class SkillData { final Skill skill; final JProgressBar mainBar = new JProgressBar(0, 100); final JLabel lblLevel = new JLabel("1"), lblXpString = new JLabel("0/0"); final JPanel trackerPanel = new JPanel(new GridLayout(0, 1, 2, 2)); final JLabel lblGained = new JLabel(), lblPerHour = new JLabel(), lblRemaining = new JLabel(), lblTTL = new JLabel(), lblProj = new JLabel(), lblActs = new JLabel(); final int startXP, startLevel; boolean isTracking = false; SkillData(Skill s) { this.skill = s; this.startXP = Skills.getExperience(s); this.startLevel = Skills.getRealLevel(s); trackerPanel.setBackground(new Color(30, 30, 30)); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + s.name() + " "); b.setTitleColor(COLOR_BLOOD); trackerPanel.setBorder(b); JLabel[] ls = {lblGained, lblPerHour, lblRemaining, lblActs, lblTTL, lblProj}; for (JLabel l : ls) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.PLAIN, 12)); trackerPanel.add(l); } } void update(int curXp, int curLvl, long start, int ph) { int curMin = Skills.getExperienceForLevel(curLvl), curMax = Skills.getExperienceForLevel(curLvl + 1); lblLevel.setText(String.valueOf(curLvl)); lblXpString.setText(String.format("%,d / %,d XP", curXp, curMax)); mainBar.setValue((int) (((double)(curXp - curMin) / Math.max(1, curMax - curMin)) * 100)); long elapsed = System.currentTimeMillis() - start; int xph = (int) (Math.max(0, curXp - startXP) / Math.max(0.0001, elapsed / 3600000.0)); int rem = Math.max(0, curMax - curXp); lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP)); lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph)); lblRemaining.setText(" TO LEVEL: " + String.format("%,d", rem)); if (xph > 0) { lblTTL.setText(String.format(" TIME TO L: %.2f hrs", (double) rem / xph)); lblProj.setText(String.format(" PROJ (%dH): Lvl %d", ph, curLvl + (xph * ph / 100000))); } } }
 
-//    private String packagePreset(int slotIndex) {
-//        String name = presetButtons[slotIndex - 1].getText();
-//
-//        // Safety check: if the queue is empty, package an empty array string
-//        String taskData = queueModel.isEmpty() ? "[]" : modelToJson(queueModel);
-//
-//        // We must escape the internal quotes of the taskData so it fits inside the preset object
-//        String escapedData = taskData.replace("\"", "\\\"");
-//
-//        // Construct the JSON slot object
-//        return "{\"name\":\"" + name + "\", \"data\":\"" + escapedData + "\"}";
-//    }
+    // --- Snapshot Classes & Capture Methods ---
+    public static class BuilderSnapshot {
+        public String selectedAction;
+        public String targetName;
+        public String taskName;
+        public String taskDescription;
+        public String taskStatus;
+        public List<Action> actions;
+    }
 
-//    private void savePresets() {
-//        StringBuilder fullJson = new StringBuilder("{");
-//        for (int i = 1; i <= 4; i++) {
-//            fullJson.append("\"p").append(i).append("\":").append(packagePreset(i));
-//            if (i < 4) fullJson.append(",");
-//        }
-//        fullJson.append("}");
-//
-//        // Push the entire object to the "presets" column
-//        dataMan.postThreaded("presets", fullJson.toString(), resp -> {
-//            Logger.log("All 4 Preset Slots synced to server.");
-//        });
-//    }
+    private BuilderSnapshot captureBuilderSnapshot() {
+        BuilderSnapshot snapshot = new BuilderSnapshot();
+        snapshot.taskName = taskNameInput != null ? taskNameInput.getText() : "";
+        snapshot.taskDescription = taskDescriptionInput != null ? taskDescriptionInput.getText() : "";
+        snapshot.taskStatus = taskStatusInput != null ? taskStatusInput.getText() : "";
+        snapshot.selectedAction = actionCombo != null && actionCombo.getSelectedItem() != null
+                ? actionCombo.getSelectedItem().toString() : "";
+        snapshot.targetName = manualTargetInput != null ? manualTargetInput.getText() : "";
+        snapshot.actions = new ArrayList<>();
+        for (int i = 0; i < modelTaskBuilder.getSize(); i++)
+            snapshot.actions.add(modelTaskBuilder.getElementAt(i));
 
-//    public void saveAllData() {
-//        // 1. Save Presets (Names + Task Data)
-//        StringBuilder sb = new StringBuilder("{");
-//        for (int i = 1; i <= 4; i++) {
-//            sb.append("\"p").append(i).append("\":").append(packagePreset(i));
-//            if (i < 4) sb.append(",");
-//        }
-//
-//        sb.append("}");
-//        dataMan.postThreaded("presets", sb.toString(), resp -> Logger.log("Presets Saved."));
-//
-//        // 2. Save Library (The Library Tab contents)
-//        dataMan.postThreaded("settings", listToJson(libraryModel), resp -> Logger.log("Library Saved."));
-//
-//        lblStatus.setText("Status: All Data Synced");
-//    }
-//
-//    private void renamePreset(int index) {
-//        String currentName = presetButtons[index].getText();
-//        String newName = JOptionPane.showInputDialog(this, "Rename Preset:", currentName);
-//
-//        if (newName != null && !newName.trim().isEmpty()) {
-//            presetButtons[index].setText(newName);
-//            // Optional: Auto-save after renaming
-//            savePresets();
-//        }
-//    }
+        return snapshot;
+    }
 
-//    private void loadPreset(int slotIndex) {
-//        DataMan dm = new DataMan();
-//        // Using "presets" column
-//        dm.getThreaded("presets", json -> {
-//            if (json == null || json.isEmpty()) {
-//                Logger.log("No preset data found on server.");
-//                return;
-//            }
-//
-//            String key = "p" + slotIndex;
-//            // Updated regex to be more literal with potential JSON spacing
-//            java.util.regex.Pattern p = java.util.regex.Pattern.compile("\"" + key + "\":\\s*\\{\"name\":\"(.*?)\",\"data\":\"(.*?)\"\\}");
-//            java.util.regex.Matcher m = p.matcher(json);
-//
-//            if (m.find()) {
-//                // Unescape the nested JSON string
-//                String tasksJson = m.group(2).replace("\\\"", "\"");
-//
-//                // Rebuild into the queueModel
-//                rebuildTasksFromJson(tasksJson, queueModel);
-//
-//                // Update UI safely
-//                SwingUtilities.invokeLater(() -> {
-//                    lblStatus.setText("Status: Loaded Preset " + slotIndex);
-//                    taskQueueList.repaint();
-//                });
-//            } else {
-//                Logger.log("Could not find slot " + key + " in the database response.");
-//            }
-//        });
-//    }
+    public static class SettingsSnapshot {
+        public boolean renderingDisabled;
+        public boolean roofsEnabled;
+        public boolean dataOrbsEnabled;
+        public boolean transparentSidePanel;
+        public boolean gameAudioOn;
+        public boolean transparentChatbox;
+        public boolean clickThroughChatbox;
+        public boolean shiftClickDrop;
+        public boolean escClosesInterface;
+        public boolean levelUpInterface;
+        public boolean lootNotifications;
+        public boolean autoSave;
+    }
+
+    private SettingsSnapshot captureSettingsSnapshot() {
+        SettingsSnapshot s = new SettingsSnapshot();
+        s.autoSave               = chkAutoSave != null && chkAutoSave.isSelected();
+        s.renderingDisabled      = chkDisableRendering != null && chkDisableRendering.isSelected();
+        s.roofsEnabled           = chkRoofs != null && chkRoofs.isSelected();
+        s.dataOrbsEnabled        = chkDataOrbs != null && chkDataOrbs.isSelected();
+        s.transparentSidePanel   = chkTransparentSidePanel != null && chkTransparentSidePanel.isSelected();
+        s.gameAudioOn            = chkGameAudio != null && chkGameAudio.isSelected();
+        s.transparentChatbox     = chkTransparentChatbox != null && chkTransparentChatbox.isSelected();
+        s.clickThroughChatbox    = chkClickThroughChatbox != null && chkClickThroughChatbox.isSelected();
+        s.shiftClickDrop         = chkShiftClickDrop != null && chkShiftClickDrop.isSelected();
+        s.escClosesInterface     = chkEscClosesInterface != null && chkEscClosesInterface.isSelected();
+        s.levelUpInterface       = chkLevelUpInterface != null && chkLevelUpInterface.isSelected();
+        s.lootNotifications      = chkLootNotifications != null && chkLootNotifications.isSelected();
+        return s;
+    }
+
+    private int[] captureLocation() {
+        Tile tile = Players.getLocal().getTile();
+        return new int[]{tile.getX(), tile.getY(), tile.getZ()};
+    }
+
+    private int[] captureInventory() {
+        return Inventory.all().stream()
+                .filter(Objects::nonNull)
+                .mapToInt(Item::getID)
+                .toArray();
+    }
+
+    private int[] captureWorn() {
+        return Equipment.all().stream()
+                .filter(Objects::nonNull)
+                .mapToInt(Item::getID)
+                .toArray();
+    }
+
+    private int[] captureSkills() {
+        int[] xp = new int[Skill.values().length];
+        for (Skill s : Skill.values()) {
+            xp[s.ordinal()] = Skills.getExperience(s);
+        }
+        return xp;
+    }
 }
