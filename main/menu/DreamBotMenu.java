@@ -1,6 +1,8 @@
 package main.menu;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 import main.managers.DataMan;
 import org.dreambot.api.Client;
@@ -45,6 +47,9 @@ public class DreamBotMenu extends JFrame {
     private boolean isUserInputAllowed = true;
     private int currentExecutionIndex = 0;
 
+    // --- Script ---
+    private final int TOAST_DELAY = 600;
+
     private final AbstractScript script;
     private final JPanel sidePanel;
 
@@ -53,6 +58,9 @@ public class DreamBotMenu extends JFrame {
     private final Color COLOR_GREY = new Color(40,40,40);
 
     // --- Data & Presets ---
+    private final Queue<ToastRequest> toastQueue = new LinkedList<>();
+    private boolean isToastProcessing = false;
+
     private final DataMan dataMan = new DataMan();
 
     private final Map<Skill, SkillData> skillRegistry = new EnumMap<>(Skill.class);
@@ -114,26 +122,13 @@ public class DreamBotMenu extends JFrame {
     private final JLabel lblMemberIcon = new JLabel();
     private final JLabel lblMemberText = new JLabel("-");
 
+    private Toast activeToast;
+
+
     public enum ActionType { ATTACK, BANK, BURY, CHOP, COOK, DROP, EXAMINE, FISH, MINE, OPEN, TALK_TO, USE_ON }
 
     private static final Skill[] OSRS_ORDER = { Skill.ATTACK, Skill.HITPOINTS, Skill.MINING, Skill.STRENGTH, Skill.AGILITY, Skill.SMITHING, Skill.DEFENCE, Skill.HERBLORE, Skill.FISHING, Skill.RANGED, Skill.THIEVING, Skill.COOKING, Skill.PRAYER, Skill.CRAFTING, Skill.FIREMAKING, Skill.MAGIC, Skill.FLETCHING, Skill.WOODCUTTING, Skill.RUNECRAFTING, Skill.SLAYER, Skill.FARMING, Skill.CONSTRUCTION, Skill.HUNTER, Skill.SAILING };
     private static final Set<Skill> F2P_SKILLS = new HashSet<>(Arrays.asList(Skill.ATTACK, Skill.STRENGTH, Skill.DEFENCE, Skill.RANGED, Skill.PRAYER, Skill.MAGIC, Skill.HITPOINTS, Skill.CRAFTING, Skill.MINING, Skill.SMITHING, Skill.FISHING, Skill.COOKING, Skill.FIREMAKING, Skill.WOODCUTTING, Skill.RUNECRAFTING));
-
-    private final java.util.Queue<ToastRequest> toastQueue = new java.util.LinkedList<>();
-    private boolean isProcessingToasts = false;
-
-    // Inner class to hold the data for each toast
-    private static class ToastRequest {
-        String message;
-        JButton anchor;
-        boolean success;
-
-        ToastRequest(String m, JButton a, boolean s) {
-            this.message = m;
-            this.anchor = a;
-            this.success = s;
-        }
-    }
 
     public DreamBotMenu(AbstractScript script) {
         this.script = script;
@@ -229,10 +224,11 @@ public class DreamBotMenu extends JFrame {
         add(this.sidePanel, BorderLayout.EAST);
         add(createProgressPanel(), BorderLayout.SOUTH);
 
-        Logger.log(Logger.LogType.INFO, "Loading task list..");
-        loadTaskList();
         Logger.log(Logger.LogType.INFO, "Loading task library...");
         loadTaskLibrary();
+        Logger.log(Logger.LogType.INFO, "Loading task list..");
+        loadTaskList();
+
         setVisible(true);
 
         SwingUtilities.invokeLater(() -> {
@@ -244,6 +240,19 @@ public class DreamBotMenu extends JFrame {
             }).start();
         });
     }
+
+    private static class ToastRequest {
+        final String message;
+        final JComponent anchor;
+        final boolean success;
+
+        ToastRequest(String message, JComponent anchor, boolean success) {
+            this.message = message;
+            this.anchor = anchor;
+            this.success = success;
+        }
+    }
+
 
     private JPanel createProgressPanel() {
         // Use a GridBagLayout for precise control or a 2-row GridLayout
@@ -1089,6 +1098,12 @@ public class DreamBotMenu extends JFrame {
             this.target = target;
         }
 
+        // copy-cat constructor
+        public Action(Action other) {
+            this.type = other.type;
+            this.target = other.target;
+        }
+
         //TODO copy how CHOP has been done then extract out into their own action classes maybe?
         public boolean execute() {
             switch (type) {
@@ -1147,27 +1162,72 @@ public class DreamBotMenu extends JFrame {
 //    }
 
     public void showToast(String message, JComponent anchor, boolean success) {
-        // 1. Find the location of the button relative to the entire window
-        Point location = SwingUtilities.convertPoint(anchor, 0, 0, getLayeredPane());
-
-        // 2. Center the toast horizontally over the button and push it up 30px
-        int x = location.x + (anchor.getWidth() / 2);
-        int y = location.y - 30;
-
-        ///  Trigger toast visual
-        Toast toast = new Toast(message, x, y);
-        Toast activeToast = toast;
-        getLayeredPane().add(toast, JLayeredPane.POPUP_LAYER);
-        getLayeredPane().revalidate();
-
-        ///  Trigger button flash (red/green)
+        // 1. Visual feedback for the button itself (immediate)
         Color flashColor = success ? COLOR_GREEN : COLOR_RED;
         flashControl(anchor, flashColor);
+
+        // 2. Add the request to the queue
+        toastQueue.add(new ToastRequest(message, anchor, success));
+
+        // 3. Kick off processing
+        processNextToast();
+    }
+
+    private void processNextToast() {
+        // If a toast is currently visible or the queue is empty, do nothing
+        if (isToastProcessing || toastQueue.isEmpty()) {
+            return;
+        }
+
+        isToastProcessing = true;
+        ToastRequest request = toastQueue.poll();
+
+        // Calculate position
+        Point location = SwingUtilities.convertPoint(request.anchor, 0, 0, getLayeredPane());
+        int x = location.x + (request.anchor.getWidth() / 2);
+        int y = location.y - 30;
+
+        // Create the toast
+        final Toast toast = new Toast(request.message, x, y);
+        getLayeredPane().add(toast, JLayeredPane.POPUP_LAYER);
+        getLayeredPane().revalidate();
+        getLayeredPane().repaint();
+
+        // 4. Set a timer to clean up and trigger the next toast
+        Timer timer = new Timer(TOAST_DELAY, e -> {
+            getLayeredPane().remove(toast);
+            getLayeredPane().revalidate();
+            getLayeredPane().repaint();
+
+            // Reset flag and check if another toast is waiting
+            isToastProcessing = false;
+            processNextToast();
+        });
+
+        timer.setRepeats(false);
+        timer.start();
     }
 
     public String getPlayerName() {
         return Players.getLocal().getName();
     }
+
+//    private void loadTaskList() {
+//        new Thread(() -> {
+//            // 1. Fetch the raw JSON string from your DataMan (Supabase/Server)
+//            String rawJson = dataMan.loadDataByPlayer("tasks");
+//
+//            // 2. Switch back to the UI thread to update the JList
+//            SwingUtilities.invokeLater(() -> {
+//                if (rawJson != null && !rawJson.isEmpty()) {
+//                    unpackTaskList(rawJson);
+//                    showToast("Task List Loaded", btnPlayPause, true);
+//                } else {
+//                    Logger.log("No saved tasks found for this player.");
+//                }
+//            });
+//        }).start();
+//    }
 
     private void loadTaskList() {
         new Thread(() -> {
@@ -1181,11 +1241,6 @@ public class DreamBotMenu extends JFrame {
     }
 
     private void loadTaskLibrary() {
-//        // load some default tasks as examples
-//        libraryModel.addElement(new Task("Tree Cutter", "Chops Trees", Arrays.asList(new Action(ActionType.CHOP, "Tree")), "Chopping tree..."));
-//        libraryModel.addElement(new Task("Oak Cutter", "Chops Oak Trees", Arrays.asList(new Action(ActionType.CHOP, "Oak tree")), "Chopping oak tree..."));
-//        libraryModel.addElement(new Task("Guard Killer", "Attacks nearby guards", Arrays.asList(new Action(ActionType.ATTACK, "Guard")), "Chopping oak tree..."));
-//        libraryModel.addElement(new Task("Imp Killer", "Attacks nearby imps", Arrays.asList(new Action(ActionType.ATTACK, "Imp")), "Chopping oak tree..."));
         new Thread(() -> {
             // Use the method from your DataMan class to get the raw JSON
             String rawJson = dataMan.loadDataByPlayer("library");
@@ -1195,8 +1250,7 @@ public class DreamBotMenu extends JFrame {
             });
         }).start();
     }
-
-    private void unpackTaskList(String json) {
+    private void unpackTaskLibrary(String json) {
         if (json == null || json.isEmpty() || json.equals("[]")) {
             Logger.log("No task list data found to unpack.");
             return;
@@ -1217,6 +1271,74 @@ public class DreamBotMenu extends JFrame {
                 if (fetchedTasks != null) {
                     // 3. Update the UI on the Swing thread
                     SwingUtilities.invokeLater(() -> {
+                        modelTaskLibrary.clear();
+                        for (Task task : fetchedTasks.values()) {
+                            // Because GSON uses the Task constructor, these are
+                            // now real objects with executable action lists.
+                            modelTaskLibrary.addElement(task);
+                        }
+                        Logger.log("Successfully loaded " + modelTaskLibrary.size() + " tasks into the task library.");
+                    });
+                }
+            }
+        } catch (Exception e) {
+            Logger.log(Logger.LogType.ERROR, "Failed to unpack library: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+
+//    private void unpackTaskLibrary(String json) {
+//        if (json == null || json.isEmpty() || json.equals("[]"))
+//            return;
+//
+//        try {
+//            Gson gson = new Gson();
+//            // Change the type to match exactly what your DataMan returns
+//            java.lang.reflect.Type listType = new TypeToken<List<Task>>(){}.getType();
+//
+//            // If your JSON is wrapped in a 'library' or 'tasks' key,
+//            // you need to parse the root object first
+//            JsonObject root = gson.fromJson(json, JsonObject.class);
+//            JsonArray taskArray = root.getAsJsonArray("library");
+//
+//            List<Task> tasks = gson.fromJson(taskArray, listType);
+//
+//            SwingUtilities.invokeLater(() -> {
+//                modelTaskLibrary.clear();
+//
+//                if (tasks != null)
+//                    for (Task t : tasks)
+//                        modelTaskLibrary.addElement(t);
+//
+//                listTaskLibrary.repaint();
+//            });
+//        } catch (Exception e) {
+//            Logger.log("Error unpacking: " + e.getMessage());
+//        }
+//    }
+
+    private void unpackTaskList(String json) {
+        if (json == null || json.isEmpty() || json.equals("[]")) {
+            Logger.log("No task list data found to unpack.");
+            return;
+        }
+
+        try {
+            Gson gson = new Gson();
+
+            // 1. Supabase returns a List of Objects. Define that type.
+            // We are looking for: List<Map<String, Map<String, Task>>>
+            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, Map<String, Task>>>>(){}.getType();
+            List<Map<String, Map<String, Task>>> responseList = gson.fromJson(json, wrapperType);
+
+            if (responseList != null && !responseList.isEmpty()) {
+                // 2. Get the "library" map from the first result
+                Map<String, Task> fetchedTasks = responseList.get(0).get("tasks");
+
+                if (fetchedTasks != null) {
+                    // 3. Update the UI on the Swing thread
+                    SwingUtilities.invokeLater(() -> {
                         modelTaskList.clear();
                         for (Task task : fetchedTasks.values()) {
                             // Because GSON uses the Task constructor, these are
@@ -1228,10 +1350,11 @@ public class DreamBotMenu extends JFrame {
                 }
             }
         } catch (Exception e) {
-            Logger.log(Logger.LogType.ERROR, "Failed to unpack library: " + e.getMessage());
+            Logger.log(Logger.LogType.ERROR, "Failed to unpack task list data: " + e.getMessage());
             e.printStackTrace();
         }
     }
+
     /**
      * Flashes a UI component a specific color and displays a message,
      * then reverts to original state after 2 seconds.
@@ -1256,43 +1379,33 @@ public class DreamBotMenu extends JFrame {
         revertTimer.start();
     }
 
-
-    private void unpackTaskLibrary(String json) {
-        if (json == null || json.isEmpty() || json.equals("[]")) {
-            Logger.log("No library data found to unpack.");
-            return;
-        }
-
-        try {
-            Gson gson = new Gson();
-
-            // 1. Supabase returns a List of Objects. Define that type.
-            // We are looking for: List<Map<String, Map<String, Task>>>
-            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, Map<String, Task>>>>(){}.getType();
-            List<Map<String, Map<String, Task>>> responseList = gson.fromJson(json, wrapperType);
-
-            if (responseList != null && !responseList.isEmpty()) {
-                // 2. Get the "library" map from the first result
-                Map<String, Task> fetchedLibrary = responseList.get(0).get("library");
-
-                if (fetchedLibrary != null) {
-                    // 3. Update the UI on the Swing thread
-                    SwingUtilities.invokeLater(() -> {
-                        modelTaskLibrary.clear();
-                        for (Task task : fetchedLibrary.values()) {
-                            // Because GSON uses the Task constructor, these are
-                            // now real objects with executable action lists.
-                            modelTaskLibrary.addElement(task);
-                        }
-                        Logger.log("Successfully loaded " + modelTaskLibrary.size() + " tasks into the library.");
-                    });
-                }
-            }
-        } catch (Exception e) {
-            Logger.log(Logger.LogType.ERROR, "Failed to unpack library: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
+//    private void unpackTaskList(String json) {
+//        if (json == null || json.isEmpty() || json.equals("[]"))
+//            return;
+//
+//        try {
+//            Gson gson = new Gson();
+//            // Change the type to match exactly what your DataMan returns
+//            java.lang.reflect.Type listType = new TypeToken<List<Task>>(){}.getType();
+//
+//            // If your JSON is wrapped in a 'library' or 'tasks' key,
+//            // you need to parse the root object first
+//            JsonObject root = gson.fromJson(json, JsonObject.class);
+//            JsonArray taskArray = root.getAsJsonArray("tasks"); // or "tasks"
+//
+//            List<Task> tasks = gson.fromJson(taskArray, listType);
+//
+//            SwingUtilities.invokeLater(() -> {
+//                modelTaskList.clear();
+//                if (tasks != null) {
+//                    for (Task t : tasks) modelTaskList.addElement(t);
+//                }
+//                listTaskList.repaint();
+//            });
+//        } catch (Exception e) {
+//            Logger.log("Error unpacking: " + e.getMessage());
+//        }
+//    }
 
     private void loadIntoBuilder(Task t) {
         if(t == null)

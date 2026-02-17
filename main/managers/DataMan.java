@@ -124,22 +124,6 @@ public class DataMan {
         }).start();
     }
 
-    public void saveTaskList(DefaultListModel<DreamBotMenu.Task> model) {
-        try {
-            List<DreamBotMenu.Task> tasks = Collections.list(model.elements());
-
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("username", getValidPlayerName());
-            payload.put("tasks", tasks); // Gson handles the List -> JSON Array conversion
-
-            String jsonBody = gson.toJson(payload);
-            executeRequest(REQUEST_METHOD.POST, TABLE_URL, jsonBody);
-
-        } catch (Exception e) {
-            Logger.log(Logger.LogType.ERROR, "Save error: " + e.getMessage());
-        }
-    }
-
     /**
      * Retrieves specific data from the database for the current player.
      * * @param columnName The column to fetch (e.g., "presets", "settings").
