@@ -155,9 +155,7 @@ public class DreamBot extends AbstractScript implements GameStateListener {
     private void updateAccountData(String name) {
         // Update your specific configs here
         log("Fetching data for " + name);
-        menu.loadTaskList();
-        menu.loadTaskLibrary();
-        //menu.load
-        //menu.loadTaskBuilder();
+        menu.updateAll();
+        //menu.saveAll(); //TODO implement save all function so that new accounts calling this function will have their default settings saved
     }
 }

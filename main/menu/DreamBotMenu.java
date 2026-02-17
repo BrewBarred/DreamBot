@@ -1,8 +1,6 @@
 package main.menu;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 import main.managers.DataMan;
 import org.dreambot.api.Client;
@@ -16,6 +14,7 @@ import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.methods.skills.Skills;
 import org.dreambot.api.methods.world.Worlds;
 import org.dreambot.api.script.AbstractScript;
+import org.dreambot.api.utilities.AccountManager;
 import org.dreambot.api.utilities.Logger;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import org.dreambot.api.wrappers.interactive.NPC;
@@ -124,7 +123,7 @@ public class DreamBotMenu extends JFrame {
 
     // --- Labels (Restored) ---
     private final JLabel lblUsername = new JLabel("...");
-    private final JLabel lblPassword = new JLabel("...");
+    private final JLabel lblNickname = new JLabel("...");
     private final JLabel lblAcctId = new JLabel("...");
     private final JLabel lblAcctStatus = new JLabel("...");
     private final JLabel lblCharName = new JLabel("...");
@@ -242,18 +241,15 @@ public class DreamBotMenu extends JFrame {
         //TODO load task builder like these two above then remove refreshTaskBuilder() below
 
         SwingUtilities.invokeLater(() -> {
-            // scan for nearby targets to populate task builder menu in advance (saves the user a short wait)
-            scanNearbyTargets();
             new Timer(1000, e -> updateUI()).start();
             // every 5 seconds scan for nearby targets if task builder is active
             new Timer(4000, e -> {
                 if (mainTabs.getSelectedIndex() == 2)
                     scanNearbyTargets();
             }).start();
-
-            refreshTaskBuilder();
         });
 
+        updateAll();
         setVisible(true);
     }
 
@@ -637,7 +633,7 @@ public class DreamBotMenu extends JFrame {
         scanNearbyTargets();
     }
 
-    private void refreshTaskBuilder(boolean forceSelectLast) {
+    private void refreshTaskBuilderTab(boolean forceSelectLast) {
         // if the list is empty or an invalid item is selected OR if force selecting the last item...
         if (listTaskBuilder.getSelectedValue() == null && !modelTaskBuilder.isEmpty() || forceSelectLast)
             // temp fix the index error by setting the index to the last item in the list (likely most relevant)
@@ -645,8 +641,16 @@ public class DreamBotMenu extends JFrame {
         listTaskBuilder.repaint();
     }
 
-    private void refreshTaskBuilder() {
-        refreshTaskBuilder(false);
+    private void refreshTaskBuilderTab() {
+        refreshTaskBuilderTab(false);
+    }
+
+    private void refreshSkillTrackerTab(JPanel gridSkills) {
+        for (Skill skill : OSRS_ORDER) {
+            SkillData data = new SkillData(skill);
+            skillRegistry.put(skill, data);
+            gridSkills.add(createSkillTile(data));
+        }
     }
 
     private JPanel createTaskBuilderTab() {
@@ -777,7 +781,7 @@ public class DreamBotMenu extends JFrame {
             if (selectedIndex != -1) {
                 modelTaskBuilder.remove(selectedIndex);
                 showToast("Action removed!", btnTaskBuilderRemove, true);
-                refreshTaskBuilder();
+                refreshTaskBuilderTab();
             } else {
                 showToast("You must select an action first!", btnTaskBuilderRemove, false);
             }
@@ -824,7 +828,7 @@ public class DreamBotMenu extends JFrame {
                         new Action((ActionType) actionCombo.getSelectedItem(), manualTargetInput.getText())
                 );
                 showToast("Added action to builder!", btnTaskBuilderAdd, true);
-                refreshTaskBuilder(true);
+                refreshTaskBuilderTab(true);
             } else {
                 showToast("Enter a target name!", btnTaskBuilderAdd, false);
             }
@@ -847,7 +851,7 @@ public class DreamBotMenu extends JFrame {
                 else if(e.getClickCount() == 2) {
                     modelTaskBuilder.addElement(new Action((ActionType) actionCombo.getSelectedItem(), val));
                     showToast("Added action to builder!", btnTaskBuilderAdd, true);
-                    refreshTaskBuilder(true);
+                    refreshTaskBuilderTab(true);
                 }
             }
         });
@@ -877,7 +881,7 @@ public class DreamBotMenu extends JFrame {
         panelTaskBuilder.addComponentListener(new ComponentAdapter() {
                 @Override
                 public void componentShown(ComponentEvent e) {
-                    refreshTaskBuilder();
+                    refreshTaskBuilderTab();
                 }
         });
 
@@ -923,18 +927,14 @@ public class DreamBotMenu extends JFrame {
         panelSkillTracker.setBorder(new EmptyBorder(15, 15, 15, 15));
         panelSkillTracker.setBackground(BG_BASE);
 
-        JPanel grid = new JPanel(new GridLayout(0, 3, 3, 3));
-        grid.setBackground(BG_BASE);
-        grid.setBorder(new EmptyBorder(8, 8, 8, 8));
+        JPanel gridSkills = new JPanel(new GridLayout(0, 3, 3, 3));
+        gridSkills.setBackground(BG_BASE);
+        gridSkills.setBorder(new EmptyBorder(8, 8, 8, 8));
 
-        for (Skill skill : OSRS_ORDER) {
-            SkillData data = new SkillData(skill);
-            skillRegistry.put(skill, data);
-            grid.add(createSkillTile(data));
-        }
+        refreshSkillTrackerTab(gridSkills);
 
         panelSkillTracker.add(createSubtitle("Skill Tracker"), BorderLayout.NORTH);
-        panelSkillTracker.add(new JScrollPane(grid), BorderLayout.CENTER);
+        panelSkillTracker.add(new JScrollPane(gridSkills), BorderLayout.CENTER);
         totalLevelLabelP2P.setForeground(TEXT_MAIN);
 
         return panelSkillTracker;
@@ -945,23 +945,30 @@ public class DreamBotMenu extends JFrame {
         panelStatus.setBorder(new EmptyBorder(15, 15, 15, 15));
         panelStatus.setBackground(BG_BASE);
 
-        JPanel content = new JPanel(new GridLayout(1, 2, 20, 0));
+        JPanel content = new JPanel(new GridLayout(2, 2, 20, 0));
         content.setBackground(BG_BASE);
 
         ///  create status 'Player' section
-        JPanel login = createInfoCard("Player");
-        addInfoRow(login, "Username", lblUsername);
-        addInfoRow(login, "Password", lblPassword);
-        addInfoRow(login, "Identifier", lblAcctId);
-        addInfoRow(login, "Acct Status", lblAcctStatus);
+        JPanel player = createInfoCard("Player");
+        addInfoRow(player, "Character name", lblCharName);
+        addInfoRowWithIcon(player, "Membership", lblMemberText, lblMemberIcon);
 
-        JPanel game = createInfoCard("World");
-        addInfoRow(game, "Character Name", lblCharName);
-        addInfoRowWithIcon(game, "Membership", lblMemberText, lblMemberIcon);
-        addInfoRow(game, "World", lblWorld); addInfoRow(game, "Coordinates", lblCoords);
-        addInfoRow(game, "GameState", lblGameState);
+        JPanel account = createInfoCard("Account");
+        addInfoRow(account, "Username", lblUsername);
+        addInfoRow(account, "Nickname", lblNickname);
+        addInfoRow(account, "Identifier", lblAcctId);
+        addInfoRow(account, "Account status", lblAcctStatus);
 
-        content.add(login);
+        JPanel world = createInfoCard("World");
+        addInfoRow(world, "World", lblWorld);
+        addInfoRow(world, "Coordinates (x, y, z)", lblCoords);
+
+        JPanel game = createInfoCard("Game");
+        addInfoRow(game, "Game state", lblGameState);
+
+        content.add(player);
+        content.add(account);
+        content.add(world);
         content.add(game);
 
         panelStatus.add(createSubtitle("Status"),  BorderLayout.NORTH);
@@ -1317,6 +1324,10 @@ public class DreamBotMenu extends JFrame {
         }).start();
     }
 
+    public void loadTaskBuilder() {
+        // TODO
+    }
+
     private void unpackTaskLibrary(String json) {
         if (json == null || json.isEmpty() || json.equals("[]")) {
             Logger.log("No task list data found to unpack.");
@@ -1577,59 +1588,87 @@ public class DreamBotMenu extends JFrame {
 
     private JPanel createSkillTile(SkillData data) { JPanel tile = new JPanel(new GridBagLayout()); tile.setBackground(PANEL_SURFACE); tile.setBorder(new LineBorder(BORDER_DIM)); GridBagConstraints gbc = new GridBagConstraints(); gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.gridx = 0; JPanel top = new JPanel(new BorderLayout()); top.setOpaque(false); JLabel icon = new JLabel(loadSkillIcon(data.skill)); data.lblLevel.setForeground(COLOR_BLOOD); data.lblLevel.setFont(new Font("Arial", Font.BOLD, 18)); top.add(icon, BorderLayout.WEST); top.add(data.lblLevel, BorderLayout.EAST); data.lblXpString.setForeground(TEXT_DIM); data.lblXpString.setFont(new Font("Monospaced", Font.PLAIN, 10)); data.mainBar.setForeground(COLOR_BLOOD); data.mainBar.setBackground(Color.BLACK); gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1; tile.add(data.lblXpString, gbc); gbc.gridy = 2; tile.add(data.mainBar, gbc); tile.addMouseListener(new MouseAdapter() { @Override public void mousePressed(MouseEvent e) { data.isTracking = !data.isTracking; tile.setBorder(new LineBorder(data.isTracking ? COLOR_BLOOD : BORDER_DIM, 1)); refreshTrackerList(); } }); return tile; }
     private void refreshTrackerList() { trackerList.removeAll(); skillRegistry.values().stream().filter(d -> d.isTracking).forEach(d -> { trackerList.add(d.trackerPanel); trackerList.add(Box.createRigidArea(new Dimension(0, 10))); }); trackerList.add(Box.createVerticalGlue()); trackerList.revalidate(); trackerList.repaint(); }
-    private void updateAll() {
-        int projH = (int) projectionSpinner.getValue();
-        long totalXPGained = 0;
-        int totalLevelsGained = 0;
-        int p2pTotal = 0;
-        int f2pTotal = 0;
 
-        for (SkillData data : skillRegistry.values()) {
-            int xp = Skills.getExperience(data.skill);
-            int lvl = Skills.getRealLevel(data.skill);
-            data.update(xp, lvl, startTime, projH);
-            p2pTotal += lvl; if (F2P_SKILLS.contains(data.skill)) f2pTotal += lvl;
+    public void updateAll() {
+        SwingUtilities.invokeLater(() -> {
+            int projH = (int) projectionSpinner.getValue();
+            long totalXPGained = 0;
+            int totalLevelsGained = 0;
+            int p2pTotal = 0;
+            int f2pTotal = 0;
 
-            if (data.isTracking) {
-                totalXPGained += Math.max(0, (xp - data.startXP));
-                totalLevelsGained += Math.max(0, (lvl - data.startLevel));
+            ///  Update Live Tracker
+            //  Update level total display
+            totalLevelsGainedLabel.setText("▲ " + totalLevelsGained + " level(s) gained");
+            totalLevelsGainedLabel.setForeground(new Color(0, 180, 0));
+            totalLevelsGainedLabel.setFont(new Font("Consolas", Font.BOLD, 14));
+
+            //  Update XP total display
+            totalXpGainedLabel.setText("▲ " + totalXPGained + " xp gained");
+            totalXpGainedLabel.setForeground(new Color(0, 180, 0));
+            totalXpGainedLabel.setFont(new Font("Consolas", Font.BOLD, 14));
+
+            //  Update F2P total level display
+            totalLevelLabelF2P.setText("Total: " + f2pTotal);
+            totalLevelLabelF2P.setIcon(loadStatusIcon("F2P_icon"));
+            totalLevelLabelF2P.setIconTextGap(8);
+            totalLevelLabelF2P.setHorizontalAlignment(SwingConstants.CENTER);
+
+            //  Update P2P total level display
+            totalLevelLabelP2P.setText("Total: " + p2pTotal);
+            totalLevelLabelP2P.setIcon(loadStatusIcon("P2P_icon"));
+            totalLevelLabelP2P.setIconTextGap(8);
+            totalLevelLabelP2P.setHorizontalAlignment(SwingConstants.CENTER);
+
+            ///  Update Task List
+            loadTaskList();
+
+            ///  Update Task Library
+            loadTaskLibrary();
+
+            ///  update Task Builder
+            loadTaskBuilder();
+
+            ///  Update Skill Tracker?
+
+            ///  Calculate total xp/levels
+            for (SkillData data : skillRegistry.values()) {
+                int xp = Skills.getExperience(data.skill);
+                int lvl = Skills.getRealLevel(data.skill);
+                data.update(xp, lvl, startTime, projH);
+                p2pTotal += lvl;
+                if (F2P_SKILLS.contains(data.skill))
+                    f2pTotal += lvl;
+
+                if (data.isTracking) {
+                    totalXPGained += Math.max(0, (xp - data.startXP));
+                    totalLevelsGained += Math.max(0, (lvl - data.startLevel));
+                }
             }
-        }
 
+            ///  Update Status
+            boolean isMember = Client.isMembers();
+            // only update if player is logged in or there wont be much to load!
+            if (Client.isLoggedIn()) {
+                // load world tab?
+                lblUsername.setText(AccountManager.getAccountUsername());
+                lblNickname.setText(AccountManager.getAccountNickname());
+                lblAcctId.setText(Client.getAccountIdentifier());
+                lblAcctStatus.setText(String.valueOf(Client.getAccountStatus()));
 
-        totalLevelsGainedLabel.setText("▲ " + totalLevelsGained + " level(s) gained");
-        totalLevelsGainedLabel.setForeground(new Color(0, 180, 0));
-        totalLevelsGainedLabel.setFont(new Font("Consolas", Font.BOLD, 14));
+                lblCharName.setText(Players.getLocal().getName());
+                lblMemberIcon.setIcon(loadStatusIcon(isMember ? "P2P_icon" : "F2P_icon"));
+                lblMemberText.setText(isMember ? "Pay-to-play" : "Free-to-play");
+                lblWorld.setText("World " + (Worlds.getCurrent() != null ? Worlds.getCurrent().getWorld() : "?"));
+                lblCoords.setText(Players.getLocal().getTile().toString());
+                lblGameState.setText(Client.getGameState().name());
+            }
+        });
+    }
 
-        totalXpGainedLabel.setText("▲ " + totalXPGained + " xp gained");
-        totalXpGainedLabel.setForeground(new Color(0, 180, 0));
-        totalXpGainedLabel.setFont(new Font("Consolas", Font.BOLD, 14));
-
-        totalLevelLabelF2P.setText("Total: " + f2pTotal);
-        totalLevelLabelF2P.setIcon(loadStatusIcon("F2P_icon"));
-
-        totalLevelLabelP2P.setText("Total: " + p2pTotal);
-        totalLevelLabelP2P.setIcon(loadStatusIcon("P2P_icon"));
-
-
-        totalLevelLabelP2P.setIconTextGap(8);
-        totalLevelLabelF2P.setIconTextGap(8);
-        totalLevelLabelP2P.setHorizontalAlignment(SwingConstants.CENTER);
-        totalLevelLabelF2P.setHorizontalAlignment(SwingConstants.CENTER);
-
-        boolean isMember = Client.isMembers();
-        if (Client.isLoggedIn()) {
-            Players.getLocal();
-            lblUsername.setText(Players.getLocal().getName());
-            lblPassword.setText(String.valueOf(Client.getPassword()));
-            lblWorld.setText("World " + (Worlds.getCurrent() != null ? Worlds.getCurrent().getWorld() : "?"));
-
-            lblMemberText.setText(isMember ? "Pay-to-play" : "Free-to-play");
-            lblMemberIcon.setIcon(loadStatusIcon(isMember ? "P2P_icon" : "F2P_icon"));
-            lblCharName.setText(Players.getLocal().getName());
-            lblCoords.setText(Players.getLocal().getTile().toString());
-            lblGameState.setText(Client.getGameState().name());
-        }
+    public void saveAll() {
+        //TODO need to somehow save task list, library builder and every other column in the server here.
+        // Columns = username, timestamp, tasks, presets, library, builder, settings, last_known_location, last_accessed
     }
 
     /**
