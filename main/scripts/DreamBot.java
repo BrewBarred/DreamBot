@@ -106,6 +106,52 @@ public class DreamBot extends AbstractScript implements GameStateListener {
         }
     }
 
+    @Override
+    public void onPause() {
+        super.onPause();
+
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+    }
+
+    @Override
+    public void onPaint(java.awt.Graphics graphics) {
+        super.onPaint(graphics);
+    }
+
+    @Override
+    public void onExit() {
+        super.onExit();
+
+    }
+
+    @Override
+    public boolean isUserVIP() {
+        // TODO enable special features for those supporting DreamBot or me
+        // TODO add to status tab
+        return super.isUserVIP();
+    }
+
+    public boolean isUserSponsor() {
+        // TODO enable special features for those supporting DreamBot or me
+        // TODO add to status tab
+        return super.isUserSponsor();
+    }
+
+    @Override
+    public void stop() {
+        super.stop();
+    }
+
+    @Override
+    public boolean isPaused() {
+        return super.isPaused();
+    }
+
+
     private void updateAccountData(String name) {
         // Update your specific configs here
         log("Fetching data for " + name);
