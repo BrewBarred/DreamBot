@@ -168,12 +168,26 @@ public class DataMan {
     public String loadDataByPlayer(String columnName) {
         try {
             String playerName = getValidPlayerName();
-            if (playerName == null)
-                return null;
 
-            String encodedName = URLEncoder.encode(playerName, StandardCharsets.UTF_8.toString());
-            String requestUrl = String.format("%s?username=eq.%s&select=%s", TABLE_URL, encodedName, columnName);
-            return fetchRequest(requestUrl);
+            if (playerName != null) {
+                // First attempt: try loading the real player's data
+                String encodedName = URLEncoder.encode(playerName, StandardCharsets.UTF_8.toString());
+                String requestUrl = String.format("%s?username=eq.%s&select=%s", TABLE_URL, encodedName, columnName);
+                String result = fetchRequest(requestUrl);
+
+                // If the player exists in the database, return their data
+                if (result != null && !result.equals("[]"))
+                    return result;
+
+                // Player exists in game but has no saved data — fall through to Zezima defaults
+                Logger.log(Logger.LogType.INFO, playerName + " has no saved data, loading defaults...");
+            }
+
+            // Either no valid player name, or player had no data — load Zezima's defaults
+            Logger.log(Logger.LogType.INFO, "Loading default data from Zezima...");
+            String encodedDefault = URLEncoder.encode("Zezima", StandardCharsets.UTF_8.toString());
+            String defaultUrl = String.format("%s?username=eq.%s&select=%s", TABLE_URL, encodedDefault, columnName);
+            return fetchRequest(defaultUrl);
 
         } catch (Exception e) {
             Logger.log(Logger.LogType.ERROR, "Load Error: " + e.getMessage());

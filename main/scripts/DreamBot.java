@@ -157,6 +157,7 @@ public class DreamBot extends AbstractScript implements GameStateListener {
         log("Fetching data for " + name);
         menu.loadTaskList();
         menu.loadTaskLibrary();
-        menu.loadTaskBuilder();
+        //menu.load
+        //menu.loadTaskBuilder();
     }
 }

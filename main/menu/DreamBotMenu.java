@@ -239,8 +239,7 @@ public class DreamBotMenu extends JFrame {
         loadTaskLibrary();
         Logger.log(Logger.LogType.INFO, "Loading task list..");
         loadTaskList();
-
-        setVisible(true);
+        //TODO load task builder like these two above then remove refreshTaskBuilder() below
 
         SwingUtilities.invokeLater(() -> {
             // scan for nearby targets to populate task builder menu in advance (saves the user a short wait)
@@ -252,11 +251,10 @@ public class DreamBotMenu extends JFrame {
                     scanNearbyTargets();
             }).start();
 
-            // refresh all tabs to ensure something is selected on load
-            refreshTaskList();
-            refreshTaskLibrary();
             refreshTaskBuilder();
         });
+
+        setVisible(true);
     }
 
     private static class ToastRequest {
@@ -634,6 +632,9 @@ public class DreamBotMenu extends JFrame {
         if (listTaskLibrary.getSelectedValue() == null && !modelTaskLibrary.isEmpty())
             listTaskLibrary.setSelectedIndex(modelTaskLibrary.getSize() - 1);
         listTaskLibrary.repaint();
+
+        // scan for nearby targets to update the nearby targets list
+        scanNearbyTargets();
     }
 
     private void refreshTaskBuilder(boolean forceSelectLast) {
@@ -642,9 +643,6 @@ public class DreamBotMenu extends JFrame {
             // temp fix the index error by setting the index to the last item in the list (likely most relevant)
             listTaskBuilder.setSelectedIndex(modelTaskBuilder.getSize() - 1);
         listTaskBuilder.repaint();
-
-        // scan for nearby targets to update the nearby targets list
-        scanNearbyTargets();
     }
 
     private void refreshTaskBuilder() {
