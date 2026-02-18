@@ -552,7 +552,7 @@ public class DreamBotMenu extends JFrame {
             @Override
             public void componentShown(ComponentEvent e) {
                 super.componentShown(e);
-                refreshTaskList();
+                refreshTaskListTab();
             }
         });
 
@@ -647,12 +647,29 @@ public class DreamBotMenu extends JFrame {
             mainTabs.setSelectedIndex(2);
         });
 
-
         listTaskLibrary.addListSelectionListener(e -> {
             btnTaskLibraryDelete.setEnabled(!listTaskLibrary.isSelectionEmpty());
             Task t = listTaskLibrary.getSelectedValue();
             if (t != null)
                 libraryEditorArea.setText(t.getEditableString());
+        });
+
+        listTaskLibrary.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                int selectedIndex = listTaskLibrary.getSelectedIndex();
+
+                // return early if no task is currently selected in the task library
+                if (selectedIndex == -1)
+                    return;
+
+                if (e.getClickCount() == 2) {
+                    // take a shallow copy of the selected task to pass it to the task list
+                    Task task = modelTaskLibrary.getElementAt(selectedIndex);
+                    modelTaskList.addElement(task);
+                    showToast("Added to queue position " + modelTaskLibrary.size(), btnTaskLibraryAdd, true);
+                    refreshTaskListTab();
+                }
+            }
         });
 
         ///  Add all buttons
@@ -683,7 +700,7 @@ public class DreamBotMenu extends JFrame {
         return panelLibraryTab;
     }
 
-    private void refreshTaskList() {
+    private void refreshTaskListTab() {
         if (listTaskList.getSelectedValue() == null && !modelTaskList.isEmpty())
             listTaskList.setSelectedIndex(modelTaskList.size() - 1);
         listTaskList.repaint();
@@ -991,7 +1008,7 @@ public class DreamBotMenu extends JFrame {
             showToast("Select a Task to remove!", btn, false);
         }
 
-        refreshTaskList();
+        refreshTaskListTab();
     }
 
     private Task createTask(List<Action> actions) {
@@ -1407,7 +1424,7 @@ public class DreamBotMenu extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 if (rawJson != null)
                     unpackTaskList(rawJson);
-                refreshTaskList();
+                refreshTaskListTab();
             });
         }).start();
     }
@@ -1469,7 +1486,7 @@ public class DreamBotMenu extends JFrame {
                         for (Task task : fetchedTasks) {
                             modelTaskList.addElement(task);
                         }
-                        refreshTaskList();
+                        refreshTaskListTab();
                         Logger.log("Successfully loaded " + modelTaskList.size() + " tasks into the task list.");
                     });
                 }

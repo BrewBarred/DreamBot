@@ -90,7 +90,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
         // initialize the GUI on the Event Dispatch Thread
         SwingUtilities.invokeLater(() -> {
             menu = new DreamBotMenu(this);
-            menu.setAlwaysOnTop(true);
+            menu.setAlwaysOnTop(true); //TODO add to "Client" settings
             menu.setVisible(true);
         });
 
