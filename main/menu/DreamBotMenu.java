@@ -60,7 +60,6 @@ public class DreamBotMenu extends JFrame {
     // --- State ---
     private boolean isScriptPaused = true;
     private boolean isUserInputAllowed = true;
-    private boolean isProcessingAction = false;
     private boolean isDataLoading = false;
     private int currentExecutionIndex = -1;
 
@@ -317,18 +316,6 @@ public class DreamBotMenu extends JFrame {
         });
 
         setVisible(true);
-    }
-
-    private void addSafeActionListener(JButton btn, ActionListener l) {
-        btn.addActionListener(e -> {
-            if (isProcessingAction) return;
-            isProcessingAction = true;
-            try {
-                l.actionPerformed(e);
-            } finally {
-                isProcessingAction = false;
-            }
-        });
     }
 
     /**
@@ -948,6 +935,7 @@ public class DreamBotMenu extends JFrame {
                 String val = nearbyList.getSelectedValue();
                 if(val == null)
                     return;
+
                 // update target name on single click
                 if(e.getClickCount() == 1) {
                     inputTargetName.setText(val);
