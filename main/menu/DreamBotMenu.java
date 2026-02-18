@@ -84,12 +84,6 @@ public class DreamBotMenu extends JFrame {
      * Recommended default = 60000ms (avoids server congestion and lag)
      */
     private Timer saveTimer;
-    /**
-     * Timer to debounce spam clicks on setting checkboxes.
-     * <p>
-     * (Spam clicks used to cause large queue delays with ingame actions and could have posed risks for players)
-     */
-    private Timer debounceSaveTimer;
     private boolean isSettingProcessing = false;
     /**
      * Flag to stop the snap-back from re-triggered listeners
@@ -1790,7 +1784,8 @@ public class DreamBotMenu extends JFrame {
     }
 
     private void stopScript() {
-        if (JOptionPane.showConfirmDialog(this, "This may result in the loss of unsaved changes.\nAre you sure you want to exit?") == JOptionPane.YES_NO_OPTION) {
+        //TODO see if this needs to be called from Dream Bot when children call stop()?
+        if (!exitOnStopWarning || JOptionPane.showConfirmDialog(this, "This may result in the loss of unsaved changes.\nAre you sure you want to exit?") == JOptionPane.YES_OPTION) {
             script.stop();
             dispose();
         }
