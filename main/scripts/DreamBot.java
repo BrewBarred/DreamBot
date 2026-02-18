@@ -89,7 +89,8 @@ public class DreamBot extends AbstractScript implements GameStateListener {
     }
 
     /**
-     * This triggers whenever the game state changes (e.g., LOGIN_SCREEN -> LOGGED_IN)
+     * Executes some code on game-state change, such as when the player logs in. This function is useful for ensuring
+     * player data remains consistent with whichever account is logged in at all times.
      */
     @Override
     public void onGameStateChange(GameState gameState) {
@@ -100,6 +101,7 @@ public class DreamBot extends AbstractScript implements GameStateListener {
 
             if (currentPlayer != null && !currentPlayer.equals(lastPlayerName)) {
                 log("New login detected for: " + currentPlayer);
+                // update player data (load from server or default if none exists)
                 updateAccountData(currentPlayer);
                 lastPlayerName = currentPlayer;
             }
@@ -125,7 +127,9 @@ public class DreamBot extends AbstractScript implements GameStateListener {
     @Override
     public void onExit() {
         super.onExit();
-
+        // safely dispose menu and menu components
+        if (menu != null)
+            menu.onExit();
     }
 
     @Override
@@ -156,6 +160,5 @@ public class DreamBot extends AbstractScript implements GameStateListener {
         // Update your specific configs here
         log("Fetching data for " + name);
         menu.updateAll();
-        //menu.saveAll(); //TODO implement save all function so that new accounts calling this function will have their default settings saved
     }
 }

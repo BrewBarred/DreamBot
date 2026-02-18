@@ -80,85 +80,85 @@ public class DataMan {
 //        }).start();
 //    }
 
-    public void saveTaskList(JList<DreamBotMenu.Task> taskList) {
-        new Thread(() -> {
-            try {
-                String playerName = getValidPlayerName();
-                if (playerName == null)
-                    return;
+//    public void saveTaskList(JList<DreamBotMenu.Task> taskList) {
+//        new Thread(() -> {
+//            try {
+//                String playerName = getValidPlayerName();
+//                if (playerName == null)
+//                    return;
+//
+//                Logger.log(Logger.LogType.INFO, "Saving " + playerName + "'s task list...");
+//
+//                // Use a List instead of a Map to preserve duplicates
+//                List<DreamBotMenu.Task> taskListData = new ArrayList<>();
+//                for (int i = 0; i < taskList.getModel().getSize(); i++) {
+//                    taskListData.add(taskList.getModel().getElementAt(i));
+//                }
+//
+//                Map<String, Object> payload = new HashMap<>();
+//                payload.put("username", playerName);
+//                payload.put("tasks", taskListData);
+//                payload.put("last_accessed", "now()");
+//
+//                String jsonBody = gson.toJson(payload);
+//                Logger.log(Logger.LogType.INFO, "Sending Payload: " + jsonBody);
+//
+//                boolean success = executeRequest(REQUEST_METHOD.POST, TABLE_URL, jsonBody);
+//
+//                if (success)
+//                    Logger.log(Logger.LogType.INFO, "Save success!");
+//                else
+//                    Logger.log(Logger.LogType.ERROR, "Save failed: Server rejected the request.");
+//
+//            } catch (Exception e) {
+//                Logger.log(Logger.LogType.ERROR, "Save error: " + e.getMessage());
+//            }
+//        }).start();
+//    }
 
-                Logger.log(Logger.LogType.INFO, "Saving " + playerName + "'s task list...");
-
-                // Use a List instead of a Map to preserve duplicates
-                List<DreamBotMenu.Task> taskListData = new ArrayList<>();
-                for (int i = 0; i < taskList.getModel().getSize(); i++) {
-                    taskListData.add(taskList.getModel().getElementAt(i));
-                }
-
-                Map<String, Object> payload = new HashMap<>();
-                payload.put("username", playerName);
-                payload.put("tasks", taskListData);
-                payload.put("last_accessed", "now()");
-
-                String jsonBody = gson.toJson(payload);
-                Logger.log(Logger.LogType.INFO, "Sending Payload: " + jsonBody);
-
-                boolean success = executeRequest(REQUEST_METHOD.POST, TABLE_URL, jsonBody);
-
-                if (success)
-                    Logger.log(Logger.LogType.INFO, "Save success!");
-                else
-                    Logger.log(Logger.LogType.ERROR, "Save failed: Server rejected the request.");
-
-            } catch (Exception e) {
-                Logger.log(Logger.LogType.ERROR, "Save error: " + e.getMessage());
-            }
-        }).start();
-    }
-
-    /**
-     * Uploads the current Task Library (Presets) to the database.
-     * <p>
-     * Uses Supabase 'Upsert' logic to update the row if the username already exists.
-     *
-     * @param libraryList The JList containing task library items
-     */
-    public void saveTaskLibrary(JList<DreamBotMenu.Task> libraryList) {
-        new Thread(() -> {
-            try {
-                String playerName = getValidPlayerName();
-                if (playerName == null)
-                    return;
-
-                Logger.log(Logger.LogType.INFO, "Saving " + playerName + "'s library list...");
-
-                // Convert JList items into a Map to preserve structure
-                Map<String, DreamBotMenu.Task> taskMap = new LinkedHashMap<>();
-                for (int i = 0; i < libraryList.getModel().getSize(); i++) {
-                    DreamBotMenu.Task task = libraryList.getModel().getElementAt(i);
-                    taskMap.put(task.getName(), task);
-                }
-
-                // Construct the JSON payload for Supabase
-                // Note: The key names must match your database column names exactly
-                Map<String, Object> payload = new HashMap<>();
-                payload.put("username", playerName);
-                payload.put("library", taskMap);
-                payload.put("last_accessed", "now()");
-
-                String jsonBody = gson.toJson(payload);
-
-                // POST to Supabase (configured as UPSERT in setPropertiesHTTP)
-                boolean success = executeRequest(REQUEST_METHOD.POST, TABLE_URL, jsonBody);
-
-                if (success)
-                    Logger.log(Logger.LogType.INFO, "Save success!");
-
-            } catch (Exception e) {
-                Logger.log(Logger.LogType.ERROR, "Save error: " + e.getMessage());
-            }
-        }).start();
-    }
+//    /**
+//     * Uploads the current Task Library (Presets) to the database.
+//     * <p>
+//     * Uses Supabase 'Upsert' logic to update the row if the username already exists.
+//     *
+//     * @param libraryList The JList containing task library items
+//     */
+//    public void saveTaskLibrary(JList<DreamBotMenu.Task> libraryList) {
+//        new Thread(() -> {
+//            try {
+//                String playerName = getValidPlayerName();
+//                if (playerName == null)
+//                    return;
+//
+//                Logger.log(Logger.LogType.INFO, "Saving " + playerName + "'s library list...");
+//
+//                // Convert JList items into a Map to preserve structure
+//                Map<String, DreamBotMenu.Task> taskMap = new LinkedHashMap<>();
+//                for (int i = 0; i < libraryList.getModel().getSize(); i++) {
+//                    DreamBotMenu.Task task = libraryList.getModel().getElementAt(i);
+//                    taskMap.put(task.getName(), task);
+//                }
+//
+//                // Construct the JSON payload for Supabase
+//                // Note: The key names must match your database column names exactly
+//                Map<String, Object> payload = new HashMap<>();
+//                payload.put("username", playerName);
+//                payload.put("library", taskMap);
+//                payload.put("last_accessed", "now()");
+//
+//                String jsonBody = gson.toJson(payload);
+//
+//                // POST to Supabase (configured as UPSERT in setPropertiesHTTP)
+//                boolean success = executeRequest(REQUEST_METHOD.POST, TABLE_URL, jsonBody);
+//
+//                if (success)
+//                    Logger.log(Logger.LogType.INFO, "Save success!");
+//
+//            } catch (Exception e) {
+//                Logger.log(Logger.LogType.ERROR, "Save error: " + e.getMessage());
+//            }
+//        }).start();
+//    }
 
     /**
      * Retrieves specific data from the database for the current player.
@@ -357,7 +357,9 @@ public class DataMan {
 
                 // 3. Construct the massive unified payload
                 Map<String, Object> payload = new HashMap<>();
-                payload.put("username", playerName);
+                payload.put("username", playerName);// Generate an exact timestamp with your local timezone offset attached
+                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
+                payload.put("last_accessed", sdf.format(new java.util.Date()));
                 payload.put("tasks", taskListData);
                 payload.put("library", libraryMap);
                 payload.put("builder", builder);
@@ -366,23 +368,22 @@ public class DataMan {
                 payload.put("inventory", inv);
                 payload.put("worn", worn);
                 payload.put("skills", skills);
-                payload.put("last_accessed", "now()");
 
                 // 4. Send exactly ONE request to the database
                 String jsonBody = gson.toJson(payload);
                 boolean success = executeRequest(REQUEST_METHOD.POST, TABLE_URL, jsonBody);
 
                 if (success) {
-                    Logger.log(Logger.LogType.INFO, "All player data saved in a single unified request.");
+                    Logger.log(Logger.LogType.INFO, "Player save complete!");
                     if (onComplete != null) {
                         onComplete.run();
                     }
                 } else {
-                    Logger.log(Logger.LogType.ERROR, "Failed to save unified player data.");
+                    Logger.log(Logger.LogType.ERROR, "Failed to save player data.");
                 }
 
             } catch (Exception e) {
-                Logger.log(Logger.LogType.ERROR, "saveEverything error: " + e.getMessage());
+                Logger.log(Logger.LogType.ERROR, "Error saving player data. " + e.getMessage());
             }
         }).start();
     }

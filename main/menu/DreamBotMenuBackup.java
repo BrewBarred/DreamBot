@@ -1,0 +1,2000 @@
+//package main.menu;
+//
+//import com.google.gson.Gson;
+//import com.google.gson.JsonArray;
+//import com.google.gson.JsonElement;
+//import com.google.gson.JsonParser;
+//import com.google.gson.reflect.TypeToken;
+//import main.managers.DataMan;
+//import org.dreambot.api.Client;
+//import org.dreambot.api.ClientSettings;
+//import org.dreambot.api.methods.container.impl.Inventory;
+//import org.dreambot.api.methods.container.impl.bank.Bank;
+//import org.dreambot.api.methods.container.impl.equipment.Equipment;
+//import org.dreambot.api.methods.interactive.GameObjects;
+//import org.dreambot.api.methods.interactive.NPCs;
+//import org.dreambot.api.methods.interactive.Players;
+//import org.dreambot.api.methods.map.Tile;
+//import org.dreambot.api.methods.skills.Skill;
+//import org.dreambot.api.methods.skills.Skills;
+//import org.dreambot.api.methods.world.Worlds;
+//import org.dreambot.api.script.AbstractScript;
+//import org.dreambot.api.utilities.AccountManager;
+//import org.dreambot.api.utilities.Logger;
+//import org.dreambot.api.wrappers.interactive.GameObject;
+//import org.dreambot.api.wrappers.interactive.NPC;
+//import org.dreambot.api.wrappers.items.Item;
+//
+//import javax.swing.*;
+//import javax.swing.Timer;
+//import javax.swing.border.EmptyBorder;
+//import javax.swing.border.LineBorder;
+//import javax.swing.border.TitledBorder;
+//import java.awt.*;
+//import java.awt.event.*;
+//import java.util.*;
+//import java.util.List;
+//import java.util.Queue;
+//import java.util.stream.Collectors;
+//
+///**
+// * <h1>DreamBotMan</h1>
+// * @author DreamBotMan Dev
+// * @version 15.0.0-Elite
+// */
+//public class DreamBotMenuBackup extends JFrame {
+//    //TODO SETTINGS:
+//    ///  DEV Settings:
+//    ///
+//    /// import org.dreambot.api.ClientSettings;
+//    ///
+//    /// // Enable delete-on-ban
+//    /// ClientSettings.setDeleteBannedAccounts(true);
+//    ///
+//    /// // Disable delete-on-ban
+//    /// ClientSettings.setDeleteBannedAccounts(false);
+//
+//    // --- Task ---
+//    boolean isTaskDescriptionRequired = false;
+//    boolean isTaskStatusRequired = false;
+//    // --- State ---
+//    private boolean isScriptPaused = true;
+//    private boolean isUserInputAllowed = true;
+//    private int currentExecutionIndex = -1;
+//
+//    // --- Script ---
+//    /**
+//     * Timer used to rapidly refresh the GUI to keep it updated.
+//     * <p>
+//     * Recommended default = 1000ms (keep GUI updated, low-cost only on this thread!!)
+//     */
+//    private Timer uiTimer;
+//    /**
+//     * Timer used to scan for nearby targets in short intervals while the Task Builder tab is open.
+//     * <p>
+//     * Recommended default = 4000ms (balance between overkill updating and up-to-date list)
+//     */
+//    private Timer scanTimer;
+//    /**
+//     * Timer used to periodically auto-save the players details to the server to back up their script settings.
+//     * <p>
+//     * Recommended default = 60000ms (avoids server congestion and lag)
+//     */
+//    private Timer saveTimer;
+//    /**
+//     * Timer to debounce spam clicks on setting checkboxes.
+//     * <p>
+//     * (Spam clicks used to cause large queue delays with ingame actions and could have posed risks for players)
+//     */
+//    private Timer debounceSaveTimer;
+//    private boolean isSettingProcessing = false;
+//    private final int TOAST_DELAY = 300;
+//
+//    private final AbstractScript script;
+//    private final JPanel sidePanel;
+//
+//    private final Color COLOR_NAV_BUTTONS = new Color(40, 40, 40);
+//    private final Color COLOR_RED = new Color(100, 0, 0);
+//    private final Color COLOR_GREEN = new Color(0, 100, 0);
+//    private final Color COLOR_LIGHT_GREEN = new Color(150, 200, 50);
+//    private final Color COLOR_GREY = new Color(40,40,40);
+//
+//    // --- Data & Presets ---
+//    private final int MAX_TOAST_QUEUE = 10; // Only allow 3 toasts to be "waiting"
+//    private final Queue<ToastRequest> toastQueue = new LinkedList<>();
+//    private boolean isToastProcessing = false;
+//
+//    private final DataMan dataMan = new DataMan();
+//
+//    private final Map<Skill, SkillData> skillRegistry = new EnumMap<>(Skill.class);
+//
+//    private final DefaultListModel<Task> modelTaskList = new DefaultListModel<>();
+//    private final JList<Task> listTaskList = new JList<>(modelTaskList);
+//
+//    private final DefaultListModel<Task> modelTaskLibrary = new DefaultListModel<>();
+//    private final JList<Task> listTaskLibrary = new JList<>(modelTaskLibrary);
+//
+//    private final DefaultListModel<Action> modelTaskBuilder = new DefaultListModel<>();
+//    private final JList<Action> listTaskBuilder = new JList<>(modelTaskBuilder);
+//
+//    private final DefaultListModel<String> nearbyEntitiesModel = new DefaultListModel<>();
+//
+//
+//    private final List<List<Task>> presets = new ArrayList<>(Arrays.asList(new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>()));
+//
+//    // --- UI Components ---
+//    private final JTabbedPane mainTabs = new JTabbedPane();
+//    private final JButton[] presetButtons = new JButton[4];
+//    private final JPanel trackerList;
+//    private final JLabel totalXpGainedLabel = new JLabel();
+//    private final JLabel totalLevelsGainedLabel = new JLabel();
+//    private final JLabel totalLevelLabelP2P = new JLabel();
+//    private final JLabel totalLevelLabelF2P = new JLabel();
+//    private final JProgressBar statusProgress = new JProgressBar(0, 100);
+//    private final JLabel lblStatus = new JLabel("Status: Idle");
+//    private final JSpinner projectionSpinner;
+//    private final long startTime;
+//    private JButton btnTaskBuilderAddToLibrary;
+//    private JButton btnTaskBuilderScanNearby;
+//
+//    private JList<String> nearbyList;
+//    private JTextArea libraryEditorArea, consoleArea;
+//    private JTextField taskNameInput, taskDescriptionInput, taskStatusInput, manualTargetInput, consoleSearch;
+//    private JComboBox<ActionType> actionCombo;
+//    private JButton btnPlayPause, btnInputToggle, btnCaptureToggle;
+//
+//    // --- Client Checkboxes ---
+//    private JCheckBox chkAutoSave;
+//    private JCheckBox chkDisableRendering;
+//    private JCheckBox chkRoofs;
+//    private JCheckBox chkDataOrbs;
+//    private JCheckBox chkTransparentSidePanel;
+//    private JCheckBox chkGameAudio;
+//    private JCheckBox chkTransparentChatbox;
+//    private JCheckBox chkClickThroughChatbox;
+//    private JCheckBox chkShiftClickDrop;
+//    private JCheckBox chkEscClosesInterface;
+//    private JCheckBox chkLevelUpInterface;
+//    private JCheckBox chkLootNotifications;
+//
+//    // --- Theme ---
+//    private final Map<JComponent, Color> originalColors = new WeakHashMap<>();
+//    private final Color BG_BASE = new Color(12, 12, 12);
+//    private final Color PANEL_SURFACE = new Color(24, 24, 24);
+//    private final Color COLOR_BLOOD = new Color(150, 0, 0);
+//    private final Color COLOR_ORANGE = new Color(220, 80, 0); // Restored from new builder
+//    private final Color BORDER_DIM = new Color(45, 45, 45);
+//    private final Color TEXT_MAIN = new Color(210, 210, 210);
+//    private final Color TEXT_DIM = new Color(140, 140, 140);
+//    private final Color TAB_SELECTED = new Color(60, 0, 0);
+//
+//    // --- Labels (Restored) ---
+//    private final JLabel lblUsername = new JLabel("...");
+//    private final JLabel lblNickname = new JLabel("...");
+//    private final JLabel lblAcctId = new JLabel("...");
+//    private final JLabel lblAcctStatus = new JLabel("...");
+//    private final JLabel lblCharName = new JLabel("...");
+//    private final JLabel lblWorld = new JLabel("-");
+//    private final JLabel lblCoords = new JLabel("-");
+//    private final JLabel lblGameState = new JLabel("-");
+//    private final JLabel lblMemberIcon = new JLabel();
+//    private final JLabel lblMemberText = new JLabel("-");
+//
+//    private Toast activeToast;
+//
+//
+//    public enum ActionType { ATTACK, BANK, BURY, CHOP, COOK, DROP, EXAMINE, FISH, MINE, OPEN, TALK_TO, USE_ON }
+//
+//    private static final Skill[] OSRS_ORDER = { Skill.ATTACK, Skill.HITPOINTS, Skill.MINING, Skill.STRENGTH, Skill.AGILITY, Skill.SMITHING, Skill.DEFENCE, Skill.HERBLORE, Skill.FISHING, Skill.RANGED, Skill.THIEVING, Skill.COOKING, Skill.PRAYER, Skill.CRAFTING, Skill.FIREMAKING, Skill.MAGIC, Skill.FLETCHING, Skill.WOODCUTTING, Skill.RUNECRAFTING, Skill.SLAYER, Skill.FARMING, Skill.CONSTRUCTION, Skill.HUNTER, Skill.SAILING };
+//    private static final Set<Skill> F2P_SKILLS = new HashSet<>(Arrays.asList(Skill.ATTACK, Skill.STRENGTH, Skill.DEFENCE, Skill.RANGED, Skill.PRAYER, Skill.MAGIC, Skill.HITPOINTS, Skill.CRAFTING, Skill.MINING, Skill.SMITHING, Skill.FISHING, Skill.COOKING, Skill.FIREMAKING, Skill.WOODCUTTING, Skill.RUNECRAFTING));
+//
+//    public DreamBotMenuBackup(AbstractScript script) {
+//        this.script = script;
+//        this.startTime = System.currentTimeMillis();
+//        this.setIconImage(Objects.requireNonNull(loadStatusIcon("Hardcore_ironman")).getImage());
+//        setTitle("DreamBotMan | OSRS DreamBot Manager v1");
+//
+//        setSize(1400, 950);
+//        setLocationRelativeTo(null);
+//        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+//        setLayout(new BorderLayout(0, 0));
+//        getContentPane().setBackground(BG_BASE);
+//
+//        JPanel header = createHeaderPanel();
+//        mainTabs.setBackground(PANEL_SURFACE);
+//        mainTabs.setForeground(TEXT_MAIN);
+//
+//        mainTabs.addTab("Task List", loadTabIcon("task_list_tab"), createTaskListTab());
+//        mainTabs.addTab("Task Library", loadTabIcon("task_library_tab"),createTaskLibraryTab());
+//        mainTabs.addTab("Task Builder", loadTabIcon("task_builder_tab"),createTaskBuilderTab());
+//        mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
+//        mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
+//        mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
+//
+//        projectionSpinner = new JSpinner(new SpinnerNumberModel(24, 1, 999, 1));
+//        styleSpinner(projectionSpinner);
+//
+//        trackerList = new JPanel();
+//        trackerList.setLayout(new BoxLayout(trackerList, BoxLayout.Y_AXIS));
+//        trackerList.setBackground(PANEL_SURFACE);
+//        JScrollPane sScroll = new JScrollPane(trackerList);
+//        sScroll.setBorder(null);
+//        sScroll.getViewport().setBackground(PANEL_SURFACE);
+//
+//        ///  Define side panel
+//        JPanel sidePanelContent = new JPanel(new BorderLayout());
+//        sidePanelContent.setPreferredSize(new Dimension(360, 0));
+//        sidePanelContent.setBackground(PANEL_SURFACE);
+//        sidePanelContent.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, BORDER_DIM));
+//
+//        ///  Add toggle button to show/hide side panel
+//        JButton btnToggleSidePanel = new JButton();
+//        styleHeaderLabel(totalXpGainedLabel);
+//        styleHeaderLabel(totalLevelsGainedLabel);
+//
+//        JPanel totals = new JPanel(new GridLayout(3, 1, 5, 10));
+//        totals.setOpaque(false);
+//
+//        JPanel topRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 5));
+//        topRow.setOpaque(false);
+//        topRow.add(totalXpGainedLabel);
+//
+//        JPanel middleRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 5));
+//        middleRow.setOpaque(false);
+//        middleRow.add(totalLevelsGainedLabel);
+//
+//        JPanel bottomRow = new JPanel(new GridLayout(1, 2));
+//        bottomRow.setOpaque(false);
+//        bottomRow.add(totalLevelLabelF2P);
+//        bottomRow.add(totalLevelLabelP2P);
+//
+//        totals.add(topRow);
+//        totals.add(middleRow);
+//        totals.add(bottomRow);
+//
+//        ///  Add side panel controls
+//        sidePanelContent.add(createSubtitle("Live Tracker"), BorderLayout.NORTH);
+//        sidePanelContent.add(sScroll, BorderLayout.CENTER);
+//        sidePanelContent.add(btnToggleSidePanel, BorderLayout.EAST);
+//        sidePanelContent.add(totals, BorderLayout.SOUTH);
+//        sidePanelContent.setVisible(false);
+//
+//        this.sidePanel = new JPanel(new BorderLayout());
+//        this.sidePanel.setOpaque(false);
+//        this.sidePanel.add(sidePanelContent, BorderLayout.CENTER);
+//        this.sidePanel.add(btnToggleSidePanel, BorderLayout.EAST);
+//
+//        btnToggleSidePanel.setText(sidePanelContent.isVisible() ? ">" : "<");
+//        btnToggleSidePanel.setPreferredSize(new Dimension(22, 0));
+//        btnToggleSidePanel.setBackground(PANEL_SURFACE);
+//        btnToggleSidePanel.setForeground(COLOR_BLOOD);
+//        btnToggleSidePanel.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 1, BORDER_DIM));
+//
+//        btnToggleSidePanel.addActionListener(e -> {
+//            sidePanelContent.setVisible(!sidePanelContent.isVisible());
+//            btnToggleSidePanel.setText(sidePanelContent.isVisible() ? ">" : "<");
+//            revalidate();
+//        });
+//
+//        add(header, BorderLayout.NORTH);
+//        add(mainTabs, BorderLayout.CENTER);
+//        add(this.sidePanel, BorderLayout.EAST);
+//        add(createProgressPanel(), BorderLayout.SOUTH);
+//
+//        updateAll();
+//
+//        SwingUtilities.invokeLater(() -> {
+//            ///  Start a timer to update the UI every 1 second
+//            uiTimer = new Timer(1000, e ->
+//                    // refresh GUI every n seconds
+//                    updateUI()
+//            );
+//
+//            ///  Start another timer to scan for nearby targets every n seconds while task builder is open.
+//            scanTimer = new Timer(4000, e -> {
+//                // scan for nearby targets every n seconds while the task builder tab is open
+//                if (mainTabs.getSelectedIndex() == 2)
+//                    scanNearbyTargets();
+//            });
+//
+//            ///  Start a third timer to auto-save everything periodically
+//            saveTimer = new Timer(60000, e -> {
+//                // auto-save every n seconds (if auto-save feature is enabled in settings)
+//                if (chkAutoSave.isSelected())
+//                    saveAll();
+//            });
+//
+//            uiTimer.start();
+//            scanTimer.start();
+//            saveTimer.start();
+//        });
+//
+//        setVisible(true);
+//    }
+//
+//    /**
+//     * Ensures the proper disposal of the {@link DreamBotMenuBackup} on exit.
+//     */
+//    public void onExit() {
+//        // disable gui refresh timer if its running
+//        if (uiTimer != null)
+//            uiTimer.stop();
+//
+//        // disable scan nearby timer if its running
+//        if (scanTimer != null)
+//            scanTimer.stop();
+//
+//        // disable auto-save timer if its running
+//        if (saveTimer != null)
+//            saveTimer.stop();
+//
+//        // safely dispose of this JFrame object
+//        this.dispose();
+//    }
+//
+//    private static class ToastRequest {
+//        final String message;
+//        final JComponent anchor;
+//        final boolean success;
+//
+//        ToastRequest(String message, JComponent anchor, boolean success) {
+//            this.message = message;
+//            this.anchor = anchor;
+//            this.success = success;
+//        }
+//    }
+//
+//    private JPanel createProgressPanel() {
+//        // Use a GridBagLayout for precise control or a 2-row GridLayout
+//        JPanel persistentStatus = new JPanel(new GridBagLayout());
+//        persistentStatus.setBackground(PANEL_SURFACE);
+//
+//        // Add a border to separate it from the tabs above
+//        persistentStatus.setBorder(BorderFactory.createCompoundBorder(
+//                BorderFactory.createMatteBorder(1, 0, 0, 0, BORDER_DIM), // Top line
+//                new EmptyBorder(8, 15, 8, 15) // Inner padding
+//        ));
+//
+//        GridBagConstraints gbc = new GridBagConstraints();
+//        gbc.fill = GridBagConstraints.HORIZONTAL;
+//        gbc.weightx = 1.0;
+//        gbc.gridx = 0;
+//
+//        // --- Row 1: The Progress Bar (Full Width) ---
+//        statusProgress.setPreferredSize(new Dimension(0, 18)); // Width 0 is fine because weightx=1.0 stretches it
+//        statusProgress.setForeground(COLOR_BLOOD);
+//        statusProgress.setBackground(BG_BASE);
+//        statusProgress.setBorder(new LineBorder(BORDER_DIM));
+//        statusProgress.setStringPainted(true); // Shows % text
+//
+//        gbc.gridy = 0;
+//        gbc.insets = new Insets(0, 0, 4, 0); // Small gap between bar and text
+//        persistentStatus.add(statusProgress, gbc);
+//
+//        // --- Row 2: The Status Text (Below) ---
+//        lblStatus.setForeground(TEXT_DIM);
+//        lblStatus.setFont(new Font("Consolas", Font.PLAIN, 12));
+//
+//        gbc.gridy = 1;
+//        gbc.insets = new Insets(0, 2, 0, 0); // Slight left offset for text alignment
+//        persistentStatus.add(lblStatus, gbc);
+//
+//        return persistentStatus;
+//    }
+//
+//    // --- Bridge Methods for Main Script ---
+//    public boolean isScriptPaused() { return isScriptPaused; }
+//    public DefaultListModel<Task> getModelTaskList() { return modelTaskList; }
+//    public int getCurrentExecutionIndex() { return currentExecutionIndex; }
+//
+//    public void setCurrentExecutionIndex(int i) {
+//        this.currentExecutionIndex = i;
+//        if(listTaskList != null)
+//            listTaskList.repaint();
+//    }
+//
+//    public void setLabelStatus(String text) {
+//        SwingUtilities.invokeLater(() -> lblStatus.setText(text));
+//    }
+//
+//    public void incrementExecutionIndex() {
+//        if (currentExecutionIndex < modelTaskList.size() - 1) {
+//            currentExecutionIndex++;
+//        } else {
+//            currentExecutionIndex = -1; // reset to "idle" state
+//            isScriptPaused = true;
+//            if (btnPlayPause != null)
+//                btnPlayPause.setText("▶");
+//        }
+//        listTaskList.repaint();
+//    }
+//
+//    private JLabel createSubtitle(String subtitle) {
+//        JLabel title = new JLabel(subtitle, SwingConstants.CENTER);
+//        title.setForeground(COLOR_BLOOD);
+//        title.setFont(new Font("Consolas", Font.BOLD, 22));
+//        title.setBorder(BorderFactory.createMatteBorder(0, 5, 0, 0, COLOR_BLOOD));
+//
+//        return title;
+//    }
+//
+//    /**
+//     * Creates the 'Task List' tab which may be used to view and manipulate the current task queue.
+//     *
+//     * @return
+//     */
+//    private JPanel createTaskListTab() {
+//        /// Set up the main task list panel
+//        // create main panel
+//        JPanel panelTaskList = new JPanel(new BorderLayout(10, 10));
+//        panelTaskList.setBorder(new EmptyBorder(15, 15, 15, 15));
+//        panelTaskList.setBackground(BG_BASE);
+//
+//        /// CENTER: Add the task queue list display to the center of the task list panel
+//        listTaskList.setCellRenderer(new TaskCellRenderer());
+//        styleJList(listTaskList);
+//
+//        /// WEST: Add up/down buttons to navigate through task list
+//        // create west panel
+//        JPanel west = new JPanel(new GridLayout(0, 1, 0, 5));
+//        west.setOpaque(false);
+//
+//        // create navigation buttons (up/down arrows)
+//        JButton btnUp = createStyledBtn("▲", COLOR_NAV_BUTTONS);
+//        btnUp.addActionListener(e -> {
+//            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+//            boolean success = shiftQueue(-1, listTaskList, modelTaskList, shiftPressed);
+//            flashControl(btnUp, success ? COLOR_GREEN : COLOR_RED);
+//        });
+//
+//        JButton btnDown = createStyledBtn("▼", COLOR_NAV_BUTTONS);
+//        btnDown.addActionListener(e -> {
+//            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+//            boolean success = shiftQueue(1, listTaskList, modelTaskList, shiftPressed);
+//            flashControl(btnDown, success ? COLOR_GREEN : COLOR_RED);
+//        });
+//
+//        // add navigation buttons (up/down arrows)
+//        west.add(btnUp);
+//        west.add(btnDown);
+//
+//        /// SOUTH: Add bottom panel and delete task button
+//        // create status label/progress bar
+//        lblStatus.setText("Status: Idle");
+//        lblStatus.setForeground(TEXT_MAIN);
+//
+//        // create south panel with 3 rows (Status, Progress, Buttons)
+//        JPanel south = new JPanel(new GridLayout(1, 3, 0, 5));
+//        south.setOpaque(false);
+//
+//        ///  Create Task List save button
+//        JButton btnTaskListSave = createStyledBtn("Save", COLOR_GREY);
+//        btnTaskListSave.addActionListener(e -> {
+//            showToast("Saving...", btnTaskListSave, true);
+//            saveAll();
+//        });
+//
+//        ///  Create Task List duplicate button
+//        JButton btnTaskListDuplicate = createStyledBtn("Duplicate", COLOR_GREY);
+//        btnTaskListDuplicate.addActionListener(e -> {
+//            // create a new task using the selected value
+//            Task selected = listTaskList.getSelectedValue();
+//            if (selected == null) {
+//                // return early if no tasks are currently selected
+//                showToast("Select a task first!", btnTaskListDuplicate, false);
+//                return;
+//            }
+//
+//            // create a new task using the selected task
+//            Task task = new Task(selected);
+//            // add the duplicated task to the task list
+//            modelTaskList.addElement(task);
+//            // refresh the task list display
+//            listTaskList.repaint();
+//            showToast("Duplication complete! Size: " + modelTaskList.size(), btnTaskListDuplicate, true);
+//        });
+//
+//        ///  Create Task List remove button
+//        JButton btnTaskListRemove = createStyledBtn("Remove", COLOR_RED);
+//        btnTaskListRemove.setEnabled(listTaskList.getSelectedIndex() != -1);
+//        btnTaskListRemove.addActionListener(e -> {
+//            int selectedIndex = listTaskList.getSelectedIndex();
+//            if (selectedIndex != -1) {
+//                modelTaskList.remove(selectedIndex);
+//                showToast("Removed task!", btnTaskListRemove, true);
+//                refreshTaskList();
+//            } else {
+//                showToast("Select a Task to remove!", btnTaskListRemove, false);
+//            }
+//        });
+//
+//        ///  Create Task List edit button
+//        JButton btnTaskListView = createStyledBtn("View in builder...", COLOR_GREY);
+//        btnTaskListView.addActionListener(e -> {
+//            loadIntoBuilder(listTaskList.getSelectedValue());
+//            showToast("Moving to builder for viewing...", btnTaskListView, true);
+//            // switch to tab 2 (3rd tab = Task Builder) to edit task
+//            mainTabs.setSelectedIndex(2);
+//        });
+//
+//        listTaskList.addListSelectionListener(e -> {
+//            btnTaskListRemove.setEnabled(!listTaskList.isSelectionEmpty());
+//        });
+//
+//        ///  Add all buttons
+//        south.add(btnTaskListSave);
+//        south.add(btnTaskListDuplicate);
+//        south.add(btnTaskListRemove);
+//        south.add(btnTaskListView);
+//
+//        // add all panels to the main panel (task list panel)
+//        panelTaskList.add(createSubtitle("Task List"), BorderLayout.NORTH);
+//        panelTaskList.add(west, BorderLayout.WEST);
+//        panelTaskList.add(new JScrollPane(listTaskList), BorderLayout.CENTER);
+//        panelTaskList.add(south, BorderLayout.SOUTH);
+//
+//        // add listener to scan for nearby targets and select the first item if none selected on show
+//        panelTaskList.addComponentListener(new ComponentAdapter() {
+//            @Override
+//            public void componentShown(ComponentEvent e) {
+//                super.componentShown(e);
+//                refreshTaskList();
+//            }
+//        });
+//
+//        return panelTaskList;
+//    }
+//
+//    private JPanel createTaskLibraryTab() {
+//        // 1. Changed to BorderLayout to allow title to span the top
+//        JPanel panelLibraryTab = new JPanel(new BorderLayout(10, 10));
+//        panelLibraryTab.setBorder(new EmptyBorder(15, 15, 15, 15));
+//        panelLibraryTab.setBackground(BG_BASE);
+//
+//        // create navigation buttons (up/down arrows)
+//        JButton btnUp = createStyledBtn("▲", COLOR_NAV_BUTTONS);
+//        btnUp.addActionListener(e -> {
+//            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+//            boolean success = shiftQueue(-1, listTaskLibrary, modelTaskLibrary, shiftPressed);
+//            flashControl(btnUp, success ? COLOR_GREEN : COLOR_RED);
+//        });
+//
+//        JButton btnDown = createStyledBtn("▼", COLOR_NAV_BUTTONS);
+//        btnDown.addActionListener(e -> {
+//            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+//            boolean success = shiftQueue(1, listTaskLibrary, modelTaskLibrary, shiftPressed);
+//            flashControl(btnDown, success ? COLOR_GREEN : COLOR_RED);
+//        });
+//
+//        JPanel panelNavButtons = new JPanel(new GridLayout(0, 1, 0, 5));
+//        panelNavButtons.setOpaque(false);
+//        panelNavButtons.add(btnUp);
+//        panelNavButtons.add(btnDown);
+//
+//        // 3. Create a wrapper for the center content (List + Editor)
+//        JPanel centerContent = new JPanel(new GridLayout(1, 2, 10, 0));
+//        centerContent.setOpaque(false);
+//
+//        /// CENTER WEST: Library list
+//        styleJList(listTaskLibrary);
+//        libraryEditorArea = new JTextArea();
+//        libraryEditorArea.setBackground(new Color(15, 15, 15));
+//        libraryEditorArea.setForeground(TEXT_MAIN);
+//
+//        /// CENTER EAST: Edit panel + buttons
+//        JPanel panelCenterEastLibraryTab = new JPanel(new BorderLayout(0, 10));
+//        JPanel btnSection = new JPanel(new GridLayout(1, 3, 0, 5));
+//        panelCenterEastLibraryTab.setOpaque(false);
+//        btnSection.setOpaque(false);
+//
+//        ///  Create Task Library save button
+//        JButton btnTaskLibrarySave = createStyledBtn("Save", COLOR_GREY);
+//        btnTaskLibrarySave.addActionListener(e -> {
+//            showToast("Saving...", btnTaskLibrarySave, true);
+//            btnTaskLibrarySave.setEnabled(false);
+//
+//            saveAll();
+//
+//            showToast("Save success!", btnTaskLibrarySave, true);
+//            btnTaskLibrarySave.setEnabled(true);
+//        });
+//
+//        ///  Create Task Library add button
+//        JButton btnTaskLibraryAdd = createStyledBtn("Add", COLOR_LIGHT_GREEN);
+//        btnTaskLibraryAdd.addActionListener(e -> {
+//            if(listTaskLibrary.getSelectedValue() != null) {
+//                modelTaskList.addElement(listTaskLibrary.getSelectedValue());
+//                showToast("Added to position " + modelTaskList.size() + " of the queue", btnTaskLibraryAdd, true);
+//            }
+//        });
+//
+//        ///  Create Task Library delete button
+//        JButton btnTaskLibraryDelete = createStyledBtn("Delete", COLOR_RED);
+//        btnTaskLibraryDelete.setEnabled(listTaskLibrary.getSelectedIndex() != -1);
+//        btnTaskLibraryDelete.addActionListener(e -> {
+//            int selectedIndex = listTaskLibrary.getSelectedIndex();
+//            if (selectedIndex != -1) {
+//                modelTaskLibrary.remove(selectedIndex);
+//                showToast("Deleted Task!", btnTaskLibraryDelete, true);
+//            } else {
+//                showToast("Select an Action to delete!", btnTaskLibraryDelete, false);
+//            }
+//
+//
+//            refreshTaskLibrary();
+//        });
+//
+//        ///  Create Task Library edit button
+//        JButton btnTaskLibraryEdit = createStyledBtn("View in builder...", COLOR_GREY);
+//        btnTaskLibraryEdit.addActionListener(e -> {
+//            loadIntoBuilder(listTaskLibrary.getSelectedValue());
+//            showToast("Moving to builder for viewing...", btnTaskLibraryEdit, true);
+//            // switch to tab 2 (3rd tab = Task Builder) to edit task
+//            mainTabs.setSelectedIndex(2);
+//        });
+//
+//
+//        listTaskLibrary.addListSelectionListener(e -> {
+//            btnTaskLibraryDelete.setEnabled(!listTaskLibrary.isSelectionEmpty());
+//            Task t = listTaskLibrary.getSelectedValue();
+//            if (t != null)
+//                libraryEditorArea.setText(t.getEditableString());
+//        });
+//
+//        ///  Add all buttons
+//        btnSection.add(btnTaskLibrarySave);
+//        btnSection.add(btnTaskLibraryAdd);
+//        btnSection.add(btnTaskLibraryDelete);
+//        btnSection.add(btnTaskLibraryEdit);
+//
+//        panelCenterEastLibraryTab.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER);
+//
+//        // 4. Add both sections to the center wrapper
+//        centerContent.add(new JScrollPane(listTaskLibrary));
+//        centerContent.add(panelCenterEastLibraryTab);
+//
+//        panelLibraryTab.add(createSubtitle("Task Library"), BorderLayout.NORTH);
+//        panelLibraryTab.add(panelNavButtons, BorderLayout.WEST);
+//        panelLibraryTab.add(centerContent, BorderLayout.CENTER);
+//        panelLibraryTab.add(btnSection, BorderLayout.SOUTH);
+//
+//        // add listener to scan for nearby targets and select the first item if none selected on show
+//        panelLibraryTab.addComponentListener(new ComponentAdapter() {
+//            @Override
+//            public void componentShown(ComponentEvent e) {
+//                refreshTaskLibrary();
+//            }
+//        });
+//
+//        return panelLibraryTab;
+//    }
+//
+//    private void refreshTaskList() {
+//        if (listTaskList.getSelectedValue() == null && !modelTaskList.isEmpty())
+//            listTaskList.setSelectedIndex(modelTaskList.size() - 1);
+//        listTaskList.repaint();
+//    }
+//
+//    private void refreshTaskLibrary() {
+//        if (listTaskLibrary.getSelectedValue() == null && !modelTaskLibrary.isEmpty())
+//            listTaskLibrary.setSelectedIndex(modelTaskLibrary.getSize() - 1);
+//        listTaskLibrary.repaint();
+//
+//        // scan for nearby targets to update the nearby targets list
+//        scanNearbyTargets();
+//    }
+//
+//    private void refreshTaskBuilderTab(boolean forceSelectLast) {
+//        // if the list is empty or an invalid item is selected OR if force selecting the last item...
+//        if (listTaskBuilder.getSelectedValue() == null && !modelTaskBuilder.isEmpty() || forceSelectLast)
+//            // temp fix the index error by setting the index to the last item in the list (likely most relevant)
+//            listTaskBuilder.setSelectedIndex(modelTaskBuilder.getSize() - 1);
+//        listTaskBuilder.repaint();
+//    }
+//
+//    private void refreshTaskBuilderTab() {
+//        refreshTaskBuilderTab(false);
+//    }
+//
+//    private void refreshSkillTrackerTab(JPanel gridSkills) {
+//        for (Skill skill : OSRS_ORDER) {
+//            SkillData data = new SkillData(skill);
+//            skillRegistry.put(skill, data);
+//            gridSkills.add(createSkillTile(data));
+//        }
+//    }
+//
+//    private JPanel createTaskBuilderTab() {
+//        ///  Create the task builders title
+//        JPanel panelTaskBuilder = new JPanel(new BorderLayout(15, 15));
+//        panelTaskBuilder.setBorder(new EmptyBorder(15, 15, 15, 15));
+//        panelTaskBuilder.setBackground(BG_BASE);
+//
+//        ///  Create the task builders right panel
+//        JPanel east = new JPanel(new GridBagLayout());
+//        east.setOpaque(false);
+//
+//        GridBagConstraints g = new GridBagConstraints();
+//        g.fill = GridBagConstraints.HORIZONTAL;
+//        g.weightx = 1.0;
+//        g.insets = new Insets(5, 5, 5, 5);
+//
+//        taskNameInput = new JTextField(25);
+//        taskDescriptionInput = new JTextField(25);
+//        taskStatusInput = new JTextField(25);
+//
+//        styleComp(taskNameInput);
+//        styleComp(taskDescriptionInput);
+//        styleComp(taskStatusInput);
+//
+//        g.gridy = 0;
+//        east.add(new JLabel("Task name:"), g);
+//
+//        g.gridy = 1;
+//        east.add(taskNameInput, g);
+//
+//        g.gridy = 2;
+//        east.add(new JLabel("Description:"), g);
+//
+//        g.gridy = 3;
+//        east.add(taskDescriptionInput, g);
+//
+//        g.gridy = 4;
+//        east.add(new JLabel("Status:"), g);
+//
+//        g.gridy = 5;
+//        east.add(taskStatusInput, g);
+//
+//        btnTaskBuilderAddToLibrary = createStyledBtn("Add to library...", COLOR_ORANGE);
+//        btnTaskBuilderAddToLibrary.addActionListener(e -> {
+//            List<Action> actions = new ArrayList<>();
+//            for(int i = 0; i< modelTaskBuilder.size(); i++)
+//                actions.add(modelTaskBuilder.get(i));
+//
+//            Task task = createTask(actions);
+//            if (task != null) {
+//                boolean exists = false;
+//
+//                for (int i = 0; i < modelTaskLibrary.getSize(); i++) {
+//                    if (modelTaskLibrary.getElementAt(i).getName().equalsIgnoreCase(task.getName())) {
+//                        exists = true;
+//                        break;
+//                    }
+//                }
+//
+//                if (!exists) {
+//                    // Standard logic for a new task
+//                    modelTaskLibrary.addElement(task);
+//                    showToast("Added to library!", btnTaskBuilderAddToLibrary, true);
+//                    resetTaskBuilder();
+//                } else {
+//                    // Task name already exists, trigger the overwrite dialogue
+//                    int choice = JOptionPane.showConfirmDialog(
+//                            this,
+//                            task.getName() + " task already exists, would you like to overwrite it?",
+//                            "Overwrite task?",
+//                            JOptionPane.YES_NO_OPTION,
+//                            JOptionPane.QUESTION_MESSAGE
+//                    );
+//
+//                    if (choice == JOptionPane.YES_OPTION) {
+//                        // find and replace the existing task
+//                        for (int i = 0; i < modelTaskLibrary.getSize(); i++) {
+//                            if (modelTaskLibrary.getElementAt(i).toString().equals(task.toString())) {
+//                                modelTaskLibrary.set(i, task);
+//                                break;
+//                            }
+//                        }
+//                        showToast("Task updated!", btnTaskBuilderAddToLibrary, true);
+//                        resetTaskBuilder();
+//                    } else {
+//                        // User clicked 'No'
+//                        showToast("Task creation failed!", btnTaskBuilderAddToLibrary, false);
+//                    }
+//                }
+//            }
+//        });
+//
+//        g.gridy = 6;
+//        g.insets = new Insets(20, 5, 5, 5);
+//        east.add(btnTaskBuilderAddToLibrary, g);
+//
+//        JPanel center = new JPanel(new BorderLayout(5, 5)); center.setOpaque(false);
+//        JLabel setLabel = new JLabel("Action List:", SwingConstants.CENTER);
+//        setLabel.setForeground(COLOR_BLOOD);
+//        setLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
+//        styleJList(listTaskBuilder);
+//
+//        // create navigation buttons (up/down arrows)
+//        JButton btnUp = createStyledBtn("▲", COLOR_NAV_BUTTONS);
+//        btnUp.addActionListener(e -> {
+//            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+//            boolean success = shiftQueue(-1, listTaskBuilder, modelTaskBuilder, shiftPressed);
+//            flashControl(btnUp, success ? COLOR_GREEN : COLOR_RED);
+//        });
+//
+//        JButton btnDown = createStyledBtn("▼", COLOR_NAV_BUTTONS);
+//        btnDown.addActionListener(e -> {
+//            boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+//            boolean success = shiftQueue(1, listTaskBuilder, modelTaskBuilder, shiftPressed);
+//            flashControl(btnDown, success ? COLOR_GREEN : COLOR_RED);
+//        });
+//
+//        JPanel navButtons = new JPanel(new GridLayout(0, 1, 0, 5));
+//        navButtons.setOpaque(false);
+//        navButtons.add(btnUp);
+//        navButtons.add(btnDown);
+//
+//        JButton btnTaskBuilderRemove = createStyledBtn("Remove", new Color(100, 0, 0));
+//        btnTaskBuilderRemove.setEnabled(listTaskBuilder.getSelectedIndex() != -1);
+//        btnTaskBuilderRemove.addActionListener(e -> {
+//            int selectedIndex = listTaskBuilder.getSelectedIndex();
+//            if (selectedIndex != -1) {
+//                modelTaskBuilder.remove(selectedIndex);
+//                showToast("Action removed!", btnTaskBuilderRemove, true);
+//                refreshTaskBuilderTab();
+//            } else {
+//                showToast("You must select an action first!", btnTaskBuilderRemove, false);
+//            }
+//        });
+//
+//        listTaskBuilder.addListSelectionListener(e -> {
+//            btnTaskBuilderRemove.setEnabled(!listTaskBuilder.isSelectionEmpty());
+//        });
+//
+//        // create reset button to reset task builder inputs, ready for next task to be created
+//        JButton btnTaskBuilderReset = createStyledBtn("Reset", new Color(50, 50, 50));
+//        btnTaskBuilderReset.addActionListener(e -> {
+//            showToast("Task builder reset!", btnTaskBuilderReset, true);
+//            resetTaskBuilder();
+//        });
+//
+//        JPanel panelActionButtons = new JPanel(new GridLayout(1, 2, 5, 5));
+//        panelActionButtons.setOpaque(false);
+//        panelActionButtons.add(btnTaskBuilderRemove);
+//        panelActionButtons.add(btnTaskBuilderReset);
+//
+//        center.add(setLabel, BorderLayout.NORTH);
+//        center.add(navButtons, BorderLayout.WEST);
+//        center.add(new JScrollPane(listTaskBuilder), BorderLayout.CENTER);
+//        center.add(panelActionButtons, BorderLayout.SOUTH);
+//
+//        JPanel left = new JPanel(new BorderLayout(0, 10));
+//        left.setOpaque(false);
+//        JPanel config = new JPanel(new GridLayout(0, 1, 2, 5));
+//        config.setOpaque(false);
+//        actionCombo = new JComboBox<>(ActionType.values());
+//        styleComp(actionCombo);
+//        actionCombo.addActionListener(e -> scanNearbyTargets());
+//        manualTargetInput = new JTextField(); styleComp(manualTargetInput);
+//        config.add(new JLabel("Select action:"));
+//        config.add(actionCombo);
+//        config.add(new JLabel("Target name:"));
+//        config.add(manualTargetInput);
+//
+//        JButton btnTaskBuilderAdd = createStyledBtn("Add to builder...", COLOR_ORANGE);
+//        btnTaskBuilderAdd.addActionListener(e -> {
+//            if(!manualTargetInput.getText().isEmpty()) {
+//                modelTaskBuilder.addElement(
+//                        new Action((ActionType) actionCombo.getSelectedItem(), manualTargetInput.getText())
+//                );
+//                showToast("Added action to builder!", btnTaskBuilderAdd, true);
+//                refreshTaskBuilderTab(true);
+//            } else {
+//                showToast("Enter a target name!", btnTaskBuilderAdd, false);
+//            }
+//        });
+//
+//        config.add(btnTaskBuilderAdd);
+//        config.add(new JLabel("Nearby targets:"));
+//
+//        nearbyList = new JList<>(nearbyEntitiesModel);
+//        styleJList(nearbyList);
+//        nearbyList.addMouseListener(new MouseAdapter() {
+//            public void mouseClicked(MouseEvent e) {
+//                String val = nearbyList.getSelectedValue();
+//                if(val == null)
+//                    return;
+//                // update target name on single click
+//                if(e.getClickCount() == 1) {
+//                    manualTargetInput.setText(val);
+//                }
+//                else if(e.getClickCount() == 2) {
+//                    modelTaskBuilder.addElement(new Action((ActionType) actionCombo.getSelectedItem(), val));
+//                    showToast("Added action to builder!", btnTaskBuilderAdd, true);
+//                    refreshTaskBuilderTab(true);
+//                }
+//            }
+//        });
+//
+//        // Wrap the list in a scroll pane and LOCK the width
+//        JScrollPane entitiesScroll = new JScrollPane(nearbyList);
+//        entitiesScroll.setPreferredSize(new Dimension(300, 0)); // 300px width, height 0 (BorderLayout will stretch height)
+//        entitiesScroll.setMinimumSize(new Dimension(300, 0));
+//
+//        JButton btnScanNearby = createStyledBtn("Scan nearby...", COLOR_GREY);
+//        btnScanNearby.addActionListener(e -> {
+//            showToast("Scanning for nearby targets...",  btnScanNearby, true);
+//            scanNearbyTargets();
+//        });
+//
+//        left.add(config, BorderLayout.NORTH);
+//        left.add(entitiesScroll, BorderLayout.CENTER);
+//        left.add(btnScanNearby, BorderLayout.SOUTH);
+//
+//        panelTaskBuilder.add(createSubtitle("Task Builder"), BorderLayout.NORTH);
+//        panelTaskBuilder.add(left, BorderLayout.WEST);
+//        panelTaskBuilder.add(center, BorderLayout.CENTER);
+//        panelTaskBuilder.add(east, BorderLayout.EAST);
+//
+//        ///  Add listeners
+//        // add component listener to update task builder on show
+//        panelTaskBuilder.addComponentListener(new ComponentAdapter() {
+//            @Override
+//            public void componentShown(ComponentEvent e) {
+//                refreshTaskBuilderTab();
+//            }
+//        });
+//
+//        listTaskLibrary.addListSelectionListener(e -> {
+//            Task t = listTaskLibrary.getSelectedValue();
+//            if (t != null)
+//                libraryEditorArea.setText(t.getEditableString());
+//        });
+//
+//
+//        return panelTaskBuilder;
+//    }
+//
+//    private Task createTask(List<Action> actions) {
+//        try {
+//            ///  fetch user input (throws null exception if invalid)
+//            String name = taskNameInput.getText();
+//            String description = taskDescriptionInput.getText();
+//            String status = taskStatusInput.getText();
+//
+//            if (actions == null || actions.isEmpty())
+//                throw new Exception("Add some actions!");
+//
+//            if (name.isEmpty())
+//                throw new Exception("Enter a valid name!");
+//
+//            if (isTaskDescriptionRequired && description.isEmpty())
+//                throw new Exception("Enter a valid description!");
+//
+//            if (isTaskStatusRequired && status.isEmpty())
+//                throw new Exception("Enter a valid status!");
+//
+//            return new Task(name, description, actions, status);
+//
+//        } catch (Exception e) {
+//            showToast(e.getMessage(), btnTaskBuilderAddToLibrary, false);
+//            return null;
+//        }
+//    }
+//
+//    private JPanel createSkillTrackerTab() {
+//        JPanel panelSkillTracker = new JPanel(new BorderLayout(15, 15));
+//        panelSkillTracker.setBorder(new EmptyBorder(15, 15, 15, 15));
+//        panelSkillTracker.setBackground(BG_BASE);
+//
+//        JPanel gridSkills = new JPanel(new GridLayout(0, 3, 3, 3));
+//        gridSkills.setBackground(BG_BASE);
+//        gridSkills.setBorder(new EmptyBorder(8, 8, 8, 8));
+//
+//        refreshSkillTrackerTab(gridSkills);
+//
+//        panelSkillTracker.add(createSubtitle("Skill Tracker"), BorderLayout.NORTH);
+//        panelSkillTracker.add(new JScrollPane(gridSkills), BorderLayout.CENTER);
+//        totalLevelLabelP2P.setForeground(TEXT_MAIN);
+//
+//        return panelSkillTracker;
+//    }
+//
+//    private JPanel createStatusTab() {
+//        JPanel panelStatus = new JPanel(new BorderLayout(15, 15));
+//        panelStatus.setBorder(new EmptyBorder(15, 15, 15, 15));
+//        panelStatus.setBackground(BG_BASE);
+//
+//        JPanel content = new JPanel(new GridLayout(2, 2, 20, 0));
+//        content.setBackground(BG_BASE);
+//
+//        ///  create status 'Player' section
+//        JPanel player = createInfoCard("Player");
+//        addInfoRow(player, "Character name", lblCharName);
+//        addInfoRowWithIcon(player, "Membership", lblMemberText, lblMemberIcon);
+//
+//        JPanel account = createInfoCard("Account");
+//        addInfoRow(account, "Username", lblUsername);
+//        addInfoRow(account, "Nickname", lblNickname);
+//        addInfoRow(account, "Identifier", lblAcctId);
+//        addInfoRow(account, "Account status", lblAcctStatus);
+//
+//        JPanel world = createInfoCard("World");
+//        addInfoRow(world, "World", lblWorld);
+//        addInfoRow(world, "Coordinates (x, y, z)", lblCoords);
+//
+//        JPanel game = createInfoCard("Game");
+//        addInfoRow(game, "Game state", lblGameState);
+//
+//        content.add(player);
+//        content.add(account);
+//        content.add(world);
+//        content.add(game);
+//
+//        panelStatus.add(createSubtitle("Status"),  BorderLayout.NORTH);
+//        panelStatus.add(content, BorderLayout.CENTER);
+//        return panelStatus;
+//    }
+//
+//    private JPanel createSettingsTab() {
+//        ///  Create the main settings panel
+//        JPanel panelSettings = new JPanel(new BorderLayout(15, 15));
+//        panelSettings.setBorder(new EmptyBorder(15, 15, 15, 15));
+//        panelSettings.setBackground(BG_BASE);
+//
+//        // add a card layout to the settings panel to switch between setting groups
+//        CardLayout cardLayout = new CardLayout();
+//
+//        ///  Create a panel to group similar settings
+//        JPanel settingGroup = new JPanel(cardLayout);
+//        settingGroup.setBackground(BG_BASE);
+//        settingGroup.setBorder(new EmptyBorder(20, 20, 20, 20));
+//
+//        ///  Define each setting group
+//        settingGroup.add(createClientPanel(), "Client");
+//        settingGroup.add(createActivitiesPanel(), "Activities");
+//        settingGroup.add(createAudioPanel(), "Audio");
+//        settingGroup.add(createChatPanel(), "Chat");
+//        settingGroup.add(createDisplayPanel(), "Display");
+//        settingGroup.add(createControlsPanel(), "Controls");
+//        settingGroup.add(createWarningsPanel(), "Warnings");
+//
+//        JPanel menuPanel = new JPanel(new GridLayout(10, 1, 0, 2));
+//        menuPanel.setPreferredSize(new Dimension(180, 0));
+//        menuPanel.setBackground(PANEL_SURFACE); menuPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, BORDER_DIM));
+//
+//        String[] groups = {"Client", "Display", "Audio", "Chat", "Controls", "Activities", "Warnings"};
+//        ButtonGroup btnGroup = new ButtonGroup();
+//
+//        for (String cat : groups) {
+//            JToggleButton btn = createMenuButton(cat);
+//            btn.addActionListener(e -> cardLayout.show(settingGroup, cat));
+//            btnGroup.add(btn);
+//            menuPanel.add(btn);
+//            if (cat.equals("Client"))
+//                btn.setSelected(true);
+//        }
+//
+//        panelSettings.add(createSubtitle("Settings"), BorderLayout.NORTH);
+//        panelSettings.add(menuPanel, BorderLayout.WEST);
+//        panelSettings.add(settingGroup, BorderLayout.CENTER);
+//
+//        return panelSettings;
+//    }
+//
+//    private void resetTaskBuilder() {
+//        manualTargetInput.setText("");
+//
+//        // clear task attribute inputs
+//        taskNameInput.setText("");
+//        taskDescriptionInput.setText("");
+//        taskStatusInput.setText("");
+//
+//        // clear the action list display
+//        modelTaskBuilder.clear();
+//
+//        // clear/refresh target inputs
+//        scanNearbyTargets();
+//    }
+//
+//    private void scanNearbyTargets() {
+//        ActionType type = (ActionType) actionCombo.getSelectedItem();
+//        if (type == null)
+//            return;
+//
+//        // Perform the heavy API scanning on the current thread (Script Thread)
+//        Set<String> names;
+//
+//        switch (type) {
+//            case ATTACK:
+//                names = NPCs.all().stream()
+//                        .filter(n -> n.hasAction("Attack"))
+//                        .map(NPC::getName)
+//                        .filter(Objects::nonNull)
+//                        .collect(Collectors.toSet());
+//                break;
+//
+//            case CHOP:
+//                names = GameObjects.all().stream()
+//                        .filter(o -> o.hasAction("Chop down"))
+//                        .map(GameObject::getName)
+//                        .filter(Objects::nonNull)
+//                        .collect(Collectors.toSet());
+//                break;
+//
+//            case MINE:
+//                names = GameObjects.all().stream()
+//                        .filter(o -> o.hasAction("Mine"))
+//                        .map(GameObject::getName)
+//                        .filter(Objects::nonNull)
+//                        .collect(Collectors.toSet());
+//                break;
+//
+//            default:
+//                names = NPCs.all().stream()
+//                        .map(NPC::getName)
+//                        .filter(Objects::nonNull)
+//                        .collect(Collectors.toSet());
+//                break;
+//        }
+//
+//        // Copy to a final list for the thread block
+//        final List<String> sortedNames = names.stream().sorted().collect(Collectors.toList());
+//        nearbyEntitiesModel.clear();
+//
+//        for (String name : sortedNames)
+//            nearbyEntitiesModel.addElement(name);
+//
+//        // Use your toast logic to confirm it finished
+//        showToast("Found " + sortedNames.size() + " targets", btnTaskBuilderScanNearby, true);
+//        showToast("Found " + sortedNames.size() + " targets", btnTaskBuilderAddToLibrary, true);
+//    }
+//
+//    // --- Inner Classes ---
+//    public static class Task {
+//        private String name;
+//        private String description;
+//        private String status;
+//        private List<Action> actions;
+//
+//        public Task(String name, String description, List<Action> actions, String status) {
+//            this.name = name;
+//            this.description = (description == null || description.isEmpty()) ? "No description provided by Author." : description;
+//            this.actions = actions;
+//            this.status = (status == null || status.isEmpty()) ? "Executing task..." : status;
+//        }
+//
+//        public Task(Task o) {
+//            this.name = o.name;
+//            this.description = o.description;
+//            this.status = o.status;
+//
+//            // DEEP COPY logic:
+//            this.actions = new ArrayList<>();
+//            if (o.actions != null) {
+//                for (Action originalAction : o.actions) {
+//                    // Create a brand new action object for the new list
+//                    this.actions.add(new Action(originalAction));
+//                }
+//            }
+//        }
+//
+//        public String getEditableString() {
+//            return "NAME:" + name
+//                    + "\nDESC:" + description
+//                    + "\nSTATUS:" + status;
+//        }
+//
+//        public void setName(String name) {
+//            this.name = name;
+//        }
+//
+//        public String getName() {
+//            return name;
+//        }
+//
+//        public void setDescription(String description) {
+//            this.description = description;
+//        }
+//
+//        public String getDescription() {
+//            return description;
+//        }
+//
+//        public void setActions(List<Action> actions) {
+//            this.actions = actions;
+//        }
+//
+//        public List<Action> getActions() {
+//            return actions;
+//        }
+//
+//        public void setStatus(String status) {
+//            this.status = status;
+//        }
+//
+//        public String getStatus() {
+//            return status;
+//        }
+//
+//        @Override public String toString() {
+//            return name;
+//        }
+//    }
+//
+//    public static class Action {
+//        public ActionType type;
+//        public String target;
+//
+//        public Action(ActionType t, String target) {
+//            this.type = t;
+//            this.target = target;
+//        }
+//
+//        // copy-cat constructor
+//        public Action(Action other) {
+//            this.type = other.type;
+//            this.target = other.target;
+//        }
+//
+//        //TODO copy how CHOP has been done then extract out into their own action classes maybe?
+//        public boolean execute() {
+//            switch (type) {
+//                case CHOP:
+//                    // find the nearest target tree
+//                    GameObject tree = GameObjects.closest(target);
+//                    // return early if no nearby trees
+//                    if (tree == null) {
+//                        Logger.log(Logger.LogType.ERROR, "Unable to find a tree!");
+//                        return false;
+//                    }
+//                    // attempt to chop the tree down
+//                    return tree.interact("Chop down");
+//
+//                case ATTACK:
+//                    // find the nearest target npc
+//                    NPC npc = NPCs.closest(target);
+//
+//                    // return early if no npcs found
+//                    if (npc == null) {
+//                        Logger.log(Logger.LogType.ERROR, "Unable to find a npc!");
+//                        return false;
+//                    }
+//
+//                    // attempt to attack the target npc
+//                    return  npc.interact("Attack");
+//
+//                case BANK:
+//                    return Bank.open();
+//
+//                case MINE:
+//                    return GameObjects.closest(target) != null && GameObjects.closest(target).interact("Mine");
+//
+//                case TALK_TO:
+//                    return NPCs.closest(target) != null && NPCs.closest(target).interact("Talk-to");
+//
+//                case DROP:
+//                    return Inventory.dropAll(target);
+//
+//                default:
+//                    Logger.log("Action " + type + " not implemented in Action.execute()");
+//                    return false;
+//            }
+//        }
+//        @Override public String toString() { return type.name() + " -> " + target; }
+//    }
+//
+//    public void showToast(String message, JComponent anchor, boolean success) {
+//        // 1. Visual feedback for the button (still happens immediately)
+//        Color flashColor = success ? COLOR_GREEN : COLOR_RED;
+//        flashControl(anchor, flashColor);
+//
+//        // 2. Congestion Control: If the queue is too full, ignore the new toast bubble
+//        if (toastQueue.size() >= MAX_TOAST_QUEUE) {
+//            return;
+//        }
+//
+//        // 3. Add the request to the queue
+//        toastQueue.add(new ToastRequest(message, anchor, success));
+//
+//        // 4. Kick off processing
+//        processNextToast();
+//    }
+//
+//    private void processNextToast() {
+//        // If a toast is currently visible or the queue is empty, do nothing
+//        if (isToastProcessing || toastQueue.isEmpty()) {
+//            return;
+//        }
+//
+//        isToastProcessing = true;
+//        ToastRequest request = toastQueue.poll();
+//        Logger.log(request.message);
+//
+//        // Skip bubble if message is null or blank, just process the queue
+//        if (request.message == null || request.message.isEmpty()) {
+//            isToastProcessing = false;
+//            processNextToast();
+//            return;
+//        }
+//
+//        // Calculate position
+//        Point location = SwingUtilities.convertPoint(request.anchor, 0, 0, getLayeredPane());
+//        int x = location.x + (request.anchor.getWidth() / 2);
+//        int y = location.y - 30;
+//
+//        // Create the toast
+//        final Toast toast = new Toast(request.message, x, y);
+//        getLayeredPane().add(toast, JLayeredPane.POPUP_LAYER);
+//        getLayeredPane().revalidate();
+//        getLayeredPane().repaint();
+//
+//        // 4. Set a timer to clean up and trigger the next toast
+//        Timer timer = new Timer(TOAST_DELAY, e -> {
+//            getLayeredPane().remove(toast);
+//            getLayeredPane().revalidate();
+//            getLayeredPane().repaint();
+//
+//            // Reset flag and check if another toast is waiting
+//            isToastProcessing = false;
+//            processNextToast();
+//        });
+//
+//        timer.setRepeats(false);
+//        timer.start();
+//    }
+//
+//    public String getPlayerName() {
+//        return Players.getLocal().getName();
+//    }
+//
+//    public void loadTaskList() {
+//        new Thread(() -> {
+//            // Use the method from your DataMan class to get the raw JSON
+//            String rawJson = dataMan.loadDataByPlayer("tasks");
+//            SwingUtilities.invokeLater(() -> {
+//                if (rawJson != null)
+//                    unpackTaskList(rawJson);
+//                refreshTaskList();
+//            });
+//        }).start();
+//    }
+//
+//    public void loadTaskLibrary() {
+//        new Thread(() -> {
+//            // Use the method from your DataMan class to get the raw JSON
+//            String rawJson = dataMan.loadDataByPlayer("library");
+//            SwingUtilities.invokeLater(() -> {
+//                if (rawJson != null)
+//                    unpackTaskLibrary(rawJson);
+//                refreshTaskLibrary();
+//            });
+//        }).start();
+//    }
+//
+//    public void loadTaskBuilder() {
+//        new Thread(() -> {
+//            String rawJson = dataMan.loadDataByPlayer("builder");
+//            SwingUtilities.invokeLater(() -> {
+//                if (rawJson != null)
+//                    unpackTaskBuilder(rawJson);
+//                refreshTaskBuilderTab();
+//            });
+//        }).start();
+//    }
+//
+//    public void loadSettings() {
+//        new Thread(() -> {
+//            String rawJson = dataMan.loadDataByPlayer("settings");
+//            SwingUtilities.invokeLater(() -> {
+//                if (rawJson != null)
+//                    unpackSettings(rawJson);
+//            });
+//        }).start();
+//    }
+//
+//
+//    private void unpackTaskList(String json) {
+//        if (json == null || json.isEmpty() || json.equals("[]")) {
+//            Logger.log("No task list data found to unpack.");
+//            return;
+//        }
+//
+//        try {
+//            Gson gson = new Gson();
+//
+//            // Supabase wraps the response in an outer array: [ { "tasks": [...] } ]
+//            // "tasks" is now a List, not a Map
+//            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, List<Task>>>>(){}.getType();
+//            List<Map<String, List<Task>>> responseList = gson.fromJson(json, wrapperType);
+//
+//            if (responseList != null && !responseList.isEmpty()) {
+//                List<Task> fetchedTasks = responseList.get(0).get("tasks");
+//
+//                if (fetchedTasks != null) {
+//                    SwingUtilities.invokeLater(() -> {
+//                        modelTaskList.clear();
+//                        for (Task task : fetchedTasks) {
+//                            modelTaskList.addElement(task);
+//                        }
+//                        refreshTaskList();
+//                        Logger.log("Successfully loaded " + modelTaskList.size() + " tasks into the task list.");
+//                    });
+//                }
+//            }
+//            listTaskList.repaint();
+//        } catch (Exception e) {
+//            Logger.log(Logger.LogType.ERROR, "Failed to unpack task list data: " + e.getMessage());
+//            e.printStackTrace();
+//        }
+//    }
+//
+//
+//    private void unpackTaskLibrary(String json) {
+//        if (json == null || json.isEmpty() || json.equals("[]")) {
+//            Logger.log("No task list data found to unpack.");
+//            return;
+//        }
+//
+//        try {
+//            Gson gson = new Gson();
+//
+//            // 1. Supabase returns a List of Objects. Define that type.
+//            // We are looking for: List<Map<String, Map<String, Task>>>
+//            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, Map<String, Task>>>>(){}.getType();
+//            List<Map<String, Map<String, Task>>> responseList = gson.fromJson(json, wrapperType);
+//
+//            if (responseList != null && !responseList.isEmpty()) {
+//                // 2. Get the "library" map from the first result
+//                Map<String, Task> fetchedTasks = responseList.get(0).get("library");
+//
+//                if (fetchedTasks != null) {
+//                    // 3. Update the UI on the Swing thread
+//                    SwingUtilities.invokeLater(() -> {
+//                        modelTaskLibrary.clear();
+//                        for (Task task : fetchedTasks.values()) {
+//                            // Because GSON uses the Task constructor, these are
+//                            // now real objects with executable action lists.
+//                            modelTaskLibrary.addElement(task);
+//                        }
+//                        refreshTaskLibrary();
+//                        Logger.log("Unpacked " + modelTaskLibrary.size() + " tasks into Task Library.");
+//                    });
+//                }
+//            }
+//            listTaskLibrary.repaint();
+//        } catch (Exception e) {
+//            Logger.log(Logger.LogType.ERROR, "Failed to unpack library: " + e.getMessage());
+//            e.printStackTrace();
+//        }
+//    }
+//
+//    private void unpackTaskBuilder(String json) {
+//        if (json == null || json.isEmpty() || json.equals("[]")) return;
+//
+//        try {
+//            Gson gson = new Gson();
+//            JsonArray outerArray = JsonParser.parseString(json).getAsJsonArray();
+//            if (outerArray.isEmpty()) return;
+//
+//            JsonElement columnData = outerArray.get(0).getAsJsonObject().get("builder");
+//            if (columnData == null || columnData.isJsonNull()) return;
+//
+//            BuilderSnapshot snap = gson.fromJson(columnData, BuilderSnapshot.class);
+//            if (snap != null) {
+//                SwingUtilities.invokeLater(() -> {
+//                    modelTaskBuilder.clear();
+//                    if (snap.actions != null) {
+//                        snap.actions.forEach(modelTaskBuilder::addElement);
+//                    }
+//                    taskNameInput.setText(snap.taskName != null ? snap.taskName : "");
+//                    taskDescriptionInput.setText(snap.taskDescription != null ? snap.taskDescription : "");
+//                    taskStatusInput.setText(snap.taskStatus != null ? snap.taskStatus : "");
+//                    manualTargetInput.setText(snap.targetName != null ? snap.targetName : "");
+//                    if (snap.selectedAction != null && !snap.selectedAction.isEmpty()) {
+//                        try {
+//                            actionCombo.setSelectedItem(ActionType.valueOf(snap.selectedAction));
+//                        } catch (Exception ignored) {}
+//                    }
+//                    Logger.log(Logger.LogType.SCRIPT, "Unpacked builder snapshot successfully.");
+//                });
+//            }
+//        } catch (Exception e) {
+//            Logger.log(Logger.LogType.ERROR, "Failed to unpack builder: " + e.getMessage());
+//            e.printStackTrace();
+//        }
+//    }
+//
+//    private void unpackSettings(String json) {
+//        if (json == null || json.isEmpty() || json.equals("[]")) return;
+//
+//        try {
+//            Gson gson = new Gson();
+//            JsonArray outerArray = JsonParser.parseString(json).getAsJsonArray();
+//            if (outerArray.isEmpty()) return;
+//
+//            JsonElement columnData = outerArray.get(0).getAsJsonObject().get("settings");
+//            if (columnData == null || columnData.isJsonNull()) return;
+//
+//            SettingsSnapshot snap = gson.fromJson(columnData, SettingsSnapshot.class);
+//            if (snap != null) {
+//                SwingUtilities.invokeLater(() -> {
+//                    if (chkAutoSave != null) chkAutoSave.setSelected(snap.autoSave);
+//                    if (chkDisableRendering != null) chkDisableRendering.setSelected(snap.renderingDisabled);
+//                    if (chkRoofs != null) chkRoofs.setSelected(snap.roofsEnabled);
+//                    if (chkDataOrbs != null) chkDataOrbs.setSelected(snap.dataOrbsEnabled);
+//                    if (chkTransparentSidePanel != null) chkTransparentSidePanel.setSelected(snap.transparentSidePanel);
+//                    if (chkGameAudio != null) chkGameAudio.setSelected(snap.gameAudioOn);
+//                    if (chkTransparentChatbox != null) chkTransparentChatbox.setSelected(snap.transparentChatbox);
+//                    if (chkClickThroughChatbox != null) chkClickThroughChatbox.setSelected(snap.clickThroughChatbox);
+//                    if (chkShiftClickDrop != null) chkShiftClickDrop.setSelected(snap.shiftClickDrop);
+//                    if (chkEscClosesInterface != null) chkEscClosesInterface.setSelected(snap.escClosesInterface);
+//                    if (chkLevelUpInterface != null) chkLevelUpInterface.setSelected(snap.levelUpInterface);
+//                    if (chkLootNotifications != null) chkLootNotifications.setSelected(snap.lootNotifications);
+//
+//                    // Note: We update the checkboxes here. To apply these directly to the
+//                    // DreamBot client on startup, you would add the API calls here
+//                    // (e.g., ClientSettings.toggleDataOrbs(snap.dataOrbsEnabled);)
+//                    // but it's safest to ensure Client.isLoggedIn() first.
+//
+//                    Logger.log(Logger.LogType.SCRIPT, "Unpacked settings successfully.");
+//                });
+//            }
+//        } catch (Exception e) {
+//            Logger.log(Logger.LogType.ERROR, "Failed to unpack settings: " + e.getMessage());
+//            e.printStackTrace();
+//        }
+//    }
+//
+//    /**
+//     * Flashes a UI component a specific color and displays a message,
+//     * then reverts to original state after 2 seconds.
+//     *
+//     * @param component The JComponent to flash (e.g., btnTriggerBreak).
+//     * @param flashColor The color to flash (e.g., new Color(100, 0, 0) for red).
+//     */
+//    private void flashControl(JComponent component, Color flashColor) {
+//        // Store the original color only once — before any flash has occurred
+//        originalColors.putIfAbsent(component, component.getBackground());
+//
+//        component.setBackground(flashColor);
+//        component.repaint();
+//
+//        Timer revertTimer = new Timer(200, e -> {
+//            component.setBackground(originalColors.get(component));
+//            component.repaint();
+//        });
+//
+//        revertTimer.setRepeats(false);
+//        revertTimer.start();
+//    }
+//
+//    private void loadIntoBuilder(Task t) {
+//        if(t == null)
+//            return;
+//
+//        taskNameInput.setText(t.name);
+//        taskDescriptionInput.setText(t.description);
+//        taskStatusInput.setText(t.status);
+//        modelTaskBuilder.clear(); t.actions.forEach(modelTaskBuilder::addElement);
+//    }
+//
+//    private JPanel createHeaderPanel() {
+//        JPanel header = new JPanel(new BorderLayout());
+//        header.setBackground(PANEL_SURFACE);
+//        header.setPreferredSize(new Dimension(0, 85));
+//        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_DIM));
+//        JLabel titleLabel = new JLabel(" DreamBotMan", SwingConstants.LEFT);
+//        titleLabel.setForeground(COLOR_BLOOD);
+//        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32));
+//        titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0));
+//        JPanel rightContainer = new JPanel(new BorderLayout());
+//        rightContainer.setOpaque(false);
+//        rightContainer.setBorder(new EmptyBorder(0, 0, 0, 20));
+//        JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 20));
+//        controls.setOpaque(false);
+//        btnPlayPause = createIconButton("▶", "Play", e -> toggleScriptState());
+//        JButton btnStop = createIconButton("■", "Stop", e -> stopScript());
+//        btnInputToggle = createIconButton("🖱", "Input", e -> toggleUserInput());
+//        controls.add(btnPlayPause);
+//        controls.add(btnStop); controls.add(btnInputToggle);
+//        JPanel headerStats = new JPanel(new GridLayout(2, 1));
+//        headerStats.setOpaque(false);
+//        headerStats.setBorder(new EmptyBorder(10, 20, 10, 10));
+//        rightContainer.add(controls, BorderLayout.CENTER);
+//        rightContainer.add(headerStats, BorderLayout.EAST);
+//        header.add(titleLabel, BorderLayout.WEST);
+//        header.add(rightContainer, BorderLayout.EAST);
+//
+//        return header;
+//    }
+//
+//    private void toggleScriptState() {
+//        if (script == null)
+//            return;
+//
+//        if (isScriptPaused) {
+//            script.getScriptManager().resume();
+//            btnPlayPause.setText("▮▮");
+//            isScriptPaused = false;
+//        } else {
+//            script.getScriptManager().pause();
+//            btnPlayPause.setText("▶");
+//            isScriptPaused = true;
+//        }
+//    }
+//
+//    private void stopScript() { if (JOptionPane.showConfirmDialog(this, "Stop?") == JOptionPane.YES_OPTION) { script.stop(); dispose(); } }
+//    private void toggleUserInput() { isUserInputAllowed = !isUserInputAllowed; Client.getInstance().setMouseInputEnabled(isUserInputAllowed); Client.getInstance().setKeyboardInputEnabled(isUserInputAllowed); btnInputToggle.setText(isUserInputAllowed ? "🖱" : "🚫"); }
+//    private void styleHeaderLabel(JLabel l) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.BOLD, 15)); l.setHorizontalAlignment(SwingConstants.RIGHT); }
+//    private void styleSpinner(JSpinner s) { JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField(); field.setBackground(new Color(30, 30, 30)); field.setForeground(COLOR_BLOOD); s.setBorder(new LineBorder(BORDER_DIM)); }
+//    private JButton createIconButton(String symbol, String tooltip, ActionListener action) { JButton btn = new JButton(symbol); btn.setPreferredSize(new Dimension(40, 40)); btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18)); btn.setBackground(new Color(30, 0, 0)); btn.setForeground(COLOR_BLOOD); btn.addActionListener(action); return btn; }
+//    private <T> boolean shiftQueue(int dir, JList<T> list, DefaultListModel<T> model, boolean isShiftHeld) {
+//        int idx = list.getSelectedIndex();
+//        if (idx == -1 || idx + dir < 0 || idx + dir >= model.size())
+//            return false; // out of bounds
+//
+//        if (isShiftHeld) {
+//            T item = model.remove(idx);
+//            model.add(idx + dir, item);
+//            list.setSelectedIndex(idx + dir);
+//        } else {
+//            list.setSelectedIndex(idx + dir);
+//            list.ensureIndexIsVisible(idx + dir);
+//        }
+//        return true;
+//    }
+//    private void styleComp(JComponent c) { c.setBackground(PANEL_SURFACE); c.setForeground(TEXT_MAIN); if(c instanceof JTextField) ((JTextField)c).setCaretColor(COLOR_BLOOD); }
+//    private void styleJList(JList<?> l) {
+//        l.setBackground(PANEL_SURFACE);
+//        l.setForeground(TEXT_MAIN);
+//        l.setSelectionBackground(TAB_SELECTED);
+//    }
+//
+//    private JButton createStyledBtn(String t, Color c) {
+//        JButton b = new JButton(t);
+//        b.setBackground(c);
+//        b.setForeground(Color.WHITE);
+//        b.setFocusPainted(false);
+//        b.setBorder(new LineBorder(BORDER_DIM));
+//        return b;
+//    }
+//
+//    private ImageIcon loadMiscIcon(String name) {
+//        try {
+//            return new ImageIcon(new ImageIcon(
+//                    Objects.requireNonNull(getClass()
+//                            .getResource("/resources/icons/misc/" + name + ".png")))
+//                    .getImage()
+//                    .getScaledInstance(18, 18, Image.SCALE_SMOOTH));
+//        } catch (Exception e) {
+//            return null;
+//        }
+//    }
+//
+//    private ImageIcon loadSkillIcon(Skill skill) {
+//        try {
+//            return new ImageIcon(new ImageIcon(
+//                    Objects.requireNonNull(getClass()
+//                            .getResource("/resources/icons/skills/" + skill.name().toLowerCase() + "_icon.png")))
+//                    .getImage()
+//                    .getScaledInstance(26, 26, Image.SCALE_SMOOTH)
+//            );
+//
+//        } catch (Exception e) {
+//            return new ImageIcon();
+//        }
+//    }
+//
+//    private ImageIcon loadTabIcon(String name) {
+//        try {
+//            return new ImageIcon(new ImageIcon(
+//                    Objects.requireNonNull(getClass()
+//                            .getResource("/resources/icons/tabs/" + name + ".png")))
+//                    .getImage()
+//                    .getScaledInstance(16, 16, Image.SCALE_SMOOTH));
+//        } catch (Exception e) {
+//            return null;
+//        }
+//    }
+//
+//    private ImageIcon loadStatusIcon(String name) {
+//        try {
+//            return new ImageIcon(new ImageIcon(
+//                    Objects.requireNonNull(getClass()
+//                            .getResource("/resources/icons/status/" + name + ".png")))
+//                    .getImage()
+//                    .getScaledInstance(16, 16, Image.SCALE_SMOOTH)
+//            );
+//
+//        } catch (Exception ignored) {}
+//
+//        return null;
+//    }
+//
+//    private void updateUI() {
+//        SwingUtilities.invokeLater(() -> {
+//            int projH = (int) projectionSpinner.getValue();
+//            long totalXPGained = 0;
+//            int totalLevelsGained = 0;
+//            int p2pTotal = 0;
+//            int f2pTotal = 0;
+//
+//            ///  Calculate total xp/levels
+//            for (SkillData data : skillRegistry.values()) {
+//                int xp = Skills.getExperience(data.skill);
+//                int lvl = Skills.getRealLevel(data.skill);
+//                data.update(xp, lvl, startTime, projH);
+//                p2pTotal += lvl;
+//                if (F2P_SKILLS.contains(data.skill))
+//                    f2pTotal += lvl;
+//
+//                if (data.isTracking) {
+//                    totalXPGained += Math.max(0, (xp - data.startXP));
+//                    totalLevelsGained += Math.max(0, (lvl - data.startLevel));
+//                }
+//            }
+//
+//            ///  Update Live Tracker
+//            //  Update level total display
+//            totalLevelsGainedLabel.setText("▲ " + totalLevelsGained + " level(s) gained");
+//            totalLevelsGainedLabel.setForeground(new Color(0, 180, 0));
+//            totalLevelsGainedLabel.setFont(new Font("Consolas", Font.BOLD, 14));
+//
+//            //  Update XP total display
+//            totalXpGainedLabel.setText("▲ " + totalXPGained + " xp gained");
+//            totalXpGainedLabel.setForeground(new Color(0, 180, 0));
+//            totalXpGainedLabel.setFont(new Font("Consolas", Font.BOLD, 14));
+//
+//            //  Update F2P total level display
+//            totalLevelLabelF2P.setText("Total: " + f2pTotal);
+//            totalLevelLabelF2P.setIcon(loadStatusIcon("F2P_icon"));
+//            totalLevelLabelF2P.setIconTextGap(8);
+//            totalLevelLabelF2P.setHorizontalAlignment(SwingConstants.CENTER);
+//
+//            //  Update P2P total level display
+//            totalLevelLabelP2P.setText("Total: " + p2pTotal);
+//            totalLevelLabelP2P.setIcon(loadStatusIcon("P2P_icon"));
+//            totalLevelLabelP2P.setIconTextGap(8);
+//            totalLevelLabelP2P.setHorizontalAlignment(SwingConstants.CENTER);
+//
+//            ///  Update Status tab
+//            boolean isMember = Client.isMembers();
+//            // only update if player is logged in or there wont be much to load!
+//            if (Client.isLoggedIn()) {
+//                // load world tab?
+//                lblUsername.setText(AccountManager.getAccountUsername());
+//                lblNickname.setText(AccountManager.getAccountNickname());
+//                lblAcctId.setText(Client.getAccountIdentifier());
+//                lblAcctStatus.setText(String.valueOf(Client.getAccountStatus()));
+//
+//                lblCharName.setText(Players.getLocal().getName());
+//                lblMemberIcon.setIcon(loadStatusIcon(isMember ? "P2P_icon" : "F2P_icon"));
+//                lblMemberText.setText(isMember ? "Pay-to-play" : "Free-to-play");
+//                lblWorld.setText("World " + (Worlds.getCurrent() != null ? Worlds.getCurrent().getWorld() : "?"));
+//                lblCoords.setText(Players.getLocal().getTile().toString());
+//                lblGameState.setText(Client.getGameState().name());
+//            }
+//
+//        });
+//    }
+//
+//    private JPanel createInfoCard(String title) { JPanel p = new JPanel(new GridLayout(0, 1, 5, 10)); p.setBackground(PANEL_SURFACE); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + title + " "); b.setTitleColor(COLOR_BLOOD); b.setTitleFont(new Font("Segoe UI", Font.BOLD, 16)); p.setBorder(BorderFactory.createCompoundBorder(b, new EmptyBorder(15, 15, 15, 15))); return p; }
+//    private void addInfoRow(JPanel p, String key, JLabel valLabel) { JPanel row = new JPanel(new BorderLayout()); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); valLabel.setForeground(TEXT_MAIN); valLabel.setFont(new Font("Consolas", Font.BOLD, 14)); row.add(k, BorderLayout.WEST); row.add(valLabel, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
+//    private void addInfoRowWithIcon(JPanel p, String key, JLabel valLabel, JLabel iconLabel) { JPanel row = new JPanel(new BorderLayout(5, 0)); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); JPanel rightSide = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0)); rightSide.setOpaque(false); valLabel.setForeground(TEXT_MAIN); rightSide.add(valLabel); rightSide.add(iconLabel); row.add(k, BorderLayout.WEST); row.add(rightSide, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
+//
+//    ///  Define settings tab
+//    private JPanel createClientPanel() {
+//        return createSettingsGroup("Client",
+//                chkDisableRendering = createSettingCheck("Disable Rendering", Client.isRenderingDisabled(), e -> Client.setRenderingDisabled(((JCheckBox)e.getSource()).isSelected())),
+//                chkAutoSave = createSettingCheck("Auto Save", true, e -> {
+//                    // save all as soon as auto save is enabled
+//                    if (chkAutoSave.isEnabled())
+//                        saveAll();
+//                })
+//        );
+//    }
+//
+//    private JPanel createDisplayPanel() {
+//        return createSettingsGroup("Display",
+//                chkRoofs = createSettingCheck("Roofs", !ClientSettings.areRoofsHidden(), e -> ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected())),
+//                chkDataOrbs = createSettingCheck("Data orbs", ClientSettings.areDataOrbsEnabled(), e -> ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())),
+//                chkTransparentSidePanel = createSettingCheck("Transparent side panel", ClientSettings.isTransparentSidePanelEnabled(), e -> ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))
+//        );
+//    }
+//
+//    private JPanel createAudioPanel() {
+//        return createSettingsGroup("Audio",
+//                chkGameAudio = createSettingCheck("Game Audio", ClientSettings.isGameAudioOn(), e -> ClientSettings.toggleGameAudio(((JCheckBox)e.getSource()).isSelected()))
+//        );
+//    }
+//
+//    private JPanel createChatPanel() {
+//        return createSettingsGroup("Chat",
+//                chkTransparentChatbox = createSettingCheck("Transparent chatbox", ClientSettings.isTransparentChatboxEnabled(), e -> ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected())),
+//                chkClickThroughChatbox = createSettingCheck("Click through chatbox", ClientSettings.isClickThroughChatboxEnabled(), e -> ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected()))
+//        );
+//    }
+//
+//    private JPanel createControlsPanel() {
+//        return createSettingsGroup("Controls",
+//                chkShiftClickDrop = createSettingCheck("Shift click drop", ClientSettings.isShiftClickDroppingEnabled(), e -> ClientSettings.toggleShiftClickDropping(((JCheckBox)e.getSource()).isSelected())),
+//                chkEscClosesInterface = createSettingCheck("Esc closes interface", ClientSettings.isEscInterfaceClosingEnabled(), e -> ClientSettings.toggleEscInterfaceClosing(((JCheckBox)e.getSource()).isSelected()))
+//        );
+//    }
+//
+//    private JPanel createActivitiesPanel() {
+//        return createSettingsGroup("Activities",
+//                chkLevelUpInterface = createSettingCheck("Level-up interface", ClientSettings.isLevelUpInterfaceEnabled(), e -> ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected()))
+//        );
+//    }
+//
+//    private JPanel createWarningsPanel() {
+//        return createSettingsGroup("Warnings",
+//                chkLootNotifications = createSettingCheck("Loot notifications", ClientSettings.areLootNotificationsEnabled(), e -> ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected()))
+//        );
+//    }
+//
+//    private JPanel createSettingsGroup(String title, Component... comps) { JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10)); p.setBackground(BG_BASE); JPanel list = new JPanel(new GridLayout(0, 1, 5, 5)); list.setBackground(BG_BASE); JLabel header = new JLabel(title); header.setForeground(COLOR_BLOOD); header.setFont(new Font("Segoe UI", Font.BOLD, 24)); JPanel wrapper = new JPanel(new BorderLayout()); wrapper.setBackground(BG_BASE); wrapper.add(header, BorderLayout.NORTH); for (Component c : comps) list.add(c); wrapper.add(list, BorderLayout.CENTER); return wrapper; }
+//
+//    private JCheckBox createSettingCheck(String text, boolean initialState, ActionListener l) {
+//        JCheckBox c = new JCheckBox(text);
+//        c.setForeground(TEXT_MAIN);
+//        c.setOpaque(false);
+//        c.setSelected(initialState);
+//
+//        if (l != null) {
+//            c.addActionListener(e -> {
+//                if (isSettingProcessing) return; // Ignore spam clicks
+//
+//                isSettingProcessing = true;
+//                try {
+//                    l.actionPerformed(e);
+//                } finally {
+//                    // Use a tiny delay before allowing another click,
+//                    // or just set to false immediately.
+//                    isSettingProcessing = false;
+//                }
+//            });
+//        }
+//        return c;
+//    }
+//
+//    private JToggleButton createMenuButton(String text) { JToggleButton btn = new JToggleButton(text) { protected void paintComponent(Graphics g) { g.setColor(isSelected() ? TAB_SELECTED : PANEL_SURFACE); g.fillRect(0, 0, getWidth(), getHeight()); super.paintComponent(g); } }; btn.setFocusPainted(false); btn.setContentAreaFilled(false); btn.setForeground(TEXT_MAIN); btn.setFont(new Font("Segoe UI", Font.BOLD, 14)); btn.setHorizontalAlignment(SwingConstants.LEFT); btn.setBorder(new EmptyBorder(0, 20, 0, 0)); return btn; }
+//    private JPanel createSkillTile(SkillData data) { JPanel tile = new JPanel(new GridBagLayout()); tile.setBackground(PANEL_SURFACE); tile.setBorder(new LineBorder(BORDER_DIM)); GridBagConstraints gbc = new GridBagConstraints(); gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.gridx = 0; JPanel top = new JPanel(new BorderLayout()); top.setOpaque(false); JLabel icon = new JLabel(loadSkillIcon(data.skill)); data.lblLevel.setForeground(COLOR_BLOOD); data.lblLevel.setFont(new Font("Arial", Font.BOLD, 18)); top.add(icon, BorderLayout.WEST); top.add(data.lblLevel, BorderLayout.EAST); data.lblXpString.setForeground(TEXT_DIM); data.lblXpString.setFont(new Font("Monospaced", Font.PLAIN, 10)); data.mainBar.setForeground(COLOR_BLOOD); data.mainBar.setBackground(Color.BLACK); gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1; tile.add(data.lblXpString, gbc); gbc.gridy = 2; tile.add(data.mainBar, gbc); tile.addMouseListener(new MouseAdapter() { @Override public void mousePressed(MouseEvent e) { data.isTracking = !data.isTracking; tile.setBorder(new LineBorder(data.isTracking ? COLOR_BLOOD : BORDER_DIM, 1)); refreshTrackerList(); } }); return tile; }
+//    private void refreshTrackerList() { trackerList.removeAll(); skillRegistry.values().stream().filter(d -> d.isTracking).forEach(d -> { trackerList.add(d.trackerPanel); trackerList.add(Box.createRigidArea(new Dimension(0, 10))); }); trackerList.add(Box.createVerticalGlue()); trackerList.revalidate(); trackerList.repaint(); }
+//
+//    public void updateAll() {
+//        updateUI();
+//        ///  Update Task List
+//        Logger.log("Loading task list...");
+//        loadTaskList();
+//
+//        ///  Update Task Library
+//        Logger.log("Loading task library...");
+//        loadTaskLibrary();
+//
+//        ///  update Task Builder
+//        Logger.log("Loading task builder...");
+//        loadTaskBuilder();
+//
+//        ///  Update Settings
+//        loadSettings();
+//    }
+//
+//    public void saveAll() {
+//        new Thread(() -> {
+//            if (!Client.isLoggedIn())
+//                return;
+//
+//            setLabelStatus("Status: Autosaving...");
+//
+//            dataMan.saveEverything(
+//                    listTaskList,
+//                    listTaskLibrary,
+//                    captureBuilderSnapshot(),
+//                    captureSettingsSnapshot(),
+//                    captureLocation(),
+//                    captureInventory(),
+//                    captureWorn(),
+//                    captureSkills(),
+//                    () -> setLabelStatus("Status: Autosave complete!")
+//            );
+//
+//            Logger.log(Logger.LogType.INFO, "Autosaving...");
+//        }).start();
+//    }
+//
+//    /**
+//     * Helper function to track and highlight the tasks as they are executed.
+//     */
+//    private class TaskCellRenderer extends DefaultListCellRenderer {
+//        @Override
+//        public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
+//            JLabel selectedTask = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+//            if (currentExecutionIndex != -1 && index == currentExecutionIndex) {
+//                selectedTask.setForeground(Color.YELLOW);
+//                selectedTask.setText("→ " + selectedTask.getText());
+//                selectedTask.setFont(new Font("Consolas", Font.BOLD, 12));
+//            }
+//            return selectedTask;
+//        }
+//    }
+//
+//    private class SkillData { final Skill skill; final JProgressBar mainBar = new JProgressBar(0, 100); final JLabel lblLevel = new JLabel("1"), lblXpString = new JLabel("0/0"); final JPanel trackerPanel = new JPanel(new GridLayout(0, 1, 2, 2)); final JLabel lblGained = new JLabel(), lblPerHour = new JLabel(), lblRemaining = new JLabel(), lblTTL = new JLabel(), lblProj = new JLabel(), lblActs = new JLabel(); final int startXP, startLevel; boolean isTracking = false; SkillData(Skill s) { this.skill = s; this.startXP = Skills.getExperience(s); this.startLevel = Skills.getRealLevel(s); trackerPanel.setBackground(new Color(30, 30, 30)); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + s.name() + " "); b.setTitleColor(COLOR_BLOOD); trackerPanel.setBorder(b); JLabel[] ls = {lblGained, lblPerHour, lblRemaining, lblActs, lblTTL, lblProj}; for (JLabel l : ls) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.PLAIN, 12)); trackerPanel.add(l); } } void update(int curXp, int curLvl, long start, int ph) { int curMin = Skills.getExperienceForLevel(curLvl), curMax = Skills.getExperienceForLevel(curLvl + 1); lblLevel.setText(String.valueOf(curLvl)); lblXpString.setText(String.format("%,d / %,d XP", curXp, curMax)); mainBar.setValue((int) (((double)(curXp - curMin) / Math.max(1, curMax - curMin)) * 100)); long elapsed = System.currentTimeMillis() - start; int xph = (int) (Math.max(0, curXp - startXP) / Math.max(0.0001, elapsed / 3600000.0)); int rem = Math.max(0, curMax - curXp); lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP)); lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph)); lblRemaining.setText(" TO LEVEL: " + String.format("%,d", rem)); if (xph > 0) { lblTTL.setText(String.format(" TIME TO L: %.2f hrs", (double) rem / xph)); lblProj.setText(String.format(" PROJ (%dH): Lvl %d", ph, curLvl + (xph * ph / 100000))); } } }
+//
+//    // --- Snapshot Classes & Capture Methods ---
+//    public static class BuilderSnapshot {
+//        public String selectedAction;
+//        public String targetName;
+//        public String taskName;
+//        public String taskDescription;
+//        public String taskStatus;
+//        public List<Action> actions;
+//    }
+//
+//    private BuilderSnapshot captureBuilderSnapshot() {
+//        BuilderSnapshot snapshot = new BuilderSnapshot();
+//        snapshot.taskName = taskNameInput != null ? taskNameInput.getText() : "";
+//        snapshot.taskDescription = taskDescriptionInput != null ? taskDescriptionInput.getText() : "";
+//        snapshot.taskStatus = taskStatusInput != null ? taskStatusInput.getText() : "";
+//        snapshot.selectedAction = actionCombo != null && actionCombo.getSelectedItem() != null
+//                ? actionCombo.getSelectedItem().toString() : "";
+//        snapshot.targetName = manualTargetInput != null ? manualTargetInput.getText() : "";
+//        snapshot.actions = new ArrayList<>();
+//        for (int i = 0; i < modelTaskBuilder.getSize(); i++)
+//            snapshot.actions.add(modelTaskBuilder.getElementAt(i));
+//
+//        return snapshot;
+//    }
+//
+//    public static class SettingsSnapshot {
+//        public boolean renderingDisabled;
+//        public boolean roofsEnabled;
+//        public boolean dataOrbsEnabled;
+//        public boolean transparentSidePanel;
+//        public boolean gameAudioOn;
+//        public boolean transparentChatbox;
+//        public boolean clickThroughChatbox;
+//        public boolean shiftClickDrop;
+//        public boolean escClosesInterface;
+//        public boolean levelUpInterface;
+//        public boolean lootNotifications;
+//        public boolean autoSave;
+//    }
+//
+//    private SettingsSnapshot captureSettingsSnapshot() {
+//        SettingsSnapshot s = new SettingsSnapshot();
+//        s.autoSave               = chkAutoSave != null && chkAutoSave.isSelected();
+//        s.renderingDisabled      = chkDisableRendering != null && chkDisableRendering.isSelected();
+//        s.roofsEnabled           = chkRoofs != null && chkRoofs.isSelected();
+//        s.dataOrbsEnabled        = chkDataOrbs != null && chkDataOrbs.isSelected();
+//        s.transparentSidePanel   = chkTransparentSidePanel != null && chkTransparentSidePanel.isSelected();
+//        s.gameAudioOn            = chkGameAudio != null && chkGameAudio.isSelected();
+//        s.transparentChatbox     = chkTransparentChatbox != null && chkTransparentChatbox.isSelected();
+//        s.clickThroughChatbox    = chkClickThroughChatbox != null && chkClickThroughChatbox.isSelected();
+//        s.shiftClickDrop         = chkShiftClickDrop != null && chkShiftClickDrop.isSelected();
+//        s.escClosesInterface     = chkEscClosesInterface != null && chkEscClosesInterface.isSelected();
+//        s.levelUpInterface       = chkLevelUpInterface != null && chkLevelUpInterface.isSelected();
+//        s.lootNotifications      = chkLootNotifications != null && chkLootNotifications.isSelected();
+//        return s;
+//    }
+//
+//    private int[] captureLocation() {
+//        Tile tile = Players.getLocal().getTile();
+//        return new int[]{tile.getX(), tile.getY(), tile.getZ()};
+//    }
+//
+//    private int[] captureInventory() {
+//        return Inventory.all().stream()
+//                .filter(Objects::nonNull)
+//                .mapToInt(Item::getID)
+//                .toArray();
+//    }
+//
+//    private int[] captureWorn() {
+//        return Equipment.all().stream()
+//                .filter(Objects::nonNull)
+//                .mapToInt(Item::getID)
+//                .toArray();
+//    }
+//
+//    private int[] captureSkills() {
+//        int[] xp = new int[Skill.values().length];
+//        for (Skill s : Skill.values()) {
+//            xp[s.ordinal()] = Skills.getExperience(s);
+//        }
+//        return xp;
+//    }
+//}

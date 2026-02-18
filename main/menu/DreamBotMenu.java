@@ -59,9 +59,41 @@ public class DreamBotMenu extends JFrame {
     // --- State ---
     private boolean isScriptPaused = true;
     private boolean isUserInputAllowed = true;
+    private boolean isProcessingAction = false;
     private int currentExecutionIndex = -1;
 
     // --- Script ---
+    boolean startScriptOnLoad;
+    boolean exitOnStopWarning;
+    /**
+     * Timer used to rapidly refresh the GUI to keep it updated.
+     * <p>
+     * Recommended default = 1000ms (keep GUI updated, low-cost only on this thread!!)
+     */
+    private Timer uiTimer;
+    /**
+     * Timer used to scan for nearby targets in short intervals while the Task Builder tab is open.
+     * <p>
+     * Recommended default = 4000ms (balance between overkill updating and up-to-date list)
+     */
+    private Timer scanTimer;
+    /**
+     * Timer used to periodically auto-save the players details to the server to back up their script settings.
+     * <p>
+     * Recommended default = 60000ms (avoids server congestion and lag)
+     */
+    private Timer saveTimer;
+    /**
+     * Timer to debounce spam clicks on setting checkboxes.
+     * <p>
+     * (Spam clicks used to cause large queue delays with ingame actions and could have posed risks for players)
+     */
+    private Timer debounceSaveTimer;
+    private boolean isSettingProcessing = false;
+    /**
+     * Flag to stop the snap-back from re-triggered listeners
+     */
+    private boolean isReverting = false;
     private final int TOAST_DELAY = 300;
 
     private final AbstractScript script;
@@ -119,8 +151,10 @@ public class DreamBotMenu extends JFrame {
 
     // --- Client Checkboxes ---
     private JCheckBox chkAutoSave;
+    private JCheckBox settingClientChkStartScriptOnLoad;
+    private JCheckBox settingClientChkExitOnStopWarning;
     private JCheckBox chkDisableRendering;
-    private JCheckBox chkRoofs;
+    private JCheckBox chkHideRoofs;
     private JCheckBox chkDataOrbs;
     private JCheckBox chkTransparentSidePanel;
     private JCheckBox chkGameAudio;
@@ -259,16 +293,63 @@ public class DreamBotMenu extends JFrame {
 
         SwingUtilities.invokeLater(() -> {
             ///  Start a timer to update the UI every 1 second
-            new Timer(1000, e -> updateUI()).start();
+            uiTimer = new Timer(1000, e ->
+                    // refresh GUI every n seconds
+                    updateUI()
+            );
 
-            ///  Start another timer to update nearby targets every 4 seconds while task builder is open.
-            new Timer(4000, e -> {
+            ///  Start another timer to scan for nearby targets every n seconds while task builder is open.
+            scanTimer = new Timer(4000, e -> {
+                // scan for nearby targets every n seconds while the task builder tab is open
                 if (mainTabs.getSelectedIndex() == 2)
                     scanNearbyTargets();
-            }).start();
+            });
+
+            ///  Start a third timer to auto-save everything periodically
+            saveTimer = new Timer(60000, e -> {
+                // auto-save every n seconds (if auto-save feature is enabled in settings)
+                if (chkAutoSave != null && chkAutoSave.isSelected())
+                    saveAll();
+            });
+
+            uiTimer.start();
+            scanTimer.start();
+            saveTimer.start();
         });
 
         setVisible(true);
+    }
+
+    private void addSafeActionListener(JButton btn, ActionListener l) {
+        btn.addActionListener(e -> {
+            if (isProcessingAction) return;
+            isProcessingAction = true;
+            try {
+                l.actionPerformed(e);
+            } finally {
+                isProcessingAction = false;
+            }
+        });
+    }
+
+    /**
+     * Ensures the proper disposal of the {@link DreamBotMenu} on exit.
+     */
+    public void onExit() {
+        // disable gui refresh timer if its running
+        if (uiTimer != null)
+            uiTimer.stop();
+
+        // disable scan nearby timer if its running
+        if (scanTimer != null)
+            scanTimer.stop();
+
+        // disable auto-save timer if its running
+        if (saveTimer != null)
+            saveTimer.stop();
+
+        // safely dispose of this JFrame object
+        this.dispose();
     }
 
     private static class ToastRequest {
@@ -1232,46 +1313,54 @@ public class DreamBotMenu extends JFrame {
     }
 
     private void processNextToast() {
-        // If a toast is currently visible or the queue is empty, do nothing
         if (isToastProcessing || toastQueue.isEmpty()) {
             return;
         }
 
         isToastProcessing = true;
         ToastRequest request = toastQueue.poll();
-        Logger.log(request.message);
 
-        // Skip bubble if message is null or blank, just process the queue
-        if (request.message == null || request.message.isEmpty()) {
-            isToastProcessing = false;
-            processNextToast();
-            return;
-        }
+        // FIX: Component creation MUST be on the EDT
+        SwingUtilities.invokeLater(() -> {
+            if (request.message == null || request.message.isEmpty()) {
+                isToastProcessing = false;
+                processNextToast();
+                return;
+            }
 
-        // Calculate position
-        Point location = SwingUtilities.convertPoint(request.anchor, 0, 0, getLayeredPane());
-        int x = location.x + (request.anchor.getWidth() / 2);
-        int y = location.y - 30;
+            // Only show toast if the anchor component is actually visible to the user
+            // This prevents "ghost toasts" from background tabs
+            if (!request.anchor.isShowing()) {
+                isToastProcessing = false;
+                processNextToast();
+                return;
+            }
 
-        // Create the toast
-        final Toast toast = new Toast(request.message, x, y);
-        getLayeredPane().add(toast, JLayeredPane.POPUP_LAYER);
-        getLayeredPane().revalidate();
-        getLayeredPane().repaint();
+            try {
+                Point location = SwingUtilities.convertPoint(request.anchor, 0, 0, getLayeredPane());
+                int x = location.x + (request.anchor.getWidth() / 2);
+                int y = location.y - 30;
 
-        // 4. Set a timer to clean up and trigger the next toast
-        Timer timer = new Timer(TOAST_DELAY, e -> {
-            getLayeredPane().remove(toast);
-            getLayeredPane().revalidate();
-            getLayeredPane().repaint();
+                final Toast toast = new Toast(request.message, x, y);
+                getLayeredPane().add(toast, JLayeredPane.POPUP_LAYER);
+                getLayeredPane().revalidate();
+                getLayeredPane().repaint();
 
-            // Reset flag and check if another toast is waiting
-            isToastProcessing = false;
-            processNextToast();
+                Timer timer = new Timer(TOAST_DELAY, e -> {
+                    getLayeredPane().remove(toast);
+                    getLayeredPane().revalidate();
+                    getLayeredPane().repaint();
+                    isToastProcessing = false;
+                    processNextToast();
+                });
+                timer.setRepeats(false);
+                timer.start();
+            } catch (Exception e) {
+                // Fallback to prevent queue locking if location conversion fails
+                isToastProcessing = false;
+                processNextToast();
+            }
         });
-
-        timer.setRepeats(false);
-        timer.start();
     }
 
     public String getPlayerName() {
@@ -1313,6 +1402,53 @@ public class DreamBotMenu extends JFrame {
         }).start();
     }
 
+    public void loadSettings() {
+        new Thread(() -> {
+            String rawJson = dataMan.loadDataByPlayer("settings");
+            SwingUtilities.invokeLater(() -> {
+                if (rawJson != null)
+                    unpackSettings(rawJson);
+            });
+        }).start();
+    }
+
+
+    private void unpackTaskList(String json) {
+        if (json == null || json.isEmpty() || json.equals("[]")) {
+            Logger.log("No task list data found to unpack.");
+            return;
+        }
+
+        try {
+            Gson gson = new Gson();
+
+            // Supabase wraps the response in an outer array: [ { "tasks": [...] } ]
+            // "tasks" is now a List, not a Map
+            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, List<Task>>>>(){}.getType();
+            List<Map<String, List<Task>>> responseList = gson.fromJson(json, wrapperType);
+
+            if (responseList != null && !responseList.isEmpty()) {
+                List<Task> fetchedTasks = responseList.get(0).get("tasks");
+
+                if (fetchedTasks != null) {
+                    SwingUtilities.invokeLater(() -> {
+                        modelTaskList.clear();
+                        for (Task task : fetchedTasks) {
+                            modelTaskList.addElement(task);
+                        }
+                        refreshTaskList();
+                        Logger.log("Successfully loaded " + modelTaskList.size() + " tasks into the task list.");
+                    });
+                }
+            }
+            listTaskList.repaint();
+        } catch (Exception e) {
+            Logger.log(Logger.LogType.ERROR, "Failed to unpack task list data: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+
     private void unpackTaskLibrary(String json) {
         if (json == null || json.isEmpty() || json.equals("[]")) {
             Logger.log("No task list data found to unpack.");
@@ -1352,41 +1488,6 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    private void unpackTaskList(String json) {
-        if (json == null || json.isEmpty() || json.equals("[]")) {
-            Logger.log("No task list data found to unpack.");
-            return;
-        }
-
-        try {
-            Gson gson = new Gson();
-
-            // Supabase wraps the response in an outer array: [ { "tasks": [...] } ]
-            // "tasks" is now a List, not a Map
-            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, List<Task>>>>(){}.getType();
-            List<Map<String, List<Task>>> responseList = gson.fromJson(json, wrapperType);
-
-            if (responseList != null && !responseList.isEmpty()) {
-                List<Task> fetchedTasks = responseList.get(0).get("tasks");
-
-                if (fetchedTasks != null) {
-                    SwingUtilities.invokeLater(() -> {
-                        modelTaskList.clear();
-                        for (Task task : fetchedTasks) {
-                            modelTaskList.addElement(task);
-                        }
-                        refreshTaskList();
-                        Logger.log("Successfully loaded " + modelTaskList.size() + " tasks into the task list.");
-                    });
-                }
-            }
-            listTaskList.repaint();
-        } catch (Exception e) {
-            Logger.log(Logger.LogType.ERROR, "Failed to unpack task list data: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
     private void unpackTaskBuilder(String json) {
         if (json == null || json.isEmpty() || json.equals("[]")) return;
 
@@ -1422,6 +1523,181 @@ public class DreamBotMenu extends JFrame {
             e.printStackTrace();
         }
     }
+
+    private void unpackSettings(String json) {
+        if (json == null || json.isEmpty() || json.equals("[]")) return;
+
+        try {
+            Gson gson = new Gson();
+            JsonArray outerArray = JsonParser.parseString(json).getAsJsonArray();
+            if (outerArray.isEmpty()) return;
+
+            JsonElement columnData = outerArray.get(0).getAsJsonObject().get("settings");
+            if (columnData == null || columnData.isJsonNull()) return;
+
+            SettingsSnapshot snap = gson.fromJson(columnData, SettingsSnapshot.class);
+            if (snap != null) {
+                SwingUtilities.invokeLater(() -> {
+                    if (chkAutoSave != null)
+                        chkAutoSave.setSelected(snap.autoSave);
+                    if (settingClientChkStartScriptOnLoad != null)
+                        settingClientChkStartScriptOnLoad.setSelected(snap.startScriptOnLoadDisabled);
+                    if (settingClientChkExitOnStopWarning != null)
+                        settingClientChkExitOnStopWarning.setSelected(snap.exitScriptOnStopWarningEnabled);
+                    if (chkDisableRendering != null)
+                        chkDisableRendering.setSelected(snap.renderingDisabled);
+                    if (chkHideRoofs != null)
+                        chkHideRoofs.setSelected(snap.hideRoofsEnabled);
+                    if (chkDataOrbs != null)
+                        chkDataOrbs.setSelected(snap.dataOrbsEnabled);
+                    if (chkTransparentSidePanel != null)
+                        chkTransparentSidePanel.setSelected(snap.transparentSidePanel);
+                    if (chkGameAudio != null)
+                        chkGameAudio.setSelected(snap.gameAudioOn);
+                    if (chkTransparentChatbox != null)
+                        chkTransparentChatbox.setSelected(snap.transparentChatbox);
+                    if (chkClickThroughChatbox != null)
+                        chkClickThroughChatbox.setSelected(snap.clickThroughChatbox);
+                    if (chkShiftClickDrop != null)
+                        chkShiftClickDrop.setSelected(snap.shiftClickDrop);
+                    if (chkEscClosesInterface != null)
+                        chkEscClosesInterface.setSelected(snap.escClosesInterface);
+                    if (chkLevelUpInterface != null)
+                        chkLevelUpInterface.setSelected(snap.levelUpInterface);
+                    if (chkLootNotifications != null)
+                        chkLootNotifications.setSelected(snap.lootNotifications);
+
+                    // Note: We update the checkboxes here. To apply these directly to the
+                    // DreamBot client on startup, you would add the API calls here
+                    // (e.g., ClientSettings.toggleDataOrbs(snap.dataOrbsEnabled);)
+                    // but it's safest to ensure Client.isLoggedIn() first.
+
+                    Logger.log(Logger.LogType.SCRIPT, "Unpacked settings successfully! Syncing game settings...");
+
+                    // Now that the UI matches the server data, force the game to match the UI
+                    syncSettings();
+
+                    if (snap.startScriptOnLoadDisabled) { // or your renamed field
+                        Logger.log("Auto-start detected! Starting script...");
+                        toggleScriptState();
+                    }
+
+                });
+            }
+        } catch (Exception e) {
+            Logger.log(Logger.LogType.ERROR, "Failed to unpack settings: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    public void syncSettings() {
+        // Don't try to click menus if we aren't in the game world
+        if (!Client.isLoggedIn()) {
+            Logger.log("Sync skipped: Not logged in.");
+            return;
+        }
+
+        new Thread(() -> {
+            // Guard the UI
+            isSettingProcessing = true;
+            setLabelStatus("Status: Syncing profile...");
+
+            try {
+                // 1. Hide Roofs
+                if (chkHideRoofs != null) {
+                    boolean target = chkHideRoofs.isSelected();
+                    // Only act if the game state differs from our checkbox
+                    if (ClientSettings.areRoofsHidden() != target) {
+                        ClientSettings.toggleRoofs(target);
+                        Thread.sleep(600);
+                    }
+                }
+
+                // 2. Data Orbs
+                if (chkDataOrbs != null) {
+                    boolean target = chkDataOrbs.isSelected();
+                    if (ClientSettings.areDataOrbsEnabled() != target) {
+                        ClientSettings.toggleDataOrbs(target);
+                        Thread.sleep(600);
+                    }
+                }
+
+                // 3. Game Audio
+                if (chkGameAudio != null) {
+                    boolean target = chkGameAudio.isSelected();
+                    if (ClientSettings.isGameAudioOn() != target) {
+                        ClientSettings.toggleGameAudio(target);
+                        Thread.sleep(600);
+                    }
+                }
+
+                // Add any other ClientSettings checks here following the same pattern...
+
+            } catch (InterruptedException ignored) {
+            } finally {
+                isSettingProcessing = false;
+                setLabelStatus("Status: Profile Synced!");
+
+                // FIX: Ensure Toast creation and UI updates happen on the EDT
+                SwingUtilities.invokeLater(() -> {
+                    // Check if the Settings tab is currently showing to decide where to anchor
+                    // If you want to avoid "random toasts," anchor to the mainTabs or a specific header label
+                    showToast("All settings synced.", mainTabs, true);
+                });
+            }
+        }).start();
+    }
+
+//    private void processNextToast() {
+//        if (isToastProcessing || toastQueue.isEmpty()) {
+//            return;
+//        }
+//
+//        isToastProcessing = true;
+//        ToastRequest request = toastQueue.poll();
+//
+//        // FIX: Component creation MUST be on the EDT
+//        SwingUtilities.invokeLater(() -> {
+//            if (request.message == null || request.message.isEmpty()) {
+//                isToastProcessing = false;
+//                processNextToast();
+//                return;
+//            }
+//
+//            // Only show toast if the anchor component is actually visible to the user
+//            // This prevents "ghost toasts" from background tabs
+//            if (!request.anchor.isShowing()) {
+//                isToastProcessing = false;
+//                processNextToast();
+//                return;
+//            }
+//
+//            try {
+//                Point location = SwingUtilities.convertPoint(request.anchor, 0, 0, getLayeredPane());
+//                int x = location.x + (request.anchor.getWidth() / 2);
+//                int y = location.y - 30;
+//
+//                final Toast toast = new Toast(request.message, x, y);
+//                getLayeredPane().add(toast, JLayeredPane.POPUP_LAYER);
+//                getLayeredPane().revalidate();
+//                getLayeredPane().repaint();
+//
+//                Timer timer = new Timer(TOAST_DELAY, e -> {
+//                    getLayeredPane().remove(toast);
+//                    getLayeredPane().revalidate();
+//                    getLayeredPane().repaint();
+//                    isToastProcessing = false;
+//                    processNextToast();
+//                });
+//                timer.setRepeats(false);
+//                timer.start();
+//            } catch (Exception e) {
+//                // Fallback to prevent queue locking if location conversion fails
+//                isToastProcessing = false;
+//                processNextToast();
+//            }
+//        });
+//    }
 
     /**
      * Flashes a UI component a specific color and displays a message,
@@ -1494,10 +1770,12 @@ public class DreamBotMenu extends JFrame {
             script.getScriptManager().resume();
             btnPlayPause.setText("▮▮");
             isScriptPaused = false;
+            setLabelStatus("Status: Running");
         } else {
             script.getScriptManager().pause();
             btnPlayPause.setText("▶");
             isScriptPaused = true;
+            setLabelStatus("Status: Script paused");
         }
     }
 
@@ -1659,33 +1937,188 @@ public class DreamBotMenu extends JFrame {
     private JPanel createInfoCard(String title) { JPanel p = new JPanel(new GridLayout(0, 1, 5, 10)); p.setBackground(PANEL_SURFACE); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + title + " "); b.setTitleColor(COLOR_BLOOD); b.setTitleFont(new Font("Segoe UI", Font.BOLD, 16)); p.setBorder(BorderFactory.createCompoundBorder(b, new EmptyBorder(15, 15, 15, 15))); return p; }
     private void addInfoRow(JPanel p, String key, JLabel valLabel) { JPanel row = new JPanel(new BorderLayout()); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); valLabel.setForeground(TEXT_MAIN); valLabel.setFont(new Font("Consolas", Font.BOLD, 14)); row.add(k, BorderLayout.WEST); row.add(valLabel, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
     private void addInfoRowWithIcon(JPanel p, String key, JLabel valLabel, JLabel iconLabel) { JPanel row = new JPanel(new BorderLayout(5, 0)); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); JPanel rightSide = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0)); rightSide.setOpaque(false); valLabel.setForeground(TEXT_MAIN); rightSide.add(valLabel); rightSide.add(iconLabel); row.add(k, BorderLayout.WEST); row.add(rightSide, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
-    private JPanel createDisplayPanel() { return createSettingsGroup("Display", createSettingCheck("Roofs", !ClientSettings.areRoofsHidden(), e -> ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected())), createSettingCheck("Data orbs", ClientSettings.areDataOrbsEnabled(), e -> ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())), createSettingCheck("Transparent side panel", ClientSettings.isTransparentSidePanelEnabled(), e -> ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))); }
-    private JPanel createAudioPanel() { return createSettingsGroup("Audio", createSettingCheck("Game Audio", ClientSettings.isGameAudioOn(), e -> ClientSettings.toggleGameAudio(((JCheckBox)e.getSource()).isSelected()))); }
-    private JPanel createChatPanel() { return createSettingsGroup("Chat", createSettingCheck("Transparent chatbox", ClientSettings.isTransparentChatboxEnabled(), e -> ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected())), createSettingCheck("Click through chatbox", ClientSettings.isClickThroughChatboxEnabled(), e -> ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected()))); }
-    private JPanel createControlsPanel() { return createSettingsGroup("Controls", createSettingCheck("Shift click drop", ClientSettings.isShiftClickDroppingEnabled(), e -> ClientSettings.toggleShiftClickDropping(((JCheckBox)e.getSource()).isSelected())), createSettingCheck("Esc closes interface", ClientSettings.isEscInterfaceClosingEnabled(), e -> ClientSettings.toggleEscInterfaceClosing(((JCheckBox)e.getSource()).isSelected()))); }
-    private JPanel createWarningsPanel() { return createSettingsGroup("Warnings", createSettingCheck("Loot notifications", ClientSettings.areLootNotificationsEnabled(), e -> ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected()))); }
-    private JPanel createClientPanel() { return createSettingsGroup("Client", createSettingCheck("Disable Rendering", Client.isRenderingDisabled(), e -> Client.setRenderingDisabled(((JCheckBox)e.getSource()).isSelected()))); }
-    private JPanel createActivitiesPanel() { return createSettingsGroup("Activities", createSettingCheck("Level-up interface", ClientSettings.isLevelUpInterfaceEnabled(), e -> ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected()))); }
-    private JPanel createSettingsGroup(String title, Component... comps) { JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10)); p.setBackground(BG_BASE); JPanel list = new JPanel(new GridLayout(0, 1, 5, 5)); list.setBackground(BG_BASE); JLabel header = new JLabel(title); header.setForeground(COLOR_BLOOD); header.setFont(new Font("Segoe UI", Font.BOLD, 24)); JPanel wrapper = new JPanel(new BorderLayout()); wrapper.setBackground(BG_BASE); wrapper.add(header, BorderLayout.NORTH); for (Component c : comps) list.add(c); wrapper.add(list, BorderLayout.CENTER); return wrapper; }
-    private JCheckBox createSettingCheck(String text, boolean initialState, ActionListener l) { JCheckBox c = new JCheckBox(text); c.setForeground(TEXT_MAIN); c.setOpaque(false); c.setSelected(initialState); if (l != null) c.addActionListener(l); return c; }
-    private JToggleButton createMenuButton(String text) { JToggleButton btn = new JToggleButton(text) { protected void paintComponent(Graphics g) { g.setColor(isSelected() ? TAB_SELECTED : PANEL_SURFACE); g.fillRect(0, 0, getWidth(), getHeight()); super.paintComponent(g); } }; btn.setFocusPainted(false); btn.setContentAreaFilled(false); btn.setForeground(TEXT_MAIN); btn.setFont(new Font("Segoe UI", Font.BOLD, 14)); btn.setHorizontalAlignment(SwingConstants.LEFT); btn.setBorder(new EmptyBorder(0, 20, 0, 0)); return btn; }
 
+    ///  Define Client Settings sub-tab
+    private JPanel createClientPanel() {
+        return createSettingsGroup("Client",
+                settingClientChkStartScriptOnLoad = createSettingCheck("Start Script on Load",
+                        startScriptOnLoad, e ->
+                                startScriptOnLoad = !settingClientChkStartScriptOnLoad.isSelected()
+                ),
+
+                settingClientChkExitOnStopWarning = createSettingCheck("Exit on Stop Warning",
+                        exitOnStopWarning, e ->
+                                exitOnStopWarning = !settingClientChkExitOnStopWarning.isSelected()
+                ),
+
+                chkDisableRendering = createSettingCheck("Disable Rendering", Client.isRenderingDisabled(), e -> {
+                    Client.setRenderingDisabled(((JCheckBox)e.getSource()).isSelected());
+                }),
+
+                chkAutoSave = createSettingCheck("Auto Save", true, e -> {
+                    // Check the ACTUAL checkmark state
+                    boolean isChecked = ((JCheckBox)e.getSource()).isSelected();
+
+                    if (isChecked) {
+                        saveAll(); // Only trigger the heavy save when turned ON
+                        if (saveTimer != null)
+                            saveTimer.start();
+                    } else {
+                        if (saveTimer != null)
+                            saveTimer.stop();
+                        showToast("Auto-save Disabled", chkAutoSave, false);
+                    }
+                })
+        );
+    }
+
+    ///  Define Display Settings sub-tab
+    private JPanel createDisplayPanel() {
+        return createSettingsGroup("Display",
+                chkHideRoofs = createSettingCheck("Hide Roofs", ClientSettings.areRoofsHidden(), e ->
+                        ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected())),
+                chkDataOrbs = createSettingCheck("Data orbs", ClientSettings.areDataOrbsEnabled(), e -> ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())),
+                chkTransparentSidePanel = createSettingCheck("Transparent side panel", ClientSettings.isTransparentSidePanelEnabled(), e -> ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))
+        );
+    }
+
+    ///  Define Audio Settings sub-tab
+    private JPanel createAudioPanel() {
+        return createSettingsGroup("Audio",
+                chkGameAudio = createSettingCheck("Game Audio", ClientSettings.isGameAudioOn(), e -> ClientSettings.toggleGameAudio(((JCheckBox)e.getSource()).isSelected()))
+        );
+    }
+
+    ///  Define Chat Settings sub-tab
+    private JPanel createChatPanel() {
+        return createSettingsGroup("Chat",
+                chkTransparentChatbox = createSettingCheck("Transparent chatbox", ClientSettings.isTransparentChatboxEnabled(), e -> ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected())),
+                chkClickThroughChatbox = createSettingCheck("Click through chatbox", ClientSettings.isClickThroughChatboxEnabled(), e -> ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected()))
+        );
+    }
+
+    ///  Define Controls Settings sub-tab
+    private JPanel createControlsPanel() {
+        return createSettingsGroup("Controls",
+                chkShiftClickDrop = createSettingCheck("Shift click drop", ClientSettings.isShiftClickDroppingEnabled(), e -> ClientSettings.toggleShiftClickDropping(((JCheckBox)e.getSource()).isSelected())),
+                chkEscClosesInterface = createSettingCheck("Esc closes interface", ClientSettings.isEscInterfaceClosingEnabled(), e -> ClientSettings.toggleEscInterfaceClosing(((JCheckBox)e.getSource()).isSelected()))
+        );
+    }
+
+    ///  Define Activities Settings sub-tab
+    private JPanel createActivitiesPanel() {
+        return createSettingsGroup("Activities",
+                chkLevelUpInterface = createSettingCheck("Level-up interface", ClientSettings.isLevelUpInterfaceEnabled(), e -> ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected()))
+        );
+    }
+
+    ///  Define Warnings Settings sub-tab
+    private JPanel createWarningsPanel() {
+        return createSettingsGroup(
+                "Warnings",
+                chkLootNotifications = createSettingCheck("Loot notifications", ClientSettings.areLootNotificationsEnabled(), e -> ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected()))
+        );
+    }
+
+    private JPanel createSettingsGroup(String title, Component... comps) { JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10)); p.setBackground(BG_BASE); JPanel list = new JPanel(new GridLayout(0, 1, 5, 5)); list.setBackground(BG_BASE); JLabel header = new JLabel(title); header.setForeground(COLOR_BLOOD); header.setFont(new Font("Segoe UI", Font.BOLD, 24)); JPanel wrapper = new JPanel(new BorderLayout()); wrapper.setBackground(BG_BASE); wrapper.add(header, BorderLayout.NORTH); for (Component c : comps) list.add(c); wrapper.add(list, BorderLayout.CENTER); return wrapper; }
+
+    /**
+     * Creates a special checkbox for the Settings tab which has extra functionality such as thread-block protection when the
+     * checkboxes are spam-clicked by users.
+     *
+     * @param text
+     * @param initialState
+     * @param l
+     * @return
+     */
+    private JCheckBox createSettingCheck(String text, boolean initialState, ActionListener l) {
+        JCheckBox c = new JCheckBox(text);
+        c.setForeground(TEXT_MAIN);
+        c.setOpaque(false);
+        c.setSelected(initialState);
+
+        c.addItemListener(e -> {
+            // 1. If we are currently forcing the box back, don't do anything
+            if (isReverting)
+                return;
+
+            // 2. If the bot is already busy ingame, block this change
+            if (isSettingProcessing) {
+                isReverting = true;
+                // Force it back: if it was just selected, unselect it (and vice-versa)
+                c.setSelected(e.getStateChange() != ItemEvent.SELECTED);
+                isReverting = false;
+
+                showToast("Bot is busy ingame...", c, false);
+                return;
+            }
+
+            // 3. Bot is free! Lock the UI and start the background "walk"
+            isSettingProcessing = true;
+            String originalStatus = lblStatus.getText();
+            setLabelStatus("Status: Adjusting " + text + " ingame...");
+
+            new Thread(() -> {
+                try {
+                    // Execute the original logic (the ClientSettings call)
+                    if (l != null) {
+                        l.actionPerformed(new ActionEvent(c, ActionEvent.ACTION_PERFORMED, null));
+                    }
+                } finally {
+                    // 4. Unlock when the bot is done clicking through menus
+                    isSettingProcessing = false;
+                    SwingUtilities.invokeLater(() -> {
+                        setLabelStatus(originalStatus);
+                        showToast(text + " updated!", c, true);
+                        Logger.log("Updated setting: " + text);
+                    });
+                }
+            }).start();
+        });
+
+        return c;
+    }
+
+    private JToggleButton createMenuButton(String text) { JToggleButton btn = new JToggleButton(text) { protected void paintComponent(Graphics g) { g.setColor(isSelected() ? TAB_SELECTED : PANEL_SURFACE); g.fillRect(0, 0, getWidth(), getHeight()); super.paintComponent(g); } }; btn.setFocusPainted(false); btn.setContentAreaFilled(false); btn.setForeground(TEXT_MAIN); btn.setFont(new Font("Segoe UI", Font.BOLD, 14)); btn.setHorizontalAlignment(SwingConstants.LEFT); btn.setBorder(new EmptyBorder(0, 20, 0, 0)); return btn; }
     private JPanel createSkillTile(SkillData data) { JPanel tile = new JPanel(new GridBagLayout()); tile.setBackground(PANEL_SURFACE); tile.setBorder(new LineBorder(BORDER_DIM)); GridBagConstraints gbc = new GridBagConstraints(); gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.gridx = 0; JPanel top = new JPanel(new BorderLayout()); top.setOpaque(false); JLabel icon = new JLabel(loadSkillIcon(data.skill)); data.lblLevel.setForeground(COLOR_BLOOD); data.lblLevel.setFont(new Font("Arial", Font.BOLD, 18)); top.add(icon, BorderLayout.WEST); top.add(data.lblLevel, BorderLayout.EAST); data.lblXpString.setForeground(TEXT_DIM); data.lblXpString.setFont(new Font("Monospaced", Font.PLAIN, 10)); data.mainBar.setForeground(COLOR_BLOOD); data.mainBar.setBackground(Color.BLACK); gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1; tile.add(data.lblXpString, gbc); gbc.gridy = 2; tile.add(data.mainBar, gbc); tile.addMouseListener(new MouseAdapter() { @Override public void mousePressed(MouseEvent e) { data.isTracking = !data.isTracking; tile.setBorder(new LineBorder(data.isTracking ? COLOR_BLOOD : BORDER_DIM, 1)); refreshTrackerList(); } }); return tile; }
     private void refreshTrackerList() { trackerList.removeAll(); skillRegistry.values().stream().filter(d -> d.isTracking).forEach(d -> { trackerList.add(d.trackerPanel); trackerList.add(Box.createRigidArea(new Dimension(0, 10))); }); trackerList.add(Box.createVerticalGlue()); trackerList.revalidate(); trackerList.repaint(); }
 
     public void updateAll() {
-        updateUI();
-        ///  Update Task List
-        Logger.log("Loading task list...");
-        loadTaskList();
+        new Thread(() -> {
+            setLabelStatus("Status: Waiting for login...");
 
-        ///  Update Task Library
-        Logger.log("Loading task library...");
-        loadTaskLibrary();
+            // Loop and wait until the client is fully logged in
+            while (!Client.isLoggedIn()) {
+                try {
+                    Thread.sleep(2000); // Check every 2 seconds
+                } catch (InterruptedException ignored) {}
+            }
 
-        ///  update Task Builder
-        Logger.log("Loading task builder...");
-        loadTaskBuilder();
+            // Once logged in, proceed with the sequence
+            Logger.log("Player logged in. Fetching data...");
+
+            // Update the UI basic info first
+            updateUI();
+            ///  Update Task List
+            Logger.log("Loading task list...");
+            loadTaskList();
+
+            ///  Update Task Library
+            Logger.log("Loading task library...");
+            loadTaskLibrary();
+
+            ///  update Task Builder
+            Logger.log("Loading task builder...");
+            loadTaskBuilder();
+
+            ///  Update Settings
+            loadSettings();
+
+            ///  Save all settings to ensure new players have a database entry incase they logout before saving.
+            saveAll();
+
+
+        }).start();
     }
 
     public void saveAll() {
@@ -1707,7 +2140,7 @@ public class DreamBotMenu extends JFrame {
                     () -> setLabelStatus("Status: Autosave complete!")
             );
 
-            Logger.log(Logger.LogType.INFO, "Autosave sequence initiated.");
+            Logger.log(Logger.LogType.INFO, "Autosaving...");
         }).start();
     }
 
@@ -1755,8 +2188,10 @@ public class DreamBotMenu extends JFrame {
     }
 
     public static class SettingsSnapshot {
+        public boolean startScriptOnLoadDisabled;
+        public boolean exitScriptOnStopWarningEnabled;
         public boolean renderingDisabled;
-        public boolean roofsEnabled;
+        public boolean hideRoofsEnabled;
         public boolean dataOrbsEnabled;
         public boolean transparentSidePanel;
         public boolean gameAudioOn;
@@ -1771,18 +2206,62 @@ public class DreamBotMenu extends JFrame {
 
     private SettingsSnapshot captureSettingsSnapshot() {
         SettingsSnapshot s = new SettingsSnapshot();
-        s.autoSave               = chkAutoSave != null && chkAutoSave.isSelected();
-        s.renderingDisabled      = chkDisableRendering != null && chkDisableRendering.isSelected();
-        s.roofsEnabled           = chkRoofs != null && chkRoofs.isSelected();
-        s.dataOrbsEnabled        = chkDataOrbs != null && chkDataOrbs.isSelected();
-        s.transparentSidePanel   = chkTransparentSidePanel != null && chkTransparentSidePanel.isSelected();
-        s.gameAudioOn            = chkGameAudio != null && chkGameAudio.isSelected();
-        s.transparentChatbox     = chkTransparentChatbox != null && chkTransparentChatbox.isSelected();
-        s.clickThroughChatbox    = chkClickThroughChatbox != null && chkClickThroughChatbox.isSelected();
-        s.shiftClickDrop         = chkShiftClickDrop != null && chkShiftClickDrop.isSelected();
-        s.escClosesInterface     = chkEscClosesInterface != null && chkEscClosesInterface.isSelected();
-        s.levelUpInterface       = chkLevelUpInterface != null && chkLevelUpInterface.isSelected();
-        s.lootNotifications      = chkLootNotifications != null && chkLootNotifications.isSelected();
+        s.startScriptOnLoadDisabled
+                = settingClientChkStartScriptOnLoad != null
+                && settingClientChkStartScriptOnLoad.isSelected();
+
+        s.exitScriptOnStopWarningEnabled
+                = settingClientChkExitOnStopWarning != null
+                && settingClientChkExitOnStopWarning.isSelected();
+
+        s.renderingDisabled
+                = chkDisableRendering != null
+                && chkDisableRendering.isSelected();
+
+        s.autoSave =
+                chkAutoSave != null
+                && chkAutoSave.isSelected();
+
+        s.hideRoofsEnabled
+                = chkHideRoofs != null
+                && chkHideRoofs.isSelected();
+
+        s.dataOrbsEnabled
+                = chkDataOrbs != null
+                && chkDataOrbs.isSelected();
+
+        s.transparentSidePanel
+                = chkTransparentSidePanel != null
+                && chkTransparentSidePanel.isSelected();
+
+        s.gameAudioOn
+                = chkGameAudio != null
+                && chkGameAudio.isSelected();
+
+        s.transparentChatbox
+                = chkTransparentChatbox != null
+                && chkTransparentChatbox.isSelected();
+
+        s.clickThroughChatbox
+                = chkClickThroughChatbox != null
+                && chkClickThroughChatbox.isSelected();
+
+        s.shiftClickDrop
+                = chkShiftClickDrop != null
+                && chkShiftClickDrop.isSelected();
+
+        s.escClosesInterface
+                = chkEscClosesInterface != null
+                && chkEscClosesInterface.isSelected();
+
+        s.levelUpInterface
+                = chkLevelUpInterface != null
+                && chkLevelUpInterface.isSelected();
+
+        s.lootNotifications
+                = chkLootNotifications != null
+                && chkLootNotifications.isSelected();
+
         return s;
     }
 
