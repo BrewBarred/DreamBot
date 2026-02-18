@@ -43,7 +43,7 @@
 // * @author DreamBotMan Dev
 // * @version 15.0.0-Elite
 // */
-//public class DreamBotMenuBackup extends JFrame {
+//public class DreamBotMenuBest extends JFrame {
 //    //TODO SETTINGS:
 //    ///  DEV Settings:
 //    ///
@@ -122,11 +122,15 @@
 //    private final DefaultListModel<String> nearbyEntitiesModel = new DefaultListModel<>();
 //
 //
-//    private final List<List<Task>> presets = new ArrayList<>(Arrays.asList(new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>()));
+//    // --- Preset State ---
+//    private final int totalMaxPresets = 16;
+//    private int currentPresetPage = 0;
+//    private final List<Preset> allPresets = new ArrayList<>();
+//    private final JButton[] presetButtons = new JButton[4];
+//    private JButton btnPageUp, btnPageDown;
 //
 //    // --- UI Components ---
 //    private final JTabbedPane mainTabs = new JTabbedPane();
-//    private final JButton[] presetButtons = new JButton[4];
 //    private final JPanel trackerList;
 //    private final JLabel totalXpGainedLabel = new JLabel();
 //    private final JLabel totalLevelsGainedLabel = new JLabel();
@@ -195,7 +199,7 @@
 //    private static final Skill[] OSRS_ORDER = { Skill.ATTACK, Skill.HITPOINTS, Skill.MINING, Skill.STRENGTH, Skill.AGILITY, Skill.SMITHING, Skill.DEFENCE, Skill.HERBLORE, Skill.FISHING, Skill.RANGED, Skill.THIEVING, Skill.COOKING, Skill.PRAYER, Skill.CRAFTING, Skill.FIREMAKING, Skill.MAGIC, Skill.FLETCHING, Skill.WOODCUTTING, Skill.RUNECRAFTING, Skill.SLAYER, Skill.FARMING, Skill.CONSTRUCTION, Skill.HUNTER, Skill.SAILING };
 //    private static final Set<Skill> F2P_SKILLS = new HashSet<>(Arrays.asList(Skill.ATTACK, Skill.STRENGTH, Skill.DEFENCE, Skill.RANGED, Skill.PRAYER, Skill.MAGIC, Skill.HITPOINTS, Skill.CRAFTING, Skill.MINING, Skill.SMITHING, Skill.FISHING, Skill.COOKING, Skill.FIREMAKING, Skill.WOODCUTTING, Skill.RUNECRAFTING));
 //
-//    public DreamBotMenuBackup(AbstractScript script) {
+//    public DreamBotMenuBest(AbstractScript script) {
 //        this.script = script;
 //        this.startTime = System.currentTimeMillis();
 //        this.setIconImage(Objects.requireNonNull(loadStatusIcon("Hardcore_ironman")).getImage());
@@ -320,7 +324,7 @@
 //    }
 //
 //    /**
-//     * Ensures the proper disposal of the {@link DreamBotMenuBackup} on exit.
+//     * Ensures the proper disposal of the {@link DreamBotMenuBest} on exit.
 //     */
 //    public void onExit() {
 //        // disable gui refresh timer if its running
@@ -470,9 +474,13 @@
 //        lblStatus.setText("Status: Idle");
 //        lblStatus.setForeground(TEXT_MAIN);
 //
-//        // create south panel with 3 rows (Status, Progress, Buttons)
-//        JPanel south = new JPanel(new GridLayout(1, 3, 0, 5));
+//        // create south panel with rows
+//        JPanel south = new JPanel(new BorderLayout(0, 10));
 //        south.setOpaque(false);
+//
+//        // Sub-panel for the original buttons
+//        JPanel southButtons = new JPanel(new GridLayout(1, 6, 5, 0));
+//        southButtons.setOpaque(false);
 //
 //        ///  Create Task List save button
 //        JButton btnTaskListSave = createStyledBtn("Save", COLOR_GREY);
@@ -507,7 +515,7 @@
 //        btnTaskListRemove.setEnabled(listTaskList.getSelectedIndex() != -1);
 //
 //        btnTaskListRemove.addActionListener(e ->
-//            removeTask(listTaskList, modelTaskList, btnTaskListRemove)
+//                removeTask(listTaskList, modelTaskList, btnTaskListRemove)
 //        );
 //
 //        ///  Create Task List edit button
@@ -517,6 +525,23 @@
 //            showToast("Moving to builder for viewing...", btnTaskListView, true);
 //            // switch to tab 2 (3rd tab = Task Builder) to edit task
 //            mainTabs.setSelectedIndex(2);
+//        });
+//
+//        /// Create Preset Delete button
+//        JButton btnPresetDelete = createStyledBtn("Del Preset", COLOR_RED);
+//        btnPresetDelete.addActionListener(e -> deleteSelectedPreset());
+//
+//        /// Create Reset All button
+//        JButton btnResetAllPresets = createStyledBtn("Reset All", new Color(139, 0, 0));
+//        btnResetAllPresets.addActionListener(e -> {
+//            int choice = JOptionPane.showConfirmDialog(this, "WARNING: This will delete ALL presets (could be 100s!). Continue?", "Nuclear Reset", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+//            if (choice == JOptionPane.YES_OPTION) {
+//                allPresets.clear();
+//                currentPresetPage = 0;
+//                btnPageUp.setEnabled(false);
+//                refreshPresetButtonLabels();
+//                showToast("System Reset Complete!", btnResetAllPresets, true);
+//            }
 //        });
 //
 //        listTaskList.addListSelectionListener(e -> {
@@ -541,10 +566,15 @@
 //        });
 //
 //        ///  Add all buttons
-//        south.add(btnTaskListSave);
-//        south.add(btnTaskListDuplicate);
-//        south.add(btnTaskListRemove);
-//        south.add(btnTaskListView);
+//        southButtons.add(btnTaskListSave);
+//        southButtons.add(btnTaskListDuplicate);
+//        southButtons.add(btnTaskListRemove);
+//        southButtons.add(btnTaskListView);
+//        southButtons.add(btnPresetDelete);
+//        southButtons.add(btnResetAllPresets);
+//
+//        south.add(createPresetControlPanel(), BorderLayout.NORTH);
+//        south.add(southButtons, BorderLayout.SOUTH);
 //
 //        // add all panels to the main panel (task list panel)
 //        panelTaskList.add(createSubtitle("Task List"), BorderLayout.NORTH);
@@ -558,6 +588,7 @@
 //            public void componentShown(ComponentEvent e) {
 //                super.componentShown(e);
 //                refreshTaskListTab();
+//                refreshPresetButtonLabels();
 //            }
 //        });
 //
@@ -1358,6 +1389,16 @@
 //        @Override public String toString() { return actionType.name() + " -> " + target; }
 //    }
 //
+//    public static class Preset {
+//        String name;
+//        List<Task> tasks;
+//
+//        public Preset(String name, List<Task> tasks) {
+//            this.name = name;
+//            this.tasks = tasks;
+//        }
+//    }
+//
 //    public void showToast(String message, JComponent anchor, boolean success) {
 //        // 1. Visual feedback for the button (still happens immediately)
 //        Color flashColor = success ? COLOR_GREEN : COLOR_RED;
@@ -1720,57 +1761,6 @@
 //        }).start();
 //    }
 //
-////    private void processNextToast() {
-////        if (isToastProcessing || toastQueue.isEmpty()) {
-////            return;
-////        }
-////
-////        isToastProcessing = true;
-////        ToastRequest request = toastQueue.poll();
-////
-////        // FIX: Component creation MUST be on the EDT
-////        SwingUtilities.invokeLater(() -> {
-////            if (request.message == null || request.message.isEmpty()) {
-////                isToastProcessing = false;
-////                processNextToast();
-////                return;
-////            }
-////
-////            // Only show toast if the anchor component is actually visible to the user
-////            // This prevents "ghost toasts" from background tabs
-////            if (!request.anchor.isShowing()) {
-////                isToastProcessing = false;
-////                processNextToast();
-////                return;
-////            }
-////
-////            try {
-////                Point location = SwingUtilities.convertPoint(request.anchor, 0, 0, getLayeredPane());
-////                int x = location.x + (request.anchor.getWidth() / 2);
-////                int y = location.y - 30;
-////
-////                final Toast toast = new Toast(request.message, x, y);
-////                getLayeredPane().add(toast, JLayeredPane.POPUP_LAYER);
-////                getLayeredPane().revalidate();
-////                getLayeredPane().repaint();
-////
-////                Timer timer = new Timer(TOAST_DELAY, e -> {
-////                    getLayeredPane().remove(toast);
-////                    getLayeredPane().revalidate();
-////                    getLayeredPane().repaint();
-////                    isToastProcessing = false;
-////                    processNextToast();
-////                });
-////                timer.setRepeats(false);
-////                timer.start();
-////            } catch (Exception e) {
-////                // Fallback to prevent queue locking if location conversion fails
-////                isToastProcessing = false;
-////                processNextToast();
-////            }
-////        });
-////    }
-//
 //    /**
 //     * Flashes a UI component a specific color and displays a message,
 //     * then reverts to original state after 2 seconds.
@@ -2068,26 +2058,26 @@
 //        return createSettingsGroup("Display",
 //                chkHideRoofs = createSettingCheck("Hide Roofs",
 //                        ClientSettings.areRoofsHidden(), e ->
-//                        ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected())),
+//                                ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected())),
 //
 //                chkTransparentSidePanel = createSettingCheck("Transparent side panel",
 //                        ClientSettings.isTransparentSidePanelEnabled(), e ->
-//                        ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))
+//                                ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))
 //        );
 //    }
 //
 //    ///  Define Gameplay Settings sub-tab
 //    private JPanel createGameplayPanel() {
 //        return createSettingsGroup("Gameplay",
-//            chkDataOrbs = createSettingCheck("Show data orbs",
-//                    ClientSettings.areDataOrbsEnabled(), e ->
-//                    ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())
-//            ),
+//                chkDataOrbs = createSettingCheck("Show data orbs",
+//                        ClientSettings.areDataOrbsEnabled(), e ->
+//                                ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())
+//                ),
 //
-//            chkAmmoPickingBehaviour = createSettingCheck("Ammo-picking behaviour",
-//                    ClientSettings.isAmmoAutoEquipping(), e ->
-//                    ClientSettings.toggleAmmoAutoEquipping(((JCheckBox)e.getSource()).isSelected())
-//            )
+//                chkAmmoPickingBehaviour = createSettingCheck("Ammo-picking behaviour",
+//                        ClientSettings.isAmmoAutoEquipping(), e ->
+//                                ClientSettings.toggleAmmoAutoEquipping(((JCheckBox)e.getSource()).isSelected())
+//                )
 //        );
 //    }
 //
@@ -2096,7 +2086,7 @@
 //        return createSettingsGroup("Interfaces",
 //                chkDataOrbs = createSettingCheck("Show data orbs",
 //                        ClientSettings.areDataOrbsEnabled(), e ->
-//                        ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected()))
+//                                ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected()))
 //        );
 //    }
 //
@@ -2112,11 +2102,11 @@
 //        return createSettingsGroup("Chat",
 //                chkTransparentChatbox = createSettingCheck("Transparent chatbox",
 //                        ClientSettings.isTransparentChatboxEnabled(), e ->
-//                        ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected())),
+//                                ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected())),
 //
 //                chkClickThroughChatbox = createSettingCheck("Click through chatbox",
 //                        ClientSettings.isClickThroughChatboxEnabled(), e ->
-//                        ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected()))
+//                                ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected()))
 //        );
 //    }
 //
@@ -2125,11 +2115,11 @@
 //        return createSettingsGroup("Controls",
 //                chkShiftClickDrop = createSettingCheck("Shift click drop",
 //                        ClientSettings.isShiftClickDroppingEnabled(), e ->
-//                        ClientSettings.toggleShiftClickDropping(((JCheckBox)e.getSource()).isSelected())),
+//                                ClientSettings.toggleShiftClickDropping(((JCheckBox)e.getSource()).isSelected())),
 //
 //                chkEscClosesInterface = createSettingCheck("Esc closes interface",
 //                        ClientSettings.isEscInterfaceClosingEnabled(), e ->
-//                        ClientSettings.toggleEscInterfaceClosing(((JCheckBox)e.getSource()).isSelected()))
+//                                ClientSettings.toggleEscInterfaceClosing(((JCheckBox)e.getSource()).isSelected()))
 //        );
 //    }
 //
@@ -2138,7 +2128,7 @@
 //        return createSettingsGroup("Activities",
 //                chkLevelUpInterface = createSettingCheck("Level-up interface",
 //                        ClientSettings.isLevelUpInterfaceEnabled(), e ->
-//                        ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected()))
+//                                ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected()))
 //        );
 //    }
 //
@@ -2148,21 +2138,12 @@
 //                "Warnings",
 //                chkLootNotifications = createSettingCheck("Loot notifications",
 //                        ClientSettings.areLootNotificationsEnabled(), e ->
-//                        ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected()))
+//                                ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected()))
 //        );
 //    }
 //
 //    private JPanel createSettingsGroup(String title, Component... comps) { JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10)); p.setBackground(BG_BASE); JPanel list = new JPanel(new GridLayout(0, 1, 5, 5)); list.setBackground(BG_BASE); JLabel header = new JLabel(title); header.setForeground(COLOR_BLOOD); header.setFont(new Font("Segoe UI", Font.BOLD, 24)); JPanel wrapper = new JPanel(new BorderLayout()); wrapper.setBackground(BG_BASE); wrapper.add(header, BorderLayout.NORTH); for (Component c : comps) list.add(c); wrapper.add(list, BorderLayout.CENTER); return wrapper; }
 //
-//    /**
-//     * Creates a special checkbox for the Settings tab which has extra functionality such as thread-block protection when the
-//     * checkboxes are spam-clicked by users.
-//     *
-//     * @param text
-//     * @param initialState
-//     * @param l
-//     * @return
-//     */
 //    private JCheckBox createSettingCheck(String text, boolean initialState, ActionListener l) {
 //        JCheckBox c = new JCheckBox(text);
 //        c.setForeground(TEXT_MAIN);
@@ -2227,13 +2208,12 @@
 //    private void refreshTrackerList() { trackerList.removeAll(); skillRegistry.values().stream().filter(d -> d.isTracking).forEach(d -> { trackerList.add(d.trackerPanel); trackerList.add(Box.createRigidArea(new Dimension(0, 10))); }); trackerList.add(Box.createVerticalGlue()); trackerList.revalidate(); trackerList.repaint(); }
 //
 //    public void updateAll() {
-//        if (isDataLoading) return; // Block if already loading
+//        if (isDataLoading) return;
 //
 //        new Thread(() -> {
 //            isDataLoading = true;
 //            setLabelStatus("Status: Waiting for login...");
 //
-//            // 1. Wait for stable login
 //            while (!Client.isLoggedIn()) {
 //                try {
 //                    Thread.sleep(2000);
@@ -2242,18 +2222,19 @@
 //
 //            Logger.log("Player logged in. Fetching data...");
 //
-//            // 2. Clear old data on the EDT before fetching new data
 //            SwingUtilities.invokeLater(() -> {
 //                modelTaskList.clear();
 //                modelTaskLibrary.clear();
+//                allPresets.clear(); // Clear presets before loading fresh from the presets column
 //                updateUI();
 //            });
 //
-//            // 3. Fetch data sequentially
+//            // Independent fetching for each specific column
 //            loadSettings();
 //            loadTaskList();
 //            loadTaskLibrary();
 //            loadTaskBuilder();
+//            loadPresets(); // Fetching from the presets column
 //
 //            isDataLoading = false;
 //        }).start();
@@ -2271,6 +2252,7 @@
 //                    listTaskLibrary,
 //                    captureBuilderSnapshot(),
 //                    captureSettingsSnapshot(),
+//                    capturePresets(), // Sending this directly to your presets column
 //                    captureLocation(),
 //                    captureInventory(),
 //                    captureWorn(),
@@ -2278,7 +2260,7 @@
 //                    () -> setLabelStatus("Status: Autosave complete!")
 //            );
 //
-//            Logger.log(Logger.LogType.INFO, "Autosaving...");
+//            Logger.log(Logger.LogType.INFO, "Autosaving all columns...");
 //        }).start();
 //    }
 //
@@ -2358,7 +2340,7 @@
 //
 //        s.autoSave =
 //                chkAutoSave != null
-//                && chkAutoSave.isSelected();
+//                        && chkAutoSave.isSelected();
 //
 //        s.hideRoofsEnabled
 //                = chkHideRoofs != null
@@ -2403,6 +2385,18 @@
 //        return s;
 //    }
 //
+//    /**
+//     * Captures the current state of all presets to be saved into the dedicated presets column.
+//     * @return A deep-copy list of all current Preset objects.
+//     */
+//    private List<Preset> capturePresets() {
+//        List<Preset> snapshot = new ArrayList<>();
+//        for (Preset p : allPresets) {
+//            snapshot.add(new Preset(p.name, new ArrayList<>(p.tasks)));
+//        }
+//        return snapshot;
+//    }
+//
 //    private int[] captureLocation() {
 //        Tile tile = Players.getLocal().getTile();
 //        return new int[]{tile.getX(), tile.getY(), tile.getZ()};
@@ -2428,5 +2422,181 @@
 //            xp[s.ordinal()] = Skills.getExperience(s);
 //        }
 //        return xp;
+//    }
+//
+//    // --- PRESET LOGIC ADDITIONS ---
+//
+//    private JPanel createPresetControlPanel() {
+//        JPanel container = new JPanel(new BorderLayout(5, 0));
+//        container.setOpaque(false);
+//        container.setBorder(new EmptyBorder(5, 0, 5, 0));
+//
+//        JPanel grid = new JPanel(new GridLayout(1, 4, 5, 0));
+//        grid.setOpaque(false);
+//
+//        for (int i = 0; i < 4; i++) {
+//            final int slot = i;
+//            presetButtons[i] = createStyledBtn("Empty", COLOR_GREY);
+//            presetButtons[i].setFont(new Font("Segoe UI", Font.BOLD, 10));
+//            presetButtons[i].addActionListener(e -> handlePresetClick(slot, e));
+//            grid.add(presetButtons[i]);
+//        }
+//
+//        JPanel nav = new JPanel(new GridLayout(2, 1, 0, 2));
+//        nav.setOpaque(false);
+//        btnPageUp = createStyledBtn("▲", COLOR_NAV_BUTTONS);
+//        btnPageDown = createStyledBtn("▼", COLOR_NAV_BUTTONS);
+//
+//        btnPageUp.setPreferredSize(new Dimension(30, 0));
+//        btnPageUp.setEnabled(false);
+//
+//        btnPageDown.addActionListener(e -> {
+//            if (canExpandPresets()) {
+//                currentPresetPage++;
+//                btnPageUp.setEnabled(true);
+//                refreshPresetButtonLabels();
+//                showToast("Page " + (currentPresetPage + 1), btnPageDown, true);
+//            } else {
+//                showToast("Fill current slots first!", btnPageDown, false);
+//            }
+//        });
+//
+//        btnPageUp.addActionListener(e -> {
+//            if (currentPresetPage > 0) {
+//                currentPresetPage--;
+//                if (currentPresetPage == 0) btnPageUp.setEnabled(false);
+//                refreshPresetButtonLabels();
+//                showToast("Page " + (currentPresetPage + 1), btnPageUp, true);
+//            }
+//        });
+//
+//        nav.add(btnPageUp);
+//        nav.add(btnPageDown);
+//
+//        container.add(grid, BorderLayout.CENTER);
+//        container.add(nav, BorderLayout.EAST);
+//        return container;
+//    }
+//
+//    private void handlePresetClick(int slot, ActionEvent e) {
+//        int actualIndex = (currentPresetPage * 4) + slot;
+//        boolean shift = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+//        boolean ctrl = (e.getModifiers() & ActionEvent.CTRL_MASK) != 0;
+//
+//        // Ensure list growth
+//        while (allPresets.size() <= actualIndex) {
+//            allPresets.add(new Preset("Empty", new ArrayList<>()));
+//        }
+//
+//        if (ctrl && shift) {
+//            String newName = JOptionPane.showInputDialog(this, "Enter short name for preset:");
+//            if (newName != null && !newName.trim().isEmpty()) {
+//                allPresets.get(actualIndex).name = newName.trim();
+//                refreshPresetButtonLabels();
+//            }
+//        } else if (shift) {
+//            List<Task> currentTasks = new ArrayList<>();
+//            for (int i = 0; i < modelTaskList.size(); i++) {
+//                currentTasks.add(new Task(modelTaskList.getElementAt(i)));
+//            }
+//            String currentName = allPresets.get(actualIndex).name;
+//            if (currentName.equals("Empty")) currentName = "Set " + (actualIndex + 1);
+//            allPresets.set(actualIndex, new Preset(currentName, currentTasks));
+//            showToast("Saved to Preset " + (actualIndex + 1), presetButtons[slot], true);
+//            refreshPresetButtonLabels();
+//        } else {
+//            Preset p = allPresets.get(actualIndex);
+//            if (p.tasks.isEmpty()) {
+//                showToast("Preset is empty!", presetButtons[slot], false);
+//            } else {
+//                modelTaskList.clear();
+//                for (Task t : p.tasks) modelTaskList.addElement(new Task(t));
+//                showToast("Loaded: " + p.name, presetButtons[slot], true);
+//            }
+//        }
+//    }
+//
+//    private void deleteSelectedPreset() {
+//        int slot = -1;
+//        for (int i = 0; i < 4; i++) {
+//            if (presetButtons[i].hasFocus()) {
+//                slot = i;
+//                break;
+//            }
+//        }
+//
+//        if (slot == -1) {
+//            showToast("Select a preset button first!", mainTabs, false);
+//            return;
+//        }
+//
+//        int actualIndex = (currentPresetPage * 4) + slot;
+//        if (actualIndex < allPresets.size()) {
+//            allPresets.remove(actualIndex);
+//            flashControl(presetButtons[slot], COLOR_GREEN);
+//            showToast("Preset Deleted & Squashed", presetButtons[slot], true);
+//            refreshPresetButtonLabels();
+//        }
+//    }
+//
+//    private void refreshPresetButtonLabels() {
+//        for (int i = 0; i < 4; i++) {
+//            int actualIndex = (currentPresetPage * 4) + i;
+//            if (actualIndex < allPresets.size()) {
+//                Preset p = allPresets.get(actualIndex);
+//                presetButtons[i].setText(p.name);
+//                presetButtons[i].setBackground(p.tasks.isEmpty() ? COLOR_GREY : COLOR_BLOOD);
+//            } else {
+//                presetButtons[i].setText("Empty");
+//                presetButtons[i].setBackground(COLOR_GREY);
+//            }
+//        }
+//    }
+//
+//    private boolean canExpandPresets() {
+//        // Check if current 4 are filled
+//        for (int i = 0; i < 4; i++) {
+//            int idx = (currentPresetPage * 4) + i;
+//            if (idx >= allPresets.size() || allPresets.get(idx).tasks.isEmpty()) return false;
+//        }
+//        // Check if next page exceeds 16 total presets
+//        return ((currentPresetPage + 1) * 4) < totalMaxPresets;
+//    }
+//
+//    public void loadPresets() {
+//        new Thread(() -> {
+//            String rawJson = dataMan.loadDataByPlayer("presets");
+//            SwingUtilities.invokeLater(() -> {
+//                if (rawJson != null)
+//                    unpackPresets(rawJson);
+//            });
+//        }).start();
+//    }
+//
+//    private void unpackPresets(String json) {
+//        if (json == null || json.isEmpty() || json.equals("[]")) return;
+//
+//        try {
+//            Gson gson = new Gson();
+//            JsonArray outerArray = JsonParser.parseString(json).getAsJsonArray();
+//            if (outerArray.isEmpty()) return;
+//
+//            JsonElement columnData = outerArray.get(0).getAsJsonObject().get("presets");
+//            if (columnData == null || columnData.isJsonNull()) return;
+//
+//            java.lang.reflect.Type presetType = new TypeToken<List<Preset>>(){}.getType();
+//            List<Preset> fetchedPresets = gson.fromJson(columnData, presetType);
+//
+//            if (fetchedPresets != null) {
+//                SwingUtilities.invokeLater(() -> {
+//                    allPresets.clear();
+//                    allPresets.addAll(fetchedPresets);
+//                    refreshPresetButtonLabels();
+//                    Logger.log(Logger.LogType.SCRIPT, "Successfully unpacked " + allPresets.size() + " presets from the presets column.");
+//                });
+//            }
+//        } catch (Exception e) {
+//            Logger.log(Logger.LogType.ERROR, "Failed to unpack presets column: " + e.getMessage());
+//        }
 //    }
 //}

@@ -331,7 +331,7 @@ public class DataMan {
             JList<DreamBotMenu.Task> libraryList,
             DreamBotMenu.BuilderSnapshot builder,
             DreamBotMenu.SettingsSnapshot settings,
-            int[] loc,
+            List<DreamBotMenu.Preset> presets, int[] loc,
             int[] inv,
             int[] worn,
             int[] skills,

@@ -121,11 +121,16 @@ public class DreamBotMenu extends JFrame {
     private final DefaultListModel<String> nearbyEntitiesModel = new DefaultListModel<>();
 
 
-    private final List<List<Task>> presets = new ArrayList<>(Arrays.asList(new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>()));
+    // --- Preset State ---
+    private final int MAX_PRESETS = 16;
+    private int currentPresetPage = 0;
+    private int selectedPresetIndex = -1; // Tracks the currently active/selected preset index
+    private final List<Preset> allPresets = new ArrayList<>();
+    private final JButton[] presetButtons = new JButton[4];
+    private JButton btnPageUp, btnPageDown;
 
     // --- UI Components ---
     private final JTabbedPane mainTabs = new JTabbedPane();
-    private final JButton[] presetButtons = new JButton[4];
     private final JPanel trackerList;
     private final JLabel totalXpGainedLabel = new JLabel();
     private final JLabel totalLevelsGainedLabel = new JLabel();
@@ -164,7 +169,7 @@ public class DreamBotMenu extends JFrame {
 
     private JCheckBox chkVisualEffects;
     // --- Theme ---
-    private final Map<JComponent, Color> originalColors = new WeakHashMap<>();
+    private final Map<JComponent, Color> originalColors = new WeakHashMap<>(); // Kept as requested, but no longer used by flashControl to prevent color bugs
     private final Color BG_BASE = new Color(12, 12, 12);
     private final Color PANEL_SURFACE = new Color(24, 24, 24);
     private final Color COLOR_BLOOD = new Color(150, 0, 0);
@@ -469,9 +474,13 @@ public class DreamBotMenu extends JFrame {
         lblStatus.setText("Status: Idle");
         lblStatus.setForeground(TEXT_MAIN);
 
-        // create south panel with 3 rows (Status, Progress, Buttons)
-        JPanel south = new JPanel(new GridLayout(1, 3, 0, 5));
+        // create south panel with rows
+        JPanel south = new JPanel(new BorderLayout(0, 10));
         south.setOpaque(false);
+
+        // Sub-panel for the original buttons
+        JPanel southButtons = new JPanel(new GridLayout(1, 5, 5, 0)); // Adjusted from 6 to 5 since Del Preset is removed
+        southButtons.setOpaque(false);
 
         ///  Create Task List save button
         JButton btnTaskListSave = createStyledBtn("Save", COLOR_GREY);
@@ -506,7 +515,7 @@ public class DreamBotMenu extends JFrame {
         btnTaskListRemove.setEnabled(listTaskList.getSelectedIndex() != -1);
 
         btnTaskListRemove.addActionListener(e ->
-            removeTask(listTaskList, modelTaskList, btnTaskListRemove)
+                removeTask(listTaskList, modelTaskList, btnTaskListRemove)
         );
 
         ///  Create Task List edit button
@@ -516,6 +525,20 @@ public class DreamBotMenu extends JFrame {
             showToast("Moving to builder for viewing...", btnTaskListView, true);
             // switch to tab 2 (3rd tab = Task Builder) to edit task
             mainTabs.setSelectedIndex(2);
+        });
+
+        /// Create Reset All button
+        JButton btnResetAllPresets = createStyledBtn("Reset All", new Color(139, 0, 0));
+        btnResetAllPresets.addActionListener(e -> {
+            int choice = JOptionPane.showConfirmDialog(this, "WARNING: This will delete ALL presets (could be 100s!). Continue?", "Nuclear Reset", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (choice == JOptionPane.YES_OPTION) {
+                allPresets.clear();
+                currentPresetPage = 0;
+                selectedPresetIndex = -1;
+                btnPageUp.setEnabled(false);
+                refreshPresetButtonLabels();
+                showToast("System Reset Complete!", btnResetAllPresets, true);
+            }
         });
 
         listTaskList.addListSelectionListener(e -> {
@@ -540,10 +563,15 @@ public class DreamBotMenu extends JFrame {
         });
 
         ///  Add all buttons
-        south.add(btnTaskListSave);
-        south.add(btnTaskListDuplicate);
-        south.add(btnTaskListRemove);
-        south.add(btnTaskListView);
+        southButtons.add(btnTaskListSave);
+        southButtons.add(btnTaskListDuplicate);
+        southButtons.add(btnTaskListRemove);
+        southButtons.add(btnTaskListView);
+        // UI preset delete button was removed here as per instructions
+        southButtons.add(btnResetAllPresets);
+
+        south.add(createPresetControlPanel(), BorderLayout.NORTH);
+        south.add(southButtons, BorderLayout.SOUTH);
 
         // add all panels to the main panel (task list panel)
         panelTaskList.add(createSubtitle("Task List"), BorderLayout.NORTH);
@@ -557,6 +585,7 @@ public class DreamBotMenu extends JFrame {
             public void componentShown(ComponentEvent e) {
                 super.componentShown(e);
                 refreshTaskListTab();
+                refreshPresetButtonLabels();
             }
         });
 
@@ -1357,6 +1386,16 @@ public class DreamBotMenu extends JFrame {
         @Override public String toString() { return actionType.name() + " -> " + target; }
     }
 
+    public static class Preset {
+        String name;
+        List<Task> tasks;
+
+        public Preset(String name, List<Task> tasks) {
+            this.name = name;
+            this.tasks = tasks;
+        }
+    }
+
     public void showToast(String message, JComponent anchor, boolean success) {
         // 1. Visual feedback for the button (still happens immediately)
         Color flashColor = success ? COLOR_GREEN : COLOR_RED;
@@ -1470,6 +1509,16 @@ public class DreamBotMenu extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 if (rawJson != null)
                     unpackSettings(rawJson);
+            });
+        }).start();
+    }
+
+    public void loadPresets() {
+        new Thread(() -> {
+            String rawJson = dataMan.loadDataByPlayer("presets");
+            SwingUtilities.invokeLater(() -> {
+                if (rawJson != null)
+                    unpackPresets(rawJson);
             });
         }).start();
     }
@@ -1661,6 +1710,34 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
+    private void unpackPresets(String json) {
+        if (json == null || json.isEmpty() || json.equals("[]")) return;
+
+        try {
+            Gson gson = new Gson();
+            JsonArray outerArray = JsonParser.parseString(json).getAsJsonArray();
+            if (outerArray.isEmpty()) return;
+
+            JsonElement columnData = outerArray.get(0).getAsJsonObject().get("presets");
+            if (columnData == null || columnData.isJsonNull()) return;
+
+            java.lang.reflect.Type presetType = new TypeToken<List<Preset>>(){}.getType();
+            List<Preset> fetchedPresets = gson.fromJson(columnData, presetType);
+
+            if (fetchedPresets != null) {
+                SwingUtilities.invokeLater(() -> {
+                    allPresets.clear();
+                    allPresets.addAll(fetchedPresets);
+                    selectedPresetIndex = -1; // Reset selection on fresh load
+                    refreshPresetButtonLabels();
+                    Logger.log(Logger.LogType.SCRIPT, "Successfully unpacked " + allPresets.size() + " presets from the presets column.");
+                });
+            }
+        } catch (Exception e) {
+            Logger.log(Logger.LogType.ERROR, "Failed to unpack presets column: " + e.getMessage());
+        }
+    }
+
     public void syncSettings() {
         // Don't try to click menus if we aren't in the game world
         if (!Client.isLoggedIn()) {
@@ -1719,73 +1796,22 @@ public class DreamBotMenu extends JFrame {
         }).start();
     }
 
-//    private void processNextToast() {
-//        if (isToastProcessing || toastQueue.isEmpty()) {
-//            return;
-//        }
-//
-//        isToastProcessing = true;
-//        ToastRequest request = toastQueue.poll();
-//
-//        // FIX: Component creation MUST be on the EDT
-//        SwingUtilities.invokeLater(() -> {
-//            if (request.message == null || request.message.isEmpty()) {
-//                isToastProcessing = false;
-//                processNextToast();
-//                return;
-//            }
-//
-//            // Only show toast if the anchor component is actually visible to the user
-//            // This prevents "ghost toasts" from background tabs
-//            if (!request.anchor.isShowing()) {
-//                isToastProcessing = false;
-//                processNextToast();
-//                return;
-//            }
-//
-//            try {
-//                Point location = SwingUtilities.convertPoint(request.anchor, 0, 0, getLayeredPane());
-//                int x = location.x + (request.anchor.getWidth() / 2);
-//                int y = location.y - 30;
-//
-//                final Toast toast = new Toast(request.message, x, y);
-//                getLayeredPane().add(toast, JLayeredPane.POPUP_LAYER);
-//                getLayeredPane().revalidate();
-//                getLayeredPane().repaint();
-//
-//                Timer timer = new Timer(TOAST_DELAY, e -> {
-//                    getLayeredPane().remove(toast);
-//                    getLayeredPane().revalidate();
-//                    getLayeredPane().repaint();
-//                    isToastProcessing = false;
-//                    processNextToast();
-//                });
-//                timer.setRepeats(false);
-//                timer.start();
-//            } catch (Exception e) {
-//                // Fallback to prevent queue locking if location conversion fails
-//                isToastProcessing = false;
-//                processNextToast();
-//            }
-//        });
-//    }
-
     /**
      * Flashes a UI component a specific color and displays a message,
-     * then reverts to original state after 2 seconds.
+     * then reverts to original state exactly without corrupting background colors.
      *
      * @param component The JComponent to flash (e.g., btnTriggerBreak).
      * @param flashColor The color to flash (e.g., new Color(100, 0, 0) for red).
      */
     private void flashControl(JComponent component, Color flashColor) {
-        // Store the original color only once — before any flash has occurred
-        originalColors.putIfAbsent(component, component.getBackground());
+        // Dynamically capture the exact color right now to prevent cache corruption
+        Color originalColor = component.getBackground();
 
         component.setBackground(flashColor);
         component.repaint();
 
         Timer revertTimer = new Timer(200, e -> {
-            component.setBackground(originalColors.get(component));
+            component.setBackground(originalColor);
             component.repaint();
         });
 
@@ -2067,26 +2093,26 @@ public class DreamBotMenu extends JFrame {
         return createSettingsGroup("Display",
                 chkHideRoofs = createSettingCheck("Hide Roofs",
                         ClientSettings.areRoofsHidden(), e ->
-                        ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected())),
+                                ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected())),
 
                 chkTransparentSidePanel = createSettingCheck("Transparent side panel",
                         ClientSettings.isTransparentSidePanelEnabled(), e ->
-                        ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))
+                                ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))
         );
     }
 
     ///  Define Gameplay Settings sub-tab
     private JPanel createGameplayPanel() {
         return createSettingsGroup("Gameplay",
-            chkDataOrbs = createSettingCheck("Show data orbs",
-                    ClientSettings.areDataOrbsEnabled(), e ->
-                    ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())
-            ),
+                chkDataOrbs = createSettingCheck("Show data orbs",
+                        ClientSettings.areDataOrbsEnabled(), e ->
+                                ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())
+                ),
 
-            chkAmmoPickingBehaviour = createSettingCheck("Ammo-picking behaviour",
-                    ClientSettings.isAmmoAutoEquipping(), e ->
-                    ClientSettings.toggleAmmoAutoEquipping(((JCheckBox)e.getSource()).isSelected())
-            )
+                chkAmmoPickingBehaviour = createSettingCheck("Ammo-picking behaviour",
+                        ClientSettings.isAmmoAutoEquipping(), e ->
+                                ClientSettings.toggleAmmoAutoEquipping(((JCheckBox)e.getSource()).isSelected())
+                )
         );
     }
 
@@ -2095,7 +2121,7 @@ public class DreamBotMenu extends JFrame {
         return createSettingsGroup("Interfaces",
                 chkDataOrbs = createSettingCheck("Show data orbs",
                         ClientSettings.areDataOrbsEnabled(), e ->
-                        ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected()))
+                                ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected()))
         );
     }
 
@@ -2111,11 +2137,11 @@ public class DreamBotMenu extends JFrame {
         return createSettingsGroup("Chat",
                 chkTransparentChatbox = createSettingCheck("Transparent chatbox",
                         ClientSettings.isTransparentChatboxEnabled(), e ->
-                        ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected())),
+                                ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected())),
 
                 chkClickThroughChatbox = createSettingCheck("Click through chatbox",
                         ClientSettings.isClickThroughChatboxEnabled(), e ->
-                        ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected()))
+                                ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected()))
         );
     }
 
@@ -2124,11 +2150,11 @@ public class DreamBotMenu extends JFrame {
         return createSettingsGroup("Controls",
                 chkShiftClickDrop = createSettingCheck("Shift click drop",
                         ClientSettings.isShiftClickDroppingEnabled(), e ->
-                        ClientSettings.toggleShiftClickDropping(((JCheckBox)e.getSource()).isSelected())),
+                                ClientSettings.toggleShiftClickDropping(((JCheckBox)e.getSource()).isSelected())),
 
                 chkEscClosesInterface = createSettingCheck("Esc closes interface",
                         ClientSettings.isEscInterfaceClosingEnabled(), e ->
-                        ClientSettings.toggleEscInterfaceClosing(((JCheckBox)e.getSource()).isSelected()))
+                                ClientSettings.toggleEscInterfaceClosing(((JCheckBox)e.getSource()).isSelected()))
         );
     }
 
@@ -2137,7 +2163,7 @@ public class DreamBotMenu extends JFrame {
         return createSettingsGroup("Activities",
                 chkLevelUpInterface = createSettingCheck("Level-up interface",
                         ClientSettings.isLevelUpInterfaceEnabled(), e ->
-                        ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected()))
+                                ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected()))
         );
     }
 
@@ -2147,21 +2173,12 @@ public class DreamBotMenu extends JFrame {
                 "Warnings",
                 chkLootNotifications = createSettingCheck("Loot notifications",
                         ClientSettings.areLootNotificationsEnabled(), e ->
-                        ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected()))
+                                ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected()))
         );
     }
 
     private JPanel createSettingsGroup(String title, Component... comps) { JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10)); p.setBackground(BG_BASE); JPanel list = new JPanel(new GridLayout(0, 1, 5, 5)); list.setBackground(BG_BASE); JLabel header = new JLabel(title); header.setForeground(COLOR_BLOOD); header.setFont(new Font("Segoe UI", Font.BOLD, 24)); JPanel wrapper = new JPanel(new BorderLayout()); wrapper.setBackground(BG_BASE); wrapper.add(header, BorderLayout.NORTH); for (Component c : comps) list.add(c); wrapper.add(list, BorderLayout.CENTER); return wrapper; }
 
-    /**
-     * Creates a special checkbox for the Settings tab which has extra functionality such as thread-block protection when the
-     * checkboxes are spam-clicked by users.
-     *
-     * @param text
-     * @param initialState
-     * @param l
-     * @return
-     */
     private JCheckBox createSettingCheck(String text, boolean initialState, ActionListener l) {
         JCheckBox c = new JCheckBox(text);
         c.setForeground(TEXT_MAIN);
@@ -2245,6 +2262,7 @@ public class DreamBotMenu extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 modelTaskList.clear();
                 modelTaskLibrary.clear();
+                allPresets.clear(); // Clear presets before loading fresh from the presets column
                 updateUI();
             });
 
@@ -2253,9 +2271,22 @@ public class DreamBotMenu extends JFrame {
             loadTaskList();
             loadTaskLibrary();
             loadTaskBuilder();
+            loadPresets(); // Fetching from the presets column
 
             isDataLoading = false;
         }).start();
+    }
+
+    /**
+     * Captures the current state of all presets to be saved into the dedicated presets column.
+     * @return A deep-copy list of all current Preset objects.
+     */
+    private List<Preset> capturePresets() {
+        List<Preset> snapshot = new ArrayList<>();
+        for (Preset p : allPresets) {
+            snapshot.add(new Preset(p.name, new ArrayList<>(p.tasks)));
+        }
+        return snapshot;
     }
 
     public void saveAll() {
@@ -2270,6 +2301,7 @@ public class DreamBotMenu extends JFrame {
                     listTaskLibrary,
                     captureBuilderSnapshot(),
                     captureSettingsSnapshot(),
+                    capturePresets(), // Sending this directly to your presets column
                     captureLocation(),
                     captureInventory(),
                     captureWorn(),
@@ -2277,7 +2309,7 @@ public class DreamBotMenu extends JFrame {
                     () -> setLabelStatus("Status: Autosave complete!")
             );
 
-            Logger.log(Logger.LogType.INFO, "Autosaving...");
+            Logger.log(Logger.LogType.INFO, "Autosaving all data columns...");
         }).start();
     }
 
@@ -2357,7 +2389,7 @@ public class DreamBotMenu extends JFrame {
 
         s.autoSave =
                 chkAutoSave != null
-                && chkAutoSave.isSelected();
+                        && chkAutoSave.isSelected();
 
         s.hideRoofsEnabled
                 = chkHideRoofs != null
@@ -2427,5 +2459,186 @@ public class DreamBotMenu extends JFrame {
             xp[s.ordinal()] = Skills.getExperience(s);
         }
         return xp;
+    }
+
+    // --- PRESET LOGIC ADDITIONS ---
+
+    private JPanel createPresetControlPanel() {
+        JPanel container = new JPanel(new BorderLayout(5, 0));
+        container.setOpaque(false);
+        container.setBorder(new EmptyBorder(5, 0, 5, 0));
+
+        JPanel grid = new JPanel(new GridLayout(1, 4, 5, 0));
+        grid.setOpaque(false);
+
+        for (int i = 0; i < 4; i++) {
+            final int slot = i;
+            presetButtons[i] = createStyledBtn("Preset " + (i + 1), COLOR_GREY);
+            presetButtons[i].setFont(new Font("Segoe UI", Font.BOLD, 10));
+            presetButtons[i].addActionListener(e -> handlePresetClick(slot, e));
+
+            // Map the physical 'Delete' key to securely prompt and squash the list
+            presetButtons[i].addKeyListener(new KeyAdapter() {
+                @Override
+                public void keyPressed(KeyEvent e) {
+                    if (e.getKeyCode() == KeyEvent.VK_DELETE) {
+                        promptAndDeletePreset();
+                    }
+                }
+            });
+
+            grid.add(presetButtons[i]);
+        }
+
+        JPanel nav = new JPanel(new GridLayout(2, 1, 0, 2));
+        nav.setOpaque(false);
+        btnPageUp = createStyledBtn("▲", COLOR_NAV_BUTTONS);
+        btnPageDown = createStyledBtn("▼", COLOR_NAV_BUTTONS);
+
+        btnPageUp.setPreferredSize(new Dimension(30, 0));
+        btnPageUp.setEnabled(false);
+
+        btnPageDown.addActionListener(e -> {
+            if (canExpandPresets()) {
+                currentPresetPage++;
+                btnPageUp.setEnabled(true);
+                refreshPresetButtonLabels();
+                showToast("Page " + (currentPresetPage + 1), btnPageDown, true);
+            } else {
+                String message = (currentPresetPage + 1) * 4 >= MAX_PRESETS ?
+                        String.format("Max presets reached! (%d)", MAX_PRESETS)
+                                    : "Fill current slots first!";
+
+                showToast(message, btnPageDown, false);
+            }
+        });
+
+        btnPageUp.addActionListener(e -> {
+            if (currentPresetPage > 0) {
+                currentPresetPage--;
+                if (currentPresetPage == 0)
+                    btnPageUp.setEnabled(false);
+                refreshPresetButtonLabels();
+                showToast("Page " + (currentPresetPage + 1), btnPageUp, true);
+            } else flashControl(btnPageUp, COLOR_RED);
+        });
+
+        nav.add(btnPageUp);
+        nav.add(btnPageDown);
+
+        container.add(grid, BorderLayout.CENTER);
+        container.add(nav, BorderLayout.EAST);
+        return container;
+    }
+
+    private void handlePresetClick(int slot, ActionEvent e) {
+        int actualIndex = (currentPresetPage * 4) + slot;
+        boolean shift = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
+        boolean ctrl = (e.getModifiers() & ActionEvent.CTRL_MASK) != 0;
+
+        // Ensure list growth defaults to proper "Preset X" formatting
+        while (allPresets.size() <= actualIndex) {
+            allPresets.add(new Preset("Preset " + (allPresets.size() + 1), new ArrayList<>()));
+        }
+
+        if (ctrl && shift) {
+            String newName = JOptionPane.showInputDialog(this, "Enter preset name:");
+            if (newName != null && !newName.trim().isEmpty()) {
+                allPresets.get(actualIndex).name = newName.trim();
+                refreshPresetButtonLabels();
+            }
+        } else if (shift) {
+            List<Task> currentTasks = new ArrayList<>();
+            for (int i = 0; i < modelTaskList.size(); i++) {
+                currentTasks.add(new Task(modelTaskList.getElementAt(i)));
+            }
+            String currentName = allPresets.get(actualIndex).name;
+            allPresets.set(actualIndex, new Preset(currentName, currentTasks));
+
+            selectedPresetIndex = actualIndex; // Select it upon saving
+            showToast("Saved to " + currentName, presetButtons[slot], true);
+            refreshPresetButtonLabels();
+        } else {
+            Preset p = allPresets.get(actualIndex);
+            selectedPresetIndex = actualIndex; // Always mark as selected when clicked
+
+            if (p.tasks.isEmpty()) {
+                showToast(p.name + " is empty!", presetButtons[slot], false);
+            } else {
+                modelTaskList.clear();
+                for (Task t : p.tasks) modelTaskList.addElement(new Task(t));
+                showToast("Loaded: " + p.name, presetButtons[slot], true);
+            }
+            refreshPresetButtonLabels();
+        }
+    }
+
+    private void promptAndDeletePreset() {
+        if (selectedPresetIndex == -1 || selectedPresetIndex >= allPresets.size()) {
+            return; // Safety guard: ignore delete press if nothing valid is selected
+        }
+
+        Preset p = allPresets.get(selectedPresetIndex);
+        int choice = JOptionPane.showConfirmDialog(this,
+                "WARNING: You are about to delete '" + p.name + "'.\nThis will shift all subsequent presets down. Continue?",
+                "Delete Preset?",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+
+        if (choice == JOptionPane.YES_OPTION) {
+            // Squashes the ArrayList left automatically
+            allPresets.remove(selectedPresetIndex);
+
+            // Clear selection because it's been removed
+            selectedPresetIndex = -1;
+
+            // If squashing makes the current page completely empty, bump back a page
+            if (currentPresetPage > 0 && (currentPresetPage * 4) >= allPresets.size()) {
+                currentPresetPage--;
+                if (currentPresetPage == 0) btnPageUp.setEnabled(false);
+            }
+
+            refreshPresetButtonLabels();
+            showToast("Preset Deleted & Squashed", mainTabs, true);
+        }
+    }
+
+    private void refreshPresetButtonLabels() {
+        for (int i = 0; i < 4; i++) {
+            int actualIndex = (currentPresetPage * 4) + i;
+
+            // Reset foreground explicitly to prevent unreadable text
+            presetButtons[i].setForeground(Color.WHITE);
+
+            if (actualIndex < allPresets.size()) {
+                Preset p = allPresets.get(actualIndex);
+                presetButtons[i].setText(p.name);
+
+                // Color Logic mapped exactly to your request:
+                if (actualIndex == selectedPresetIndex) {
+                    presetButtons[i].setBackground(COLOR_ORANGE); // Selected
+                } else if (p.tasks.isEmpty()) {
+                    presetButtons[i].setBackground(COLOR_GREY);   // Empty
+                } else {
+                    presetButtons[i].setBackground(COLOR_BLOOD);  // Filled
+                }
+            } else {
+                // Formatting for uninitialized presets beyond current size
+                presetButtons[i].setText("Preset " + (actualIndex + 1));
+                presetButtons[i].setBackground(actualIndex == selectedPresetIndex ? COLOR_ORANGE : COLOR_GREY);
+            }
+        }
+    }
+
+    private boolean canExpandPresets() {
+        // Check if current 4 are filled
+        for (int i = 0; i < 4; i++) {
+            int idx = (currentPresetPage * 4) + i;
+            if (idx >= allPresets.size() || allPresets.get(idx).tasks.isEmpty())
+                return false;
+        }
+
+        // check if next page size exceeds preset limit
+        return ((currentPresetPage + 1) * 4) < MAX_PRESETS;
     }
 }
