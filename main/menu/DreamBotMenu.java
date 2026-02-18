@@ -60,11 +60,12 @@ public class DreamBotMenu extends JFrame {
     private boolean isScriptPaused = true;
     private boolean isUserInputAllowed = true;
     private boolean isProcessingAction = false;
+    private boolean isDataLoading = false;
     private int currentExecutionIndex = -1;
 
     // --- Script ---
-    boolean startScriptOnLoad;
-    boolean exitOnStopWarning;
+    public boolean startScriptOnLoad;
+    public boolean exitOnStopWarning;
     /**
      * Timer used to rapidly refresh the GUI to keep it updated.
      * <p>
@@ -1540,10 +1541,19 @@ public class DreamBotMenu extends JFrame {
                 SwingUtilities.invokeLater(() -> {
                     if (chkAutoSave != null)
                         chkAutoSave.setSelected(snap.autoSave);
-                    if (settingClientChkStartScriptOnLoad != null)
+
+                    if (settingClientChkStartScriptOnLoad != null) {
                         settingClientChkStartScriptOnLoad.setSelected(snap.startScriptOnLoadDisabled);
-                    if (settingClientChkExitOnStopWarning != null)
+                        // update the class field // TODO see if this field is necessary or if the checkbox can be used directly instead, perhaps reference the checkbox from a function if too inconvenient?
+                        this.startScriptOnLoad = snap.startScriptOnLoadDisabled;
+                    }
+
+                    if (settingClientChkExitOnStopWarning != null) {
                         settingClientChkExitOnStopWarning.setSelected(snap.exitScriptOnStopWarningEnabled);
+                        // update the class field
+                        this.exitOnStopWarning = snap.exitScriptOnStopWarningEnabled;
+                    }
+
                     if (chkDisableRendering != null)
                         chkDisableRendering.setSelected(snap.renderingDisabled);
                     if (chkHideRoofs != null)
@@ -2038,39 +2048,36 @@ public class DreamBotMenu extends JFrame {
         c.setSelected(initialState);
 
         c.addItemListener(e -> {
-            // 1. If we are currently forcing the box back, don't do anything
-            if (isReverting)
-                return;
+            if (isReverting) return;
 
-            // 2. If the bot is already busy ingame, block this change
             if (isSettingProcessing) {
                 isReverting = true;
-                // Force it back: if it was just selected, unselect it (and vice-versa)
                 c.setSelected(e.getStateChange() != ItemEvent.SELECTED);
                 isReverting = false;
-
                 showToast("Bot is busy ingame...", c, false);
                 return;
             }
 
-            // 3. Bot is free! Lock the UI and start the background "walk"
             isSettingProcessing = true;
             String originalStatus = lblStatus.getText();
             setLabelStatus("Status: Adjusting " + text + " ingame...");
 
             new Thread(() -> {
                 try {
-                    // Execute the original logic (the ClientSettings call)
+                    // Execute the actual DreamBot ClientSettings toggle
                     if (l != null) {
                         l.actionPerformed(new ActionEvent(c, ActionEvent.ACTION_PERFORMED, null));
                     }
+                } catch (Exception ex) {
+                    Logger.log("Error updating setting: " + ex.getMessage());
                 } finally {
-                    // 4. Unlock when the bot is done clicking through menus
+                    // Unlock the semaphore so the user can click other things
                     isSettingProcessing = false;
+
+                    // Substance UI FIX: Move all UI feedback to the EDT
                     SwingUtilities.invokeLater(() -> {
                         setLabelStatus(originalStatus);
                         showToast(text + " updated!", c, true);
-                        Logger.log("Updated setting: " + text);
                     });
                 }
             }).start();
@@ -2084,40 +2091,35 @@ public class DreamBotMenu extends JFrame {
     private void refreshTrackerList() { trackerList.removeAll(); skillRegistry.values().stream().filter(d -> d.isTracking).forEach(d -> { trackerList.add(d.trackerPanel); trackerList.add(Box.createRigidArea(new Dimension(0, 10))); }); trackerList.add(Box.createVerticalGlue()); trackerList.revalidate(); trackerList.repaint(); }
 
     public void updateAll() {
+        if (isDataLoading) return; // Block if already loading
+
         new Thread(() -> {
+            isDataLoading = true;
             setLabelStatus("Status: Waiting for login...");
 
-            // Loop and wait until the client is fully logged in
+            // 1. Wait for stable login
             while (!Client.isLoggedIn()) {
                 try {
-                    Thread.sleep(2000); // Check every 2 seconds
+                    Thread.sleep(2000);
                 } catch (InterruptedException ignored) {}
             }
 
-            // Once logged in, proceed with the sequence
             Logger.log("Player logged in. Fetching data...");
 
-            // Update the UI basic info first
-            updateUI();
-            ///  Update Task List
-            Logger.log("Loading task list...");
+            // 2. Clear old data on the EDT before fetching new data
+            SwingUtilities.invokeLater(() -> {
+                modelTaskList.clear();
+                modelTaskLibrary.clear();
+                updateUI();
+            });
+
+            // 3. Fetch data sequentially
+            loadSettings();
             loadTaskList();
-
-            ///  Update Task Library
-            Logger.log("Loading task library...");
             loadTaskLibrary();
-
-            ///  update Task Builder
-            Logger.log("Loading task builder...");
             loadTaskBuilder();
 
-            ///  Update Settings
-            loadSettings();
-
-            ///  Save all settings to ensure new players have a database entry incase they logout before saving.
-            saveAll();
-
-
+            isDataLoading = false;
         }).start();
     }
 

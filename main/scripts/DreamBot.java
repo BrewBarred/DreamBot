@@ -8,6 +8,8 @@ import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.script.Category;
 import org.dreambot.api.script.ScriptManifest;
 import org.dreambot.api.script.listener.GameStateListener;
+import org.dreambot.api.utilities.Logger;
+import org.dreambot.api.wrappers.interactive.Player;
 
 import javax.swing.*;
 
@@ -95,15 +97,14 @@ public class DreamBot extends AbstractScript implements GameStateListener {
     @Override
     public void onGameStateChange(GameState gameState) {
         if (gameState == GameState.LOGGED_IN) {
-            // Give the client a moment to fully load the player object
-            Players.getLocal();
-            String currentPlayer = Players.getLocal().getName();
-
-            if (currentPlayer != null && !currentPlayer.equals(lastPlayerName)) {
-                log("New login detected for: " + currentPlayer);
-                // update player data (load from server or default if none exists)
-                updateAccountData(currentPlayer);
-                lastPlayerName = currentPlayer;
+            Player player = Players.getLocal();
+            if (player.getName() != null) {
+                String currentPlayer = player.getName();
+                if (!currentPlayer.equals(lastPlayerName)) {
+                    lastPlayerName = currentPlayer;
+                    log("New login detected for: " + currentPlayer);
+                    updateAccountData(currentPlayer);
+                }
             }
         }
     }
