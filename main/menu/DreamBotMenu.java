@@ -522,6 +522,23 @@ public class DreamBotMenu extends JFrame {
             btnTaskListRemove.setEnabled(!listTaskList.isSelectionEmpty());
         });
 
+        listTaskList.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                int selectedIndex = listTaskList.getSelectedIndex();
+
+                // return early if no task is currently selected in the task library
+                if (selectedIndex == -1)
+                    return;
+
+                if (e.getClickCount() == 1) {
+                    // TODO add logic to view task information? Perhaps, loop count, description, end condition, and maybe a live-action-chain? action1 -> action2 -> action3
+                }
+
+                if (e.getClickCount() == 2)
+                    removeTask(listTaskList, modelTaskList, btnTaskListRemove);
+            }
+        });
+
         ///  Add all buttons
         south.add(btnTaskListSave);
         south.add(btnTaskListDuplicate);
@@ -653,7 +670,7 @@ public class DreamBotMenu extends JFrame {
                     // take a shallow copy of the selected task to pass it to the task list
                     Task task = modelTaskLibrary.getElementAt(selectedIndex);
                     modelTaskList.addElement(task);
-                    showToast("Added to queue position " + modelTaskLibrary.size(), btnTaskLibraryAdd, true);
+                    showToast("Added to queue position " + modelTaskList.size(), btnTaskLibraryAdd, true);
                     refreshTaskListTab();
                 }
             }
@@ -988,15 +1005,22 @@ public class DreamBotMenu extends JFrame {
     }
 
     public void removeTask(JList<Task> list, DefaultListModel<Task> model, JButton btn) {
-        int selectedIndex = list.getSelectedIndex();
-        if (selectedIndex != -1) {
-            model.remove(selectedIndex);
-            showToast("Removed task!", btn, true);
-        } else {
-            showToast("Select a Task to remove!", btn, false);
-        }
+        try {
+            int selectedIndex = list.getSelectedIndex();
+            if (selectedIndex != -1) {
+                model.remove(selectedIndex);
+                showToast("Removed task!", btn, true);
+            } else {
+                showToast("Select a Task to remove!", btn, false);
+            }
 
-        refreshTaskListTab();
+            // this get element is a dummy task which throws an error if index is invalid, which will trigger refresh methods
+            model.getElementAt(selectedIndex);
+            list.setSelectedIndex(selectedIndex);
+        } catch (Exception e) {
+            refreshTaskListTab();
+            refreshTaskBuilderTab();
+        }
     }
 
     private Task createTask(List<Action> actions) {
