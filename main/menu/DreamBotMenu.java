@@ -1789,7 +1789,13 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    private void stopScript() { if (JOptionPane.showConfirmDialog(this, "Stop?") == JOptionPane.YES_OPTION) { script.stop(); dispose(); } }
+    private void stopScript() {
+        if (JOptionPane.showConfirmDialog(this, "This may result in the loss of unsaved changes.\nAre you sure you want to exit?") == JOptionPane.YES_NO_OPTION) {
+            script.stop();
+            dispose();
+        }
+    }
+
     private void toggleUserInput() { isUserInputAllowed = !isUserInputAllowed; Client.getInstance().setMouseInputEnabled(isUserInputAllowed); Client.getInstance().setKeyboardInputEnabled(isUserInputAllowed); btnInputToggle.setText(isUserInputAllowed ? "🖱" : "🚫"); }
     private void styleHeaderLabel(JLabel l) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.BOLD, 15)); l.setHorizontalAlignment(SwingConstants.RIGHT); }
     private void styleSpinner(JSpinner s) { JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField(); field.setBackground(new Color(30, 30, 30)); field.setForeground(COLOR_BLOOD); s.setBorder(new LineBorder(BORDER_DIM)); }
