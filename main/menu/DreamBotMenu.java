@@ -66,6 +66,7 @@ public class DreamBotMenu extends JFrame {
     // --- Script ---
     public boolean startScriptOnLoad;
     public boolean exitOnStopWarning;
+    public boolean enableVisualEffects;
     /**
      * Timer used to rapidly refresh the GUI to keep it updated.
      * <p>
@@ -151,6 +152,7 @@ public class DreamBotMenu extends JFrame {
     private JCheckBox chkDisableRendering;
     private JCheckBox chkHideRoofs;
     private JCheckBox chkDataOrbs;
+    private JCheckBox chkAmmoPickingBehaviour;
     private JCheckBox chkTransparentSidePanel;
     private JCheckBox chkGameAudio;
     private JCheckBox chkTransparentChatbox;
@@ -160,6 +162,8 @@ public class DreamBotMenu extends JFrame {
     private JCheckBox chkLevelUpInterface;
     private JCheckBox chkLootNotifications;
 
+
+    private JCheckBox chkVisualEffects;
     // --- Theme ---
     private final Map<JComponent, Color> originalColors = new WeakHashMap<>();
     private final Color BG_BASE = new Color(12, 12, 12);
@@ -1058,18 +1062,21 @@ public class DreamBotMenu extends JFrame {
 
         ///  Define each setting group
         settingGroup.add(createClientPanel(), "Client");
+        settingGroup.add(createScriptPanel(), "Script");
         settingGroup.add(createActivitiesPanel(), "Activities");
         settingGroup.add(createAudioPanel(), "Audio");
         settingGroup.add(createChatPanel(), "Chat");
-        settingGroup.add(createDisplayPanel(), "Display");
         settingGroup.add(createControlsPanel(), "Controls");
+        settingGroup.add(createDisplayPanel(), "Display");
+        settingGroup.add(createGameplayPanel(), "Gameplay");
+        settingGroup.add(createInterfacesPanel(), "Interfaces");
         settingGroup.add(createWarningsPanel(), "Warnings");
 
         JPanel menuPanel = new JPanel(new GridLayout(10, 1, 0, 2));
         menuPanel.setPreferredSize(new Dimension(180, 0));
         menuPanel.setBackground(PANEL_SURFACE); menuPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, BORDER_DIM));
 
-        String[] groups = {"Client", "Display", "Audio", "Chat", "Controls", "Activities", "Warnings"};
+        String[] groups = {"Client", "Script", "Display", "Audio", "Chat", "Controls", "Activities", "Warnings"};
         ButtonGroup btnGroup = new ButtonGroup();
 
         for (String cat : groups) {
@@ -1952,6 +1959,14 @@ public class DreamBotMenu extends JFrame {
     ///  Define Client Settings sub-tab
     private JPanel createClientPanel() {
         return createSettingsGroup("Client",
+                chkDisableRendering = createSettingCheck("Disable Rendering", Client.isRenderingDisabled(), e -> {
+                    Client.setRenderingDisabled(((JCheckBox)e.getSource()).isSelected());
+                })
+        );
+    }
+
+    private JPanel createScriptPanel() {
+        return createSettingsGroup("Script",
                 settingClientChkStartScriptOnLoad = createSettingCheck("Start Script on Load",
                         startScriptOnLoad, e ->
                                 startScriptOnLoad = !settingClientChkStartScriptOnLoad.isSelected()
@@ -1961,10 +1976,6 @@ public class DreamBotMenu extends JFrame {
                         exitOnStopWarning, e ->
                                 exitOnStopWarning = !settingClientChkExitOnStopWarning.isSelected()
                 ),
-
-                chkDisableRendering = createSettingCheck("Disable Rendering", Client.isRenderingDisabled(), e -> {
-                    Client.setRenderingDisabled(((JCheckBox)e.getSource()).isSelected());
-                }),
 
                 chkAutoSave = createSettingCheck("Auto Save", true, e -> {
                     // Check the ACTUAL checkmark state
@@ -1986,10 +1997,37 @@ public class DreamBotMenu extends JFrame {
     ///  Define Display Settings sub-tab
     private JPanel createDisplayPanel() {
         return createSettingsGroup("Display",
-                chkHideRoofs = createSettingCheck("Hide Roofs", ClientSettings.areRoofsHidden(), e ->
+                chkHideRoofs = createSettingCheck("Hide Roofs",
+                        ClientSettings.areRoofsHidden(), e ->
                         ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected())),
-                chkDataOrbs = createSettingCheck("Data orbs", ClientSettings.areDataOrbsEnabled(), e -> ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())),
-                chkTransparentSidePanel = createSettingCheck("Transparent side panel", ClientSettings.isTransparentSidePanelEnabled(), e -> ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))
+
+                chkTransparentSidePanel = createSettingCheck("Transparent side panel",
+                        ClientSettings.isTransparentSidePanelEnabled(), e ->
+                        ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))
+        );
+    }
+
+    ///  Define Gameplay Settings sub-tab
+    private JPanel createGameplayPanel() {
+        return createSettingsGroup("Gameplay",
+            chkDataOrbs = createSettingCheck("Show data orbs",
+                    ClientSettings.areDataOrbsEnabled(), e ->
+                    ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())
+            ),
+
+            chkAmmoPickingBehaviour = createSettingCheck("Ammo-picking behaviour",
+                    ClientSettings.isAmmoAutoEquipping(), e ->
+                    ClientSettings.toggleAmmoAutoEquipping(((JCheckBox)e.getSource()).isSelected())
+            )
+        );
+    }
+
+    ///  Define Interfaces Settings sub-tab
+    private JPanel createInterfacesPanel() {
+        return createSettingsGroup("Interfaces",
+                chkDataOrbs = createSettingCheck("Show data orbs",
+                        ClientSettings.areDataOrbsEnabled(), e ->
+                        ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected()))
         );
     }
 
@@ -2003,23 +2041,35 @@ public class DreamBotMenu extends JFrame {
     ///  Define Chat Settings sub-tab
     private JPanel createChatPanel() {
         return createSettingsGroup("Chat",
-                chkTransparentChatbox = createSettingCheck("Transparent chatbox", ClientSettings.isTransparentChatboxEnabled(), e -> ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected())),
-                chkClickThroughChatbox = createSettingCheck("Click through chatbox", ClientSettings.isClickThroughChatboxEnabled(), e -> ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected()))
+                chkTransparentChatbox = createSettingCheck("Transparent chatbox",
+                        ClientSettings.isTransparentChatboxEnabled(), e ->
+                        ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected())),
+
+                chkClickThroughChatbox = createSettingCheck("Click through chatbox",
+                        ClientSettings.isClickThroughChatboxEnabled(), e ->
+                        ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected()))
         );
     }
 
     ///  Define Controls Settings sub-tab
     private JPanel createControlsPanel() {
         return createSettingsGroup("Controls",
-                chkShiftClickDrop = createSettingCheck("Shift click drop", ClientSettings.isShiftClickDroppingEnabled(), e -> ClientSettings.toggleShiftClickDropping(((JCheckBox)e.getSource()).isSelected())),
-                chkEscClosesInterface = createSettingCheck("Esc closes interface", ClientSettings.isEscInterfaceClosingEnabled(), e -> ClientSettings.toggleEscInterfaceClosing(((JCheckBox)e.getSource()).isSelected()))
+                chkShiftClickDrop = createSettingCheck("Shift click drop",
+                        ClientSettings.isShiftClickDroppingEnabled(), e ->
+                        ClientSettings.toggleShiftClickDropping(((JCheckBox)e.getSource()).isSelected())),
+
+                chkEscClosesInterface = createSettingCheck("Esc closes interface",
+                        ClientSettings.isEscInterfaceClosingEnabled(), e ->
+                        ClientSettings.toggleEscInterfaceClosing(((JCheckBox)e.getSource()).isSelected()))
         );
     }
 
     ///  Define Activities Settings sub-tab
     private JPanel createActivitiesPanel() {
         return createSettingsGroup("Activities",
-                chkLevelUpInterface = createSettingCheck("Level-up interface", ClientSettings.isLevelUpInterfaceEnabled(), e -> ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected()))
+                chkLevelUpInterface = createSettingCheck("Level-up interface",
+                        ClientSettings.isLevelUpInterfaceEnabled(), e ->
+                        ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected()))
         );
     }
 
@@ -2027,7 +2077,9 @@ public class DreamBotMenu extends JFrame {
     private JPanel createWarningsPanel() {
         return createSettingsGroup(
                 "Warnings",
-                chkLootNotifications = createSettingCheck("Loot notifications", ClientSettings.areLootNotificationsEnabled(), e -> ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected()))
+                chkLootNotifications = createSettingCheck("Loot notifications",
+                        ClientSettings.areLootNotificationsEnabled(), e ->
+                        ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected()))
         );
     }
 
