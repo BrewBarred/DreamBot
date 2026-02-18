@@ -90,7 +90,7 @@ public class DreamBotMenu extends JFrame {
      * Flag to stop the snap-back from re-triggered listeners
      */
     private boolean isReverting = false;
-    private final int TOAST_DELAY = 300;
+    private final int TOAST_DELAY = 450;
 
     private final AbstractScript script;
     private final JPanel sidePanel;
@@ -515,17 +515,12 @@ public class DreamBotMenu extends JFrame {
 
         ///  Create Task List remove button
         JButton btnTaskListRemove = createStyledBtn("Remove", COLOR_RED);
+        // disable remove button when nothing is selected
         btnTaskListRemove.setEnabled(listTaskList.getSelectedIndex() != -1);
-        btnTaskListRemove.addActionListener(e -> {
-            int selectedIndex = listTaskList.getSelectedIndex();
-            if (selectedIndex != -1) {
-                modelTaskList.remove(selectedIndex);
-                showToast("Removed task!", btnTaskListRemove, true);
-                refreshTaskList();
-            } else {
-                showToast("Select a Task to remove!", btnTaskListRemove, false);
-            }
-        });
+
+        btnTaskListRemove.addActionListener(e ->
+            removeTask(listTaskList, modelTaskList, btnTaskListRemove)
+        );
 
         ///  Create Task List edit button
         JButton btnTaskListView = createStyledBtn("View in builder...", COLOR_GREY);
@@ -861,6 +856,19 @@ public class DreamBotMenu extends JFrame {
             btnTaskBuilderRemove.setEnabled(!listTaskBuilder.isSelectionEmpty());
         });
 
+        listTaskBuilder.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    int selectedIndex = listTaskBuilder.getSelectedIndex();
+                    if (selectedIndex != -1) {
+                        modelTaskBuilder.remove(selectedIndex);
+                        showToast("Action removed!", btnTaskBuilderRemove, true);
+                        refreshTaskBuilderTab();
+                    }
+                }
+            }
+        });
+
         // create reset button to reset task builder inputs, ready for next task to be created
         JButton btnTaskBuilderReset = createStyledBtn("Reset", new Color(50, 50, 50));
         btnTaskBuilderReset.addActionListener(e -> {
@@ -963,6 +971,18 @@ public class DreamBotMenu extends JFrame {
 
 
         return panelTaskBuilder;
+    }
+
+    public void removeTask(JList<Task> list, DefaultListModel<Task> model, JButton btn) {
+        int selectedIndex = list.getSelectedIndex();
+        if (selectedIndex != -1) {
+            model.remove(selectedIndex);
+            showToast("Removed task!", btn, true);
+        } else {
+            showToast("Select a Task to remove!", btn, false);
+        }
+
+        refreshTaskList();
     }
 
     private Task createTask(List<Action> actions) {
@@ -2140,7 +2160,21 @@ public class DreamBotMenu extends JFrame {
     }
 
     private JToggleButton createMenuButton(String text) { JToggleButton btn = new JToggleButton(text) { protected void paintComponent(Graphics g) { g.setColor(isSelected() ? TAB_SELECTED : PANEL_SURFACE); g.fillRect(0, 0, getWidth(), getHeight()); super.paintComponent(g); } }; btn.setFocusPainted(false); btn.setContentAreaFilled(false); btn.setForeground(TEXT_MAIN); btn.setFont(new Font("Segoe UI", Font.BOLD, 14)); btn.setHorizontalAlignment(SwingConstants.LEFT); btn.setBorder(new EmptyBorder(0, 20, 0, 0)); return btn; }
-    private JPanel createSkillTile(SkillData data) { JPanel tile = new JPanel(new GridBagLayout()); tile.setBackground(PANEL_SURFACE); tile.setBorder(new LineBorder(BORDER_DIM)); GridBagConstraints gbc = new GridBagConstraints(); gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.gridx = 0; JPanel top = new JPanel(new BorderLayout()); top.setOpaque(false); JLabel icon = new JLabel(loadSkillIcon(data.skill)); data.lblLevel.setForeground(COLOR_BLOOD); data.lblLevel.setFont(new Font("Arial", Font.BOLD, 18)); top.add(icon, BorderLayout.WEST); top.add(data.lblLevel, BorderLayout.EAST); data.lblXpString.setForeground(TEXT_DIM); data.lblXpString.setFont(new Font("Monospaced", Font.PLAIN, 10)); data.mainBar.setForeground(COLOR_BLOOD); data.mainBar.setBackground(Color.BLACK); gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1; tile.add(data.lblXpString, gbc); gbc.gridy = 2; tile.add(data.mainBar, gbc); tile.addMouseListener(new MouseAdapter() { @Override public void mousePressed(MouseEvent e) { data.isTracking = !data.isTracking; tile.setBorder(new LineBorder(data.isTracking ? COLOR_BLOOD : BORDER_DIM, 1)); refreshTrackerList(); } }); return tile; }
+
+    private JPanel createSkillTile(SkillData data) { JPanel tile = new JPanel(new GridBagLayout()); tile.setBackground(PANEL_SURFACE); tile.setBorder(new LineBorder(BORDER_DIM)); GridBagConstraints gbc = new GridBagConstraints(); gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.gridx = 0; JPanel top = new JPanel(new BorderLayout()); top.setOpaque(false); JLabel icon = new JLabel(loadSkillIcon(data.skill)); data.lblLevel.setForeground(COLOR_BLOOD); data.lblLevel.setFont(new Font("Arial", Font.BOLD, 18)); top.add(icon, BorderLayout.WEST); top.add(data.lblLevel, BorderLayout.EAST); data.lblXpString.setForeground(TEXT_DIM); data.lblXpString.setFont(new Font("Monospaced", Font.PLAIN, 10)); data.mainBar.setForeground(COLOR_BLOOD); data.mainBar.setBackground(Color.BLACK); gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1; tile.add(data.lblXpString, gbc); gbc.gridy = 2; tile.add(data.mainBar, gbc);
+        tile.addMouseListener(new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent e) {
+                if (e.getButton() == MouseEvent.BUTTON1) {
+                    data.isTracking = !data.isTracking;
+                    tile.setBorder(new LineBorder(data.isTracking ? COLOR_BLOOD : BORDER_DIM, 1));
+                    refreshTrackerList();
+                }
+            }
+        });
+
+        return tile;
+    }
+
     private void refreshTrackerList() { trackerList.removeAll(); skillRegistry.values().stream().filter(d -> d.isTracking).forEach(d -> { trackerList.add(d.trackerPanel); trackerList.add(Box.createRigidArea(new Dimension(0, 10))); }); trackerList.add(Box.createVerticalGlue()); trackerList.revalidate(); trackerList.repaint(); }
 
     public void updateAll() {
