@@ -140,13 +140,16 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
                 if (currentTask.getActions() != null) {
                     // for each action in this task
                     for (DreamBotMenu.Action action : currentTask.getActions()) {
-                        // execute an action in this task
+                        if (action == null){ //|| action.actionType == null) {
+                            Logger.log("Skipping null/invalid action in task: " + currentTask.getName());
+                            continue;
+                        }
+
                         if (!action.execute()) {
-                            // if the action didn't return true (complete), mark task incomplete
                             taskComplete = false;
                             break;
                         }
-                        // call after action func to perform logic after each action within each task
+
                         if (!postAction())
                             throw new Exception("Error executing after action logic!");
                     }
@@ -159,7 +162,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
 
         } catch (Exception e) {
             String error = e.getMessage();
-            Logger.log(error.isEmpty() ? "Error executing main loop!" : error);
+            Logger.log(error != null && error.isEmpty() ? "Error executing main loop!" : error);
             e.printStackTrace();
         }
 
@@ -223,7 +226,6 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     @Override
     public final void stop() {
         super.stop();
-
         postStop();
     }
 
@@ -237,12 +239,6 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
         log("Fetching player data for " + name);
         menu.updateAll();
     }
-
-
-
-
-
-
 
     @Override
     public final boolean isUserVIP() {

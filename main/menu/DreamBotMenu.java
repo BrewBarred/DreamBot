@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
+import com.google.gson.annotations.SerializedName;
 import com.google.gson.reflect.TypeToken;
 import main.managers.DataMan;
 import org.dreambot.api.Client;
@@ -66,7 +67,6 @@ public class DreamBotMenu extends JFrame {
     // --- Script ---
     public boolean startScriptOnLoad;
     public boolean exitOnStopWarning;
-    public boolean enableVisualEffects;
     /**
      * Timer used to rapidly refresh the GUI to keep it updated.
      * <p>
@@ -90,7 +90,7 @@ public class DreamBotMenu extends JFrame {
      * Flag to stop the snap-back from re-triggered listeners
      */
     private boolean isReverting = false;
-    private final int TOAST_DELAY = 450;
+    private final int TOAST_DELAY = 300;
 
     private final AbstractScript script;
     private final JPanel sidePanel;
@@ -141,7 +141,7 @@ public class DreamBotMenu extends JFrame {
 
     private JList<String> nearbyList;
     private JTextArea libraryEditorArea, consoleArea;
-    private JTextField taskNameInput, taskDescriptionInput, taskStatusInput, manualTargetInput, consoleSearch;
+    private JTextField taskNameInput, taskDescriptionInput, taskStatusInput, inputTargetName, consoleSearch;
     private JComboBox<ActionType> actionCombo;
     private JButton btnPlayPause, btnInputToggle, btnCaptureToggle;
 
@@ -858,13 +858,20 @@ public class DreamBotMenu extends JFrame {
 
         listTaskBuilder.addMouseListener(new MouseAdapter() {
             public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    int selectedIndex = listTaskBuilder.getSelectedIndex();
-                    if (selectedIndex != -1) {
-                        modelTaskBuilder.remove(selectedIndex);
-                        showToast("Action removed!", btnTaskBuilderRemove, true);
-                        refreshTaskBuilderTab();
-                    }
+                int selectedIndex = listTaskBuilder.getSelectedIndex();
+                if (selectedIndex == -1)
+                    return;
+
+                if (e.getClickCount() == 1) {
+                    // Pre-fill the action type and target name inputs from the selected action
+                    loadIntoBuilder(modelTaskBuilder.getElementAt(selectedIndex));
+                } else if (e.getClickCount() == 2) {
+                    // Remove all selected actions
+                    int[] selected = listTaskBuilder.getSelectedIndices();
+                    for (int i = selected.length - 1; i >= 0; i--)
+                        modelTaskBuilder.remove(selected[i]);
+                    showToast("Removed " + selected.length + " action(s)!", btnTaskBuilderRemove, true);
+                    refreshTaskBuilderTab();
                 }
             }
         });
@@ -892,18 +899,20 @@ public class DreamBotMenu extends JFrame {
         config.setOpaque(false);
         actionCombo = new JComboBox<>(ActionType.values());
         styleComp(actionCombo);
-        actionCombo.addActionListener(e -> scanNearbyTargets());
-        manualTargetInput = new JTextField(); styleComp(manualTargetInput);
+        actionCombo.addActionListener(e -> {
+            scanNearbyTargets();
+        });
+        inputTargetName = new JTextField(); styleComp(inputTargetName);
         config.add(new JLabel("Select action:"));
         config.add(actionCombo);
         config.add(new JLabel("Target name:"));
-        config.add(manualTargetInput);
+        config.add(inputTargetName);
 
         JButton btnTaskBuilderAdd = createStyledBtn("Add to builder...", COLOR_ORANGE);
         btnTaskBuilderAdd.addActionListener(e -> {
-            if(!manualTargetInput.getText().isEmpty()) {
+            if(!inputTargetName.getText().isEmpty()) {
                 modelTaskBuilder.addElement(
-                        new Action((ActionType) actionCombo.getSelectedItem(), manualTargetInput.getText())
+                        new Action((ActionType) actionCombo.getSelectedItem(), inputTargetName.getText())
                 );
                 showToast("Added action to builder!", btnTaskBuilderAdd, true);
                 refreshTaskBuilderTab(true);
@@ -924,7 +933,7 @@ public class DreamBotMenu extends JFrame {
                     return;
                 // update target name on single click
                 if(e.getClickCount() == 1) {
-                    manualTargetInput.setText(val);
+                    inputTargetName.setText(val);
                 }
                 else if(e.getClickCount() == 2) {
                     modelTaskBuilder.addElement(new Action((ActionType) actionCombo.getSelectedItem(), val));
@@ -1116,7 +1125,7 @@ public class DreamBotMenu extends JFrame {
     }
 
     private void resetTaskBuilder() {
-        manualTargetInput.setText("");
+        inputTargetName.setText("");
 
         // clear task attribute inputs
         taskNameInput.setText("");
@@ -1173,14 +1182,15 @@ public class DreamBotMenu extends JFrame {
 
         // Copy to a final list for the thread block
         final List<String> sortedNames = names.stream().sorted().collect(Collectors.toList());
-        nearbyEntitiesModel.clear();
+        SwingUtilities.invokeLater(() -> { //TODO remove redundant? invoke later here
+            nearbyEntitiesModel.clear();
 
-        for (String name : sortedNames)
-            nearbyEntitiesModel.addElement(name);
+            for (String name : sortedNames)
+                nearbyEntitiesModel.addElement(name);
 
-        // Use your toast logic to confirm it finished
-        showToast("Found " + sortedNames.size() + " targets", btnTaskBuilderScanNearby, true);
-        showToast("Found " + sortedNames.size() + " targets", btnTaskBuilderAddToLibrary, true);
+            // Use your toast logic to confirm it finished
+            showToast("Found " + sortedNames.size() + " targets", btnTaskBuilderScanNearby, true);
+        });
     }
 
     // --- Inner Classes ---
@@ -1256,23 +1266,24 @@ public class DreamBotMenu extends JFrame {
     }
 
     public static class Action {
-        public ActionType type;
+        @SerializedName("type")
+        public ActionType actionType;
         public String target;
 
         public Action(ActionType t, String target) {
-            this.type = t;
+            this.actionType = t;
             this.target = target;
         }
 
         // copy-cat constructor
         public Action(Action other) {
-            this.type = other.type;
+            this.actionType = other.actionType;
             this.target = other.target;
         }
 
         //TODO copy how CHOP has been done then extract out into their own action classes maybe?
         public boolean execute() {
-            switch (type) {
+            switch (actionType) {
                 case CHOP:
                     // find the nearest target tree
                     GameObject tree = GameObjects.closest(target);
@@ -1310,11 +1321,11 @@ public class DreamBotMenu extends JFrame {
                     return Inventory.dropAll(target);
 
                 default:
-                    Logger.log("Action " + type + " not implemented in Action.execute()");
+                    Logger.log("Action " + actionType + " not implemented in Action.execute()");
                     return false;
             }
         }
-        @Override public String toString() { return type.name() + " -> " + target; }
+        @Override public String toString() { return actionType.name() + " -> " + target; }
     }
 
     public void showToast(String message, JComponent anchor, boolean success) {
@@ -1531,7 +1542,7 @@ public class DreamBotMenu extends JFrame {
                     taskNameInput.setText(snap.taskName != null ? snap.taskName : "");
                     taskDescriptionInput.setText(snap.taskDescription != null ? snap.taskDescription : "");
                     taskStatusInput.setText(snap.taskStatus != null ? snap.taskStatus : "");
-                    manualTargetInput.setText(snap.targetName != null ? snap.targetName : "");
+                    inputTargetName.setText(snap.targetName != null ? snap.targetName : "");
                     if (snap.selectedAction != null && !snap.selectedAction.isEmpty()) {
                         try {
                             actionCombo.setSelectedItem(ActionType.valueOf(snap.selectedAction));
@@ -1753,14 +1764,22 @@ public class DreamBotMenu extends JFrame {
         revertTimer.start();
     }
 
-    private void loadIntoBuilder(Task t) {
-        if(t == null)
+    private void loadIntoBuilder(Task task) {
+        if(task == null)
             return;
 
-        taskNameInput.setText(t.name);
-        taskDescriptionInput.setText(t.description);
-        taskStatusInput.setText(t.status);
-        modelTaskBuilder.clear(); t.actions.forEach(modelTaskBuilder::addElement);
+        taskNameInput.setText(task.name);
+        taskDescriptionInput.setText(task.description);
+        taskStatusInput.setText(task.status);
+        modelTaskBuilder.clear(); task.actions.forEach(modelTaskBuilder::addElement);
+    }
+
+    private void loadIntoBuilder(Action action) {
+        if (action == null)
+            return;
+
+        actionCombo.setSelectedItem(action.actionType);
+        inputTargetName.setText(action.target);
     }
 
     private JPanel createHeaderPanel() {
@@ -1810,7 +1829,7 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    private void stopScript() {
+    private final void stopScript() {
         //TODO see if this needs to be called from Dream Bot when children call stop()?
         if (!exitOnStopWarning || JOptionPane.showConfirmDialog(this, "This may result in the loss of unsaved changes.\nAre you sure you want to exit?") == JOptionPane.YES_OPTION) {
             script.stop();
@@ -2268,7 +2287,7 @@ public class DreamBotMenu extends JFrame {
         snapshot.taskStatus = taskStatusInput != null ? taskStatusInput.getText() : "";
         snapshot.selectedAction = actionCombo != null && actionCombo.getSelectedItem() != null
                 ? actionCombo.getSelectedItem().toString() : "";
-        snapshot.targetName = manualTargetInput != null ? manualTargetInput.getText() : "";
+        snapshot.targetName = inputTargetName != null ? inputTargetName.getText() : "";
         snapshot.actions = new ArrayList<>();
         for (int i = 0; i < modelTaskBuilder.getSize(); i++)
             snapshot.actions.add(modelTaskBuilder.getElementAt(i));
