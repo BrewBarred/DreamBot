@@ -738,25 +738,24 @@ public class DreamBotMenu extends JFrame {
     }
 
     private void refreshTaskListTab(int index) {
-        if (modelTaskList.isEmpty())
-            return;
+        // ignore empty lists (but still refresh them in case of update after removal)
+        if (!modelTaskList.isEmpty()) {
+            // get the selected index (prefer passed index, default to selected, resort to first item worst case
+            int selected = index >= 0 ? index : listTaskList.getSelectedIndex();
+            // ensure index is still within bounds of list model
+            if (selected >= 0 && selected < modelTaskList.size())
+                listTaskList.setSelectedIndex(selected);
 
-        // get the selected index (prefer passed index, default to selected, resort to first item worst case
-        // (empty lists don't get this far))
-        int selected = index >= 0 ? index : listTaskList.getSelectedIndex();
-        // ensure index is still within bounds of list model
-        if (selected >= 0 && selected < modelTaskList.size())
-            listTaskList.setSelectedIndex(selected);
-
-        // refresh preset button labels
-        refreshPresetButtonLabels();
+            // refresh preset button labels
+            refreshPresetButtonLabels();
+        }
 
         // repaint the whole tab to finalize gui update
         listTaskList.repaint();
     }
 
     private void refreshTaskListTab() {
-        listTaskList.repaint();
+        refreshTaskListTab(-1);
     }
 
     private void refreshTaskLibrary() {
@@ -1496,7 +1495,6 @@ public class DreamBotMenu extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 if (rawJson != null)
                     unpackTaskList(rawJson);
-                refreshTaskListTab();
             });
         }).start();
     }
@@ -1508,7 +1506,6 @@ public class DreamBotMenu extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 if (rawJson != null)
                     unpackTaskLibrary(rawJson);
-                refreshTaskLibrary();
             });
         }).start();
     }
@@ -2519,6 +2516,33 @@ public class DreamBotMenu extends JFrame {
         btnPageUp.setPreferredSize(new Dimension(30, 0));
         btnPageUp.setEnabled(false);
 
+        /*
+         * Listener for navigating to the previous page of presets.
+         * Decrements the page index and updates UI state, or flashes if already at the first page.
+         */
+        btnPageUp.addActionListener(e -> {
+            // if this is not the first page
+            if (currentPresetPage > 0) {
+                // move to the previous page
+                currentPresetPage--;
+
+                // if we are now on the first page, disable back navigation
+                if (currentPresetPage == 0)
+                    btnPageUp.setEnabled(false);
+
+                // update button labels to refresh names/colors
+                refreshPresetButtonLabels();
+                showToast("Page " + (currentPresetPage + 1), btnPageUp, true);
+            } else {
+                // Visual feedback for invalid navigation attempt
+                flashControl(btnPageUp, COLOR_RED);
+            }
+        });
+
+        /*
+         * Listener for navigating to the next page of presets.
+         * Increments the page index if expansion is possible; otherwise, triggers a warning toast.
+         */
         btnPageDown.addActionListener(e -> {
             if (canExpandPresets()) {
                 currentPresetPage++;
@@ -2526,22 +2550,13 @@ public class DreamBotMenu extends JFrame {
                 refreshPresetButtonLabels();
                 showToast("Page " + (currentPresetPage + 1), btnPageDown, true);
             } else {
+                // Determine if failure is due to hard limit or empty slots on current page
                 String message = (currentPresetPage + 1) * 4 >= MAX_PRESETS ?
                         String.format("Max presets reached! (%d)", MAX_PRESETS)
-                                    : "Fill current slots first!";
+                        : "Fill current slots first!";
 
                 showToast(message, btnPageDown, false);
             }
-        });
-
-        btnPageUp.addActionListener(e -> {
-            if (currentPresetPage > 0) {
-                currentPresetPage--;
-                if (currentPresetPage == 0)
-                    btnPageUp.setEnabled(false);
-                refreshPresetButtonLabels();
-                showToast("Page " + (currentPresetPage + 1), btnPageUp, true);
-            } else flashControl(btnPageUp, COLOR_RED);
         });
 
         nav.add(btnPageUp);
