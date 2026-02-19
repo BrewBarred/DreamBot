@@ -44,6 +44,11 @@ import java.util.stream.Collectors;
  */
 public class DreamBotMenu extends JFrame {
     private static final int PRESET_COLUMNS = 4;
+    /**
+     * The amount of time (ms) before the status is automatically reverted to the {@link #DEFAULT_STATUS_STRING}
+     */
+    private static final int DEFAULT_STATUS_RESET_DELAY = 3000;
+    private static final String DEFAULT_STATUS_STRING = "Day-dreaming...";
     //TODO SETTINGS:
     ///  DEV Settings:
     ///
@@ -301,6 +306,7 @@ public class DreamBotMenu extends JFrame {
                     // refresh GUI every n seconds
                     updateUI()
             );
+            uiTimer.start();
 
             ///  Start another timer to scan for nearby targets every n seconds while task builder is open.
             scanTimer = new Timer(4000, e -> {
@@ -308,6 +314,7 @@ public class DreamBotMenu extends JFrame {
                 if (mainTabs.getSelectedIndex() == 2)
                     scanNearbyTargets();
             });
+            scanTimer.start();
 
             ///  Start a third timer to auto-save everything periodically
             saveTimer = new Timer(60000, e -> {
@@ -315,10 +322,8 @@ public class DreamBotMenu extends JFrame {
                 if (chkAutoSave != null && chkAutoSave.isSelected())
                     saveAll();
             });
-
-            uiTimer.start();
-            scanTimer.start();
             saveTimer.start();
+
         });
 
         setVisible(true);
@@ -406,7 +411,20 @@ public class DreamBotMenu extends JFrame {
     }
 
     public void setLabelStatus(String text) {
-        SwingUtilities.invokeLater(() -> lblStatus.setText(text));
+        SwingUtilities.invokeLater(() -> {
+            lblStatus.setText(text);
+            // start a timer after the default status reset delay
+            Timer timer = new Timer(DEFAULT_STATUS_RESET_DELAY, e -> {
+                // if by the time this timer is triggered, the text has not changed
+                if (lblStatus.getText().equals(text))
+                    // revert the text back to the default status string
+                    lblStatus.setText(DEFAULT_STATUS_STRING);
+            });
+
+            // disable repeats to prevent multiple calls of the same action, i think??
+            timer.setRepeats(false);
+            timer.start();
+        });
     }
 
     public void incrementExecutionIndex() {
@@ -1474,6 +1492,7 @@ public class DreamBotMenu extends JFrame {
                     isToastProcessing = false;
                     processNextToast();
                 });
+
                 timer.setRepeats(false);
                 timer.start();
             } catch (Exception e) {
@@ -1516,7 +1535,6 @@ public class DreamBotMenu extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 if (rawJson != null)
                     unpackTaskBuilder(rawJson);
-                refreshTaskBuilderTab();
             });
         }).start();
     }
@@ -1566,13 +1584,13 @@ public class DreamBotMenu extends JFrame {
                             modelTaskList.addElement(task);
                         }
                         refreshTaskListTab();
-                        Logger.log("Successfully loaded " + modelTaskList.size() + " tasks into the task list.");
+                        Logger.log("Successfully unpacked " + modelTaskList.size() + " tasks into the Task List");
                     });
                 }
             }
             listTaskList.repaint();
         } catch (Exception e) {
-            Logger.log(Logger.LogType.ERROR, "Failed to unpack task list data: " + e.getMessage());
+            Logger.log(Logger.LogType.ERROR, "Failed to unpack Task List data: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -1606,13 +1624,13 @@ public class DreamBotMenu extends JFrame {
                             modelTaskLibrary.addElement(task);
                         }
                         refreshTaskLibrary();
-                        Logger.log("Unpacked " + modelTaskLibrary.size() + " tasks into Task Library.");
+                        Logger.log("Successfully unpacked " + modelTaskLibrary.size() + " tasks into Task Library");
                     });
                 }
             }
             listTaskLibrary.repaint();
         } catch (Exception e) {
-            Logger.log(Logger.LogType.ERROR, "Failed to unpack library: " + e.getMessage());
+            Logger.log(Logger.LogType.ERROR, "Failed to unpack Task Library data: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -1639,16 +1657,19 @@ public class DreamBotMenu extends JFrame {
                     taskDescriptionInput.setText(snap.taskDescription != null ? snap.taskDescription : "");
                     taskStatusInput.setText(snap.taskStatus != null ? snap.taskStatus : "");
                     inputTargetName.setText(snap.targetName != null ? snap.targetName : "");
+
                     if (snap.selectedAction != null && !snap.selectedAction.isEmpty()) {
                         try {
                             actionCombo.setSelectedItem(ActionType.valueOf(snap.selectedAction));
                         } catch (Exception ignored) {}
                     }
-                    Logger.log(Logger.LogType.SCRIPT, "Unpacked builder snapshot successfully.");
+
+                    refreshTaskBuilderTab();
+                    Logger.log(Logger.LogType.SCRIPT, "Successfully unpacked Task Builder data");
                 });
             }
         } catch (Exception e) {
-            Logger.log(Logger.LogType.ERROR, "Failed to unpack builder: " + e.getMessage());
+            Logger.log(Logger.LogType.ERROR, "Failed to unpack Task Builder data: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -1797,9 +1818,12 @@ public class DreamBotMenu extends JFrame {
                     }
                 }
 
-                // Add any other ClientSettings checks here following the same pattern...
+                // TODO Add any other ClientSettings checks here following the same pattern...
 
-            } catch (InterruptedException ignored) {
+            } catch (InterruptedException e) {
+                Logger.log(Logger.LogType.ERROR, "Error synchronizing in-game settings!");
+                e.printStackTrace();
+
             } finally {
                 isSettingProcessing = false;
                 setLabelStatus("Status: Profile Synced!");
