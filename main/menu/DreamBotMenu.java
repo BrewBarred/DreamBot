@@ -43,6 +43,7 @@ import java.util.stream.Collectors;
  * @version 15.0.0-Elite
  */
 public class DreamBotMenu extends JFrame {
+    private static final int PRESET_COLUMNS = 4;
     //TODO SETTINGS:
     ///  DEV Settings:
     ///
@@ -546,19 +547,22 @@ public class DreamBotMenu extends JFrame {
         });
 
         listTaskList.addMouseListener(new MouseAdapter() {
+            @Override
             public void mouseClicked(MouseEvent e) {
-                int selectedIndex = listTaskList.getSelectedIndex();
+                // get the index based on the specific mouse coordinates
+                int index = listTaskList.locationToIndex(e.getPoint());
 
-                // return early if no task is currently selected in the task library
-                if (selectedIndex == -1)
-                    return;
+                // ensure the index is valid and the click bounds actually contain that item
+                if (index != -1 && listTaskList.getCellBounds(index, index).contains(e.getPoint())) {
 
-                if (e.getClickCount() == 1) {
-                    // TODO add logic to view task information? Perhaps, loop count, description, end condition, and maybe a live-action-chain? action1 -> action2 -> action3
+                    if (e.getClickCount() == 1) {
+                        // TODO add logic to view task information? Perhaps, loop count, description, end condition, and maybe a live-action-chain? action1 -> action2 -> action3
+                    }
+
+                    // only trigger if it's a double-click AND Shift is NOT being held
+                    if (e.getClickCount() == 2 && !e.isShiftDown())
+                        removeTask(listTaskList, modelTaskList, btnTaskListRemove);
                 }
-
-                if (e.getClickCount() == 2)
-                    removeTask(listTaskList, modelTaskList, btnTaskListRemove);
             }
         });
 
@@ -733,9 +737,25 @@ public class DreamBotMenu extends JFrame {
         return panelLibraryTab;
     }
 
+    private void refreshTaskListTab(int index) {
+        if (modelTaskList.isEmpty())
+            return;
+
+        // get the selected index (prefer passed index, default to selected, resort to first item worst case
+        // (empty lists don't get this far))
+        int selected = index >= 0 ? index : listTaskList.getSelectedIndex();
+        // ensure index is still within bounds of list model
+        if (selected >= 0 && selected < modelTaskList.size())
+            listTaskList.setSelectedIndex(selected);
+
+        // refresh preset button labels
+        refreshPresetButtonLabels();
+
+        // repaint the whole tab to finalize gui update
+        listTaskList.repaint();
+    }
+
     private void refreshTaskListTab() {
-        if (listTaskList.getSelectedValue() == null && !modelTaskList.isEmpty())
-            listTaskList.setSelectedIndex(modelTaskList.size() - 1);
         listTaskList.repaint();
     }
 
@@ -1046,6 +1066,7 @@ public class DreamBotMenu extends JFrame {
             // this get element is a dummy task which throws an error if index is invalid, which will trigger refresh methods
             model.getElementAt(selectedIndex);
             list.setSelectedIndex(selectedIndex);
+
         } catch (Exception e) {
             refreshTaskListTab();
             refreshTaskBuilderTab();
@@ -1924,6 +1945,7 @@ public class DreamBotMenu extends JFrame {
         b.setForeground(Color.WHITE);
         b.setFocusPainted(false);
         b.setBorder(new LineBorder(BORDER_DIM));
+
         return b;
     }
 
@@ -2481,9 +2503,8 @@ public class DreamBotMenu extends JFrame {
             presetButtons[i].addKeyListener(new KeyAdapter() {
                 @Override
                 public void keyPressed(KeyEvent e) {
-                    if (e.getKeyCode() == KeyEvent.VK_DELETE) {
+                    if (e.getKeyCode() == KeyEvent.VK_DELETE)
                         promptAndDeletePreset();
-                    }
                 }
             });
 
@@ -2541,36 +2562,79 @@ public class DreamBotMenu extends JFrame {
             allPresets.add(new Preset("Preset " + (allPresets.size() + 1), new ArrayList<>()));
         }
 
+        ///  Ctrl + shift click preset to rename
         if (ctrl && shift) {
             String newName = JOptionPane.showInputDialog(this, "Enter preset name:");
-            if (newName != null && !newName.trim().isEmpty()) {
+            if (newName != null && !newName.trim().isEmpty())
                 allPresets.get(actualIndex).name = newName.trim();
-                refreshPresetButtonLabels();
-            }
+
+        /// Shift click preset to save
         } else if (shift) {
             List<Task> currentTasks = new ArrayList<>();
-            for (int i = 0; i < modelTaskList.size(); i++) {
+
+            for (int i = 0; i < modelTaskList.size(); i++)
                 currentTasks.add(new Task(modelTaskList.getElementAt(i)));
-            }
+
             String currentName = allPresets.get(actualIndex).name;
             allPresets.set(actualIndex, new Preset(currentName, currentTasks));
-
+            // TODO decide whether or not to select the preset on save
             selectedPresetIndex = actualIndex; // Select it upon saving
+            refreshPresetButtonLabels();
             showToast("Saved to " + currentName, presetButtons[slot], true);
-            refreshPresetButtonLabels();
-        } else {
-            Preset p = allPresets.get(actualIndex);
-            selectedPresetIndex = actualIndex; // Always mark as selected when clicked
 
-            if (p.tasks.isEmpty()) {
-                showToast(p.name + " is empty!", presetButtons[slot], false);
+        /// Normal click to load
+        } else {
+            // fetch the selected preset object using the preset buttons index
+            Preset preset = allPresets.get(actualIndex);
+
+            if (preset.tasks.isEmpty()) {
+                showToast(preset.name + " is empty!", presetButtons[slot], false);
             } else {
+                // store the total task count for this set
+                int taskCount = 0;
+                // clear the old task
                 modelTaskList.clear();
-                for (Task t : p.tasks) modelTaskList.addElement(new Task(t));
-                showToast("Loaded: " + p.name, presetButtons[slot], true);
+
+                // load in the preset tasks
+                for (Task t : preset.tasks) {
+                    modelTaskList.addElement(new Task(t));
+                    taskCount++;
+                }
+
+                // inform the user that the preset has been loaded and how many tasks this set has.
+                loadPreset(actualIndex);
+                showToast("Loaded " + taskCount + " tasks from " + preset.name, presetButtons[slot], true);
             }
-            refreshPresetButtonLabels();
         }
+    }
+
+    private void loadPreset(int index) {
+        try {
+            ///  Fetch the preset object using the passed index
+            Preset p = allPresets.get(index);
+
+            ///  Validate the passed index
+            if (p == null)
+                throw new IndexOutOfBoundsException("Unable to index a null preset object!");
+
+            if (p.tasks.isEmpty())
+                throw new IndexOutOfBoundsException("Unable to index a empty preset object!");
+
+            ///  Perform the load operation
+            // update selected preset index
+            selectedPresetIndex = index;
+            // highlight the preset button by using index modulus preset_columns
+            int localButtonIndex = index % PRESET_COLUMNS;
+
+            // highlight the specific button from your array
+            presetButtons[localButtonIndex].setSelected(true);
+            refreshTaskListTab();
+
+        } catch (IndexOutOfBoundsException i) {
+            Logger.log(Logger.LogType.ERROR, i.getMessage());
+            i.printStackTrace();
+        }
+        
     }
 
     private void promptAndDeletePreset() {
