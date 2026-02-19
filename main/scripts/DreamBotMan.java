@@ -116,7 +116,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             // access the queue and return early if its invalid
             DefaultListModel<DreamBotMenu.Task> queue = menu.getModelTaskList();
             if (queue == null || queue.isEmpty()) {
-                menu.setLabelStatus("Status: Queue Empty");
+                menu.setStatus("Status: Queue Empty");
                 return 1000;
             }
 
@@ -133,7 +133,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             if (currentTask != null) {
                 // update status using task status field which is always the initial message to display
                 // (develops further as actions are executed)
-                menu.setLabelStatus("Status: " + currentTask.getStatus());
+                menu.setStatus("Status: " + currentTask.getStatus());
 
                 // if this task still has actions to complete
                 boolean taskComplete = true;

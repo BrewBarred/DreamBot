@@ -143,7 +143,7 @@ public class DreamBotMenu extends JFrame {
     private final JLabel totalLevelLabelP2P = new JLabel();
     private final JLabel totalLevelLabelF2P = new JLabel();
     private final JProgressBar statusProgress = new JProgressBar(0, 100);
-    private final JLabel lblStatus = new JLabel("Status: Idle");
+    private final JLabel lblStatus = new JLabel();
     private final JSpinner projectionSpinner;
     private final long startTime;
     private JButton btnTaskBuilderAddToLibrary;
@@ -391,6 +391,7 @@ public class DreamBotMenu extends JFrame {
         // --- Row 2: The Status Text (Below) ---
         lblStatus.setForeground(TEXT_DIM);
         lblStatus.setFont(new Font("Consolas", Font.PLAIN, 12));
+        setStatus("Waiting instructions...");
 
         gbc.gridy = 1;
         gbc.insets = new Insets(0, 2, 0, 0); // Slight left offset for text alignment
@@ -410,15 +411,15 @@ public class DreamBotMenu extends JFrame {
             listTaskList.repaint();
     }
 
-    public void setLabelStatus(String text) {
+    public void setStatus(String text) {
         SwingUtilities.invokeLater(() -> {
-            lblStatus.setText(text);
+            lblStatus.setText("Status: " + text);
             // start a timer after the default status reset delay
             Timer timer = new Timer(DEFAULT_STATUS_RESET_DELAY, e -> {
                 // if by the time this timer is triggered, the text has not changed
                 if (lblStatus.getText().equals(text))
                     // revert the text back to the default status string
-                    lblStatus.setText(DEFAULT_STATUS_STRING);
+                    lblStatus.setText("Status: " + DEFAULT_STATUS_STRING);
             });
 
             // disable repeats to prevent multiple calls of the same action, i think??
@@ -490,7 +491,7 @@ public class DreamBotMenu extends JFrame {
 
         /// SOUTH: Add bottom panel and delete task button
         // create status label/progress bar
-        lblStatus.setText("Status: Idle");
+        setStatus("Idle");
         lblStatus.setForeground(TEXT_MAIN);
 
         // create south panel with rows
@@ -1787,7 +1788,7 @@ public class DreamBotMenu extends JFrame {
         new Thread(() -> {
             // Guard the UI
             isSettingProcessing = true;
-            setLabelStatus("Status: Syncing profile...");
+            setStatus("Status: Syncing profile...");
 
             try {
                 // 1. Hide Roofs
@@ -1826,7 +1827,7 @@ public class DreamBotMenu extends JFrame {
 
             } finally {
                 isSettingProcessing = false;
-                setLabelStatus("Status: Profile Synced!");
+                setStatus("Status: Profile Synced!");
 
                 // FIX: Ensure Toast creation and UI updates happen on the EDT
                 SwingUtilities.invokeLater(() -> {
@@ -1917,12 +1918,12 @@ public class DreamBotMenu extends JFrame {
             script.getScriptManager().resume();
             btnPlayPause.setText("▮▮");
             isScriptPaused = false;
-            setLabelStatus("Status: Running");
+            setStatus("Status: Running");
         } else {
             script.getScriptManager().pause();
             btnPlayPause.setText("▶");
             isScriptPaused = true;
-            setLabelStatus("Status: Script paused");
+            setStatus("Status: Script paused");
         }
     }
 
@@ -2241,7 +2242,7 @@ public class DreamBotMenu extends JFrame {
 
             isSettingProcessing = true;
             String originalStatus = lblStatus.getText();
-            setLabelStatus("Status: Adjusting " + text + " ingame...");
+            setStatus("Status: Adjusting " + text + " ingame...");
 
             new Thread(() -> {
                 try {
@@ -2257,7 +2258,7 @@ public class DreamBotMenu extends JFrame {
 
                     // Substance UI FIX: Move all UI feedback to the EDT
                     SwingUtilities.invokeLater(() -> {
-                        setLabelStatus(originalStatus);
+                        setStatus(originalStatus);
                         showToast(text + " updated!", c, true);
                     });
                 }
@@ -2290,7 +2291,7 @@ public class DreamBotMenu extends JFrame {
 
         new Thread(() -> {
             isDataLoading = true;
-            setLabelStatus("Status: Waiting for login...");
+            setStatus("Status: Waiting for login...");
 
             // 1. Wait for stable login
             while (!Client.isLoggedIn()) {
@@ -2337,7 +2338,7 @@ public class DreamBotMenu extends JFrame {
             if (!Client.isLoggedIn())
                 return;
 
-            setLabelStatus("Status: Autosaving...");
+            setStatus("Status: Autosaving...");
 
             dataMan.saveEverything(
                     listTaskList,
@@ -2349,7 +2350,7 @@ public class DreamBotMenu extends JFrame {
                     captureInventory(),
                     captureWorn(),
                     captureSkills(),
-                    () -> setLabelStatus("Status: Autosave complete!")
+                    () -> setStatus("Status: Autosave complete!")
             );
 
             Logger.log(Logger.LogType.INFO, "Autosaving all data columns...");
