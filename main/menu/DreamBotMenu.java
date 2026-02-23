@@ -56,7 +56,8 @@ public class DreamBotMenu extends JFrame {
 
     ///  THEME VARIABLES
     private final Color COLOR_BUTTON_TEXT = Color.WHITE;
-    private final Color COLOR_BUTTON_BACKGROUND = Color.GRAY;
+    private final Color COLOR_BUTTON_DEFAULT = Color.GRAY;
+    private final Color COLOR_BUTTON_RED = Color.RED;
 
     //TODO SETTINGS:
     ///  DEV Settings:
@@ -483,16 +484,7 @@ public class DreamBotMenu extends JFrame {
 
         // create task list navigation buttons (up/down arrows)
         JButton btnUp = createNavButton("▲");
-        btnUp.addActionListener(e -> {
-            //boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
-        });
-
         JButton btnDown = createNavButton("▼");
-        btnDown.addActionListener(e -> {
-            //boolean shiftPressed = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
-            boolean success = navigateQueue(1, listTaskList, modelTaskList);
-            flashControl(btnDown, success ? COLOR_SUCCESS : COLOR_FAILURE);
-        });
 
         // add navigation buttons (up/down arrows)
         west.add(btnUp);
@@ -512,20 +504,20 @@ public class DreamBotMenu extends JFrame {
         southButtons.setOpaque(false);
 
         ///  Create Task List save button
-        JButton btnTaskListSave = createNavButton("Save");
+        JButton btnTaskListSave = createButton("Save");
         btnTaskListSave.addActionListener(e -> {
-            this.makeToast("Saving...", btnTaskListSave, true);
+            this.showToast("Saving...", btnTaskListSave, true);
             saveAll();
         });
 
         ///  Create Task List duplicate button
-        JButton btnTaskListDuplicate = createNavButton("Duplicate");
+        JButton btnTaskListDuplicate = createButton("Duplicate");
         btnTaskListDuplicate.addActionListener(e -> {
             // create a new task using the selected value
             Task selected = listTaskList.getSelectedValue();
             if (selected == null) {
                 // return early if no tasks are currently selected
-                this.makeToast("Select a task first!", btnTaskListDuplicate, false);
+                this.showToast("Select a task first!", btnTaskListDuplicate, false);
                 return;
             }
 
@@ -534,23 +526,23 @@ public class DreamBotMenu extends JFrame {
             // add the duplicated task to the task list
             modelTaskList.addElement(task);
             // refresh the task list display
-            listTaskList.repaint();
-            this.makeToast("Duplication complete! Size: " + modelTaskList.size(), btnTaskListDuplicate, true);
+            //listTaskList.repaint();
+            this.showToast("Duplication complete! Size: " + modelTaskList.size(), btnTaskListDuplicate, true);
         });
 
         ///  Create Task List remove button
-        JButton btnTaskListRemove = createNavButton("Remove");
+        JButton btnTaskListRemove = createButton("Remove", COLOR_BUTTON_RED, null);
         // disable remove button when nothing is selected
         btnTaskListRemove.setEnabled(listTaskList.getSelectedIndex() != -1);
-        btnTaskListRemove.addActionListener(e ->
-                removeTask(listTaskList, modelTaskList, btnTaskListRemove)
-        );
+        btnTaskListRemove.addActionListener(e -> {
+            removeTask(listTaskList, modelTaskList, btnTaskListRemove);
+        });
 
         ///  Create Task List edit button
         JButton btnTaskListView = createNavButton("View in builder...");
         btnTaskListView.addActionListener(e -> {
             loadIntoBuilder(listTaskList.getSelectedValue());
-            this.makeToast("Moving to builder for viewing...", btnTaskListView, true);
+            this.showToast("Moving to builder for viewing...", btnTaskListView, true);
             // switch to tab 2 (3rd tab = Task Builder) to edit task
             mainTabs.setSelectedIndex(2);
         });
@@ -565,7 +557,7 @@ public class DreamBotMenu extends JFrame {
                 selectedPresetIndex = -1;
                 btnPageUp.setEnabled(false);
                 refreshPresetButtonLabels();
-                this.makeToast("System Reset Complete!", btnResetAllPresets, true);
+                this.showToast("System Reset Complete!", btnResetAllPresets, true);
             }
         });
 
@@ -657,12 +649,12 @@ public class DreamBotMenu extends JFrame {
         ///  Create Task Library save button
         JButton btnTaskLibrarySave = createButton("Save");
         btnTaskLibrarySave.addActionListener(e -> {
-            this.makeToast("Saving...", btnTaskLibrarySave, true);
+            this.showToast("Saving...", btnTaskLibrarySave, true);
             btnTaskLibrarySave.setEnabled(false);
 
             saveAll();
 
-            this.makeToast("Save success!", btnTaskLibrarySave, true);
+            this.showToast("Save success!", btnTaskLibrarySave, true);
             btnTaskLibrarySave.setEnabled(true);
         });
 
@@ -671,7 +663,7 @@ public class DreamBotMenu extends JFrame {
         btnTaskLibraryAdd.addActionListener(e -> {
             if(listTaskLibrary.getSelectedValue() != null) {
                 modelTaskList.addElement(listTaskLibrary.getSelectedValue());
-                this.makeToast("Added to position " + modelTaskList.size() + " of the queue", btnTaskLibraryAdd, true);
+                this.showToast("Added to position " + modelTaskList.size() + " of the queue", btnTaskLibraryAdd, true);
             }
         });
 
@@ -682,9 +674,9 @@ public class DreamBotMenu extends JFrame {
             int selectedIndex = listTaskLibrary.getSelectedIndex();
             if (selectedIndex != -1) {
                 modelTaskLibrary.remove(selectedIndex);
-                this.makeToast("Deleted Task!", btnTaskLibraryDelete, true);
+                this.showToast("Deleted Task!", btnTaskLibraryDelete, true);
             } else {
-                this.makeToast("Select an Action to delete!", btnTaskLibraryDelete, false);
+                this.showToast("Select an Action to delete!", btnTaskLibraryDelete, false);
             }
 
 
@@ -695,7 +687,7 @@ public class DreamBotMenu extends JFrame {
         JButton btnTaskLibraryEdit = createButton("View in builder...");
         btnTaskLibraryEdit.addActionListener(e -> {
             loadIntoBuilder(listTaskLibrary.getSelectedValue());
-            this.makeToast("Moving to builder for viewing...", btnTaskLibraryEdit, true);
+            this.showToast("Moving to builder for viewing...", btnTaskLibraryEdit, true);
             // switch to tab 2 (3rd tab = Task Builder) to edit task
             mainTabs.setSelectedIndex(2);
         });
@@ -719,7 +711,7 @@ public class DreamBotMenu extends JFrame {
                     // take a shallow copy of the selected task to pass it to the task list
                     Task task = modelTaskLibrary.getElementAt(selectedIndex);
                     modelTaskList.addElement(task);
-                    DreamBotMenu.this.makeToast("Added to queue position " + modelTaskList.size(), btnTaskLibraryAdd, true);
+                    DreamBotMenu.this.showToast("Added to queue position " + modelTaskList.size(), btnTaskLibraryAdd, true);
                     refreshTaskListTab();
                 }
             }
@@ -754,20 +746,24 @@ public class DreamBotMenu extends JFrame {
     }
 
     private void refreshTaskListTab(int index) {
+        Logger.log(Logger.LogType.ERROR, index);
         // ignore empty lists (but still refresh them in case of update after removal)
         if (!modelTaskList.isEmpty()) {
+            index = index == -1 ? listTaskList.getSelectedIndex(): -1;
+            Logger.log(Logger.LogType.ERROR, index);
             // get the selected index (prefer passed index, default to selected, resort to first item worst case
-            int selected = index >= 0 ? index : listTaskList.getSelectedIndex();
+            index = index == -1 ? 0 : index;
+            Logger.log(Logger.LogType.ERROR, index);
             // ensure index is still within bounds of list model
-            if (selected >= 0 && selected < modelTaskList.size())
-                listTaskList.setSelectedIndex(selected);
+            if (index >= 0 && index < modelTaskList.size())
+                listTaskList.setSelectedIndex(index);
 
-            // refresh preset button labels
-            refreshPresetButtonLabels();
+            Logger.log(Logger.LogType.ERROR, index);
         }
 
-        // repaint the whole tab to finalize gui update
-        listTaskList.repaint();
+        listTaskBuilder.ensureIndexIsVisible(index);
+        // refresh preset button labels
+        refreshPresetButtonLabels();
     }
 
     private void refreshTaskListTab() {
@@ -864,7 +860,7 @@ public class DreamBotMenu extends JFrame {
                 if (!exists) {
                     // Standard logic for a new task
                     modelTaskLibrary.addElement(task);
-                    this.makeToast("Added to library!", btnTaskBuilderAddToLibrary, true);
+                    this.showToast("Added to library!", btnTaskBuilderAddToLibrary, true);
                     resetTaskBuilder();
                 } else {
                     // Task name already exists, trigger the overwrite dialogue
@@ -884,11 +880,11 @@ public class DreamBotMenu extends JFrame {
                                 break;
                             }
                         }
-                        this.makeToast("Task updated!", btnTaskBuilderAddToLibrary, true);
+                        this.showToast("Task updated!", btnTaskBuilderAddToLibrary, true);
                         resetTaskBuilder();
                     } else {
                         // User clicked 'No'
-                        this.makeToast("Task creation failed!", btnTaskBuilderAddToLibrary, false);
+                        this.showToast("Task creation failed!", btnTaskBuilderAddToLibrary, false);
                     }
                 }
             }
@@ -909,22 +905,23 @@ public class DreamBotMenu extends JFrame {
         JButton btnDown = createButton("▼");
 
         JPanel navButtons = new JPanel(new GridLayout(0, 1, 0, 5));
-        navButtons.setOpaque(false);
-        navButtons.add(btnUp);
-        navButtons.add(btnDown);
+            navButtons.setOpaque(false);
+            navButtons.add(btnUp);
+            navButtons.add(btnDown);
 
-        JButton btnTaskBuilderRemove = createButton("Remove", new Color(100, 0, 0) , null);
-        btnTaskBuilderRemove.setEnabled(listTaskBuilder.getSelectedIndex() != -1);
-        btnTaskBuilderRemove.addActionListener(e -> {
-            int selectedIndex = listTaskBuilder.getSelectedIndex();
-            if (selectedIndex != -1) {
-                modelTaskBuilder.remove(selectedIndex);
-                this.makeToast("Action removed!", btnTaskBuilderRemove, true);
-                refreshTaskBuilderTab();
-            } else {
-                this.makeToast("You must select an action first!", btnTaskBuilderRemove, false);
-            }
-        });
+        JButton btnTaskBuilderRemove = createButton("Remove", COLOR_BUTTON_RED, null);
+            // disable remove button when nothing is selected
+            btnTaskBuilderRemove.setEnabled(listTaskBuilder.getSelectedIndex() != -1);
+            btnTaskBuilderRemove.addActionListener(e -> {
+                int selectedIndex = listTaskBuilder.getSelectedIndex();
+                if (selectedIndex != -1) {
+                    modelTaskBuilder.remove(selectedIndex);
+                    showToast("Action removed!", btnTaskBuilderRemove, true);
+                    refreshTaskBuilderTab();
+                } else {
+                    showToast("You must select an action first!", btnTaskBuilderRemove, false);
+                }
+            });
 
         listTaskBuilder.addListSelectionListener(e -> {
             btnTaskBuilderRemove.setEnabled(!listTaskBuilder.isSelectionEmpty());
@@ -944,7 +941,7 @@ public class DreamBotMenu extends JFrame {
                     int[] selected = listTaskBuilder.getSelectedIndices();
                     for (int i = selected.length - 1; i >= 0; i--)
                         modelTaskBuilder.remove(selected[i]);
-                    DreamBotMenu.this.makeToast("Removed " + selected.length + " action(s)!", btnTaskBuilderRemove, true);
+                    DreamBotMenu.this.showToast("Removed " + selected.length + " action(s)!", btnTaskBuilderRemove, true);
                     refreshTaskBuilderTab();
                 }
             }
@@ -953,7 +950,7 @@ public class DreamBotMenu extends JFrame {
         // create reset button to reset task builder inputs, ready for next task to be created
         JButton btnTaskBuilderReset = createButton("Reset", new Color(50, 50, 50), null);
         btnTaskBuilderReset.addActionListener(e -> {
-            this.makeToast("Task builder reset!", btnTaskBuilderReset, true);
+            this.showToast("Task builder reset!", btnTaskBuilderReset, true);
             resetTaskBuilder();
         });
 
@@ -988,10 +985,10 @@ public class DreamBotMenu extends JFrame {
                 modelTaskBuilder.addElement(
                         new Action((ActionType) actionCombo.getSelectedItem(), inputTargetName.getText())
                 );
-                this.makeToast("Added action to builder!", btnTaskBuilderAdd, true);
+                this.showToast("Added action to builder!", btnTaskBuilderAdd, true);
                 refreshTaskBuilderTab(true);
             } else {
-                this.makeToast("Enter a target name!", btnTaskBuilderAdd, false);
+                this.showToast("Enter a target name!", btnTaskBuilderAdd, false);
             }
         });
 
@@ -1012,7 +1009,7 @@ public class DreamBotMenu extends JFrame {
                 }
                 else if(e.getClickCount() == 2) {
                     modelTaskBuilder.addElement(new Action((ActionType) actionCombo.getSelectedItem(), val));
-                    DreamBotMenu.this.makeToast("Added action to builder!", btnTaskBuilderAdd, true);
+                    DreamBotMenu.this.showToast("Added action to builder!", btnTaskBuilderAdd, true);
                     refreshTaskBuilderTab(true);
                 }
             }
@@ -1025,7 +1022,7 @@ public class DreamBotMenu extends JFrame {
 
         JButton btnScanNearby = createButton("Scan nearby...");
         btnScanNearby.addActionListener(e -> {
-            this.makeToast("Scanning for nearby targets...",  btnScanNearby, true);
+            this.showToast("Scanning for nearby targets...",  btnScanNearby, true);
             scanNearbyTargets();
         });
 
@@ -1062,17 +1059,20 @@ public class DreamBotMenu extends JFrame {
             int selectedIndex = list.getSelectedIndex();
             if (selectedIndex != -1) {
                 model.remove(selectedIndex);
-                this.makeToast("Removed task!", btn, true);
+                list.ensureIndexIsVisible(selectedIndex);
+                showToast("Removed task!", btn, true);
             } else {
-                this.makeToast("Select a Task to remove!", btn, false);
+                showToast("Select a Task to remove!", btn, false);
             }
 
-            // this get element is a dummy task which throws an error if index is invalid, which will trigger refresh methods
-            model.getElementAt(selectedIndex);
-            list.setSelectedIndex(selectedIndex);
+            // set last index if possible
+            list.setSelectedIndex(model.getSize() - 1);
 
         } catch (Exception e) {
+            // refresh all lists to be safe
+            //TODO override list and perform these functions on the list themselves?
             refreshTaskListTab();
+            refreshTaskLibrary();
             refreshTaskBuilderTab();
         }
     }
@@ -1099,7 +1099,7 @@ public class DreamBotMenu extends JFrame {
             return new Task(name, description, actions, status);
 
         } catch (Exception e) {
-            this.makeToast(e.getMessage(), btnTaskBuilderAddToLibrary, false);
+            this.showToast(e.getMessage(), btnTaskBuilderAddToLibrary, false);
             return null;
         }
     }
@@ -1272,7 +1272,7 @@ public class DreamBotMenu extends JFrame {
                 nearbyEntitiesModel.addElement(name);
 
             // Use your toast logic to confirm it finished
-            this.makeToast("Found " + sortedNames.size() + " targets", btnTaskBuilderScanNearby, true);
+            this.showToast("Found " + sortedNames.size() + " targets", btnTaskBuilderScanNearby, true);
         });
     }
 
@@ -1421,7 +1421,7 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    public boolean makeToast(String toastText, JComponent component, boolean success) {
+    public boolean showToast(String toastText, JComponent component, boolean success) {
         if (toastText == null || component == null)
             throw new IllegalArgumentException("Error creating button! Invalid text or JComponent parameter(s).");
 
@@ -1777,7 +1777,7 @@ public class DreamBotMenu extends JFrame {
         new Thread(() -> {
             // Guard the UI
             isSettingProcessing = true;
-            setStatus("Status: Syncing profile...");
+            setStatus("Syncing profile...");
 
             try {
                 // 1. Hide Roofs
@@ -1816,13 +1816,13 @@ public class DreamBotMenu extends JFrame {
 
             } finally {
                 isSettingProcessing = false;
-                setStatus("Status: Profile Synced!");
+                setStatus("Profile Synced!");
 
                 // FIX: Ensure Toast creation and UI updates happen on the EDT
                 SwingUtilities.invokeLater(() -> {
                     // Check if the Settings tab is currently showing to decide where to anchor
                     // If you want to avoid "random toasts," anchor to the mainTabs or a specific header label
-                    makeToast("All settings synced.", mainTabs, true);
+                    showToast("All settings synced.", mainTabs, true);
                 });
             }
         }).start();
@@ -1836,6 +1836,9 @@ public class DreamBotMenu extends JFrame {
      * @param flashColor The color to flash (e.g., new Color(100, 0, 0) for red).
      */
     private void flashControl(JComponent component, Color flashColor) {
+        if (component.getBackground().equals(flashColor))
+            return;
+
         // dynamically capture the current background color to restore it later
         Color original = component.getBackground();
 
@@ -1907,12 +1910,12 @@ public class DreamBotMenu extends JFrame {
             script.getScriptManager().resume();
             btnPlayPause.setText("▮▮");
             isScriptPaused = false;
-            setStatus("Status: Running");
+            setStatus("Running");
         } else {
             script.getScriptManager().pause();
             btnPlayPause.setText("▶");
             isScriptPaused = true;
-            setStatus("Status: Script paused");
+            setStatus("Script paused");
         }
     }
 
@@ -1964,10 +1967,7 @@ public class DreamBotMenu extends JFrame {
      * @return A {@link JButton} component styled to match the default theme.
      */
     private JButton createNavButton(@NotNull String btnText) {
-        if (btnText.isEmpty())
-            throw new IllegalArgumentException("Error creating button! Button text cannot be empty");
-
-        JButton btn = new JButton(btnText);
+        JButton btn = createButton(btnText);
             btn.setBackground(COLOR_BTN_BACKGROUND);
             btn.setForeground(COLOR_BTN_FOREGROUND);
             btn.setFocusPainted(false);
@@ -1995,24 +1995,24 @@ public class DreamBotMenu extends JFrame {
     }
 
     private JButton createButton(@NotNull String btnText, Color backgroundColor, Color foregroundColor) {
-        JButton b = createNavButton(btnText);
-            b.setBackground(backgroundColor == null ? COLOR_BTN_BACKGROUND : backgroundColor);
-            b.setForeground(foregroundColor == null ? COLOR_BTN_FOREGROUND : foregroundColor);
+        // validate button text
+        if (btnText.isEmpty())
+            throw new IllegalArgumentException("Error creating button! Button text cannot be empty");
 
-        return b;
+        // create button object
+        JButton btn = new JButton(btnText);
+            // set button properties
+            btn.setBackground(backgroundColor == null ? COLOR_BTN_BACKGROUND : backgroundColor);
+            btn.setForeground(foregroundColor == null ? COLOR_BTN_FOREGROUND : foregroundColor);
+            btn.setFocusPainted(false);
+            btn.setBorder(new LineBorder(BORDER_DIM));
+
+        return btn;
     }
 
     private JButton createButton(@NotNull String btnText) {
         return createButton(btnText, null, null);
     }
-
-    private void makeToast(String toastText, JButton component, boolean success) {
-        if (toastText == null || component == null)
-            throw new IllegalArgumentException("Error creating button! Invalid text or JComponent parameter(s).");
-
-        this.makeToast(toastText, component, success);
-    }
-
 
     private ImageIcon loadMiscIcon(String name) {
         try {
@@ -2148,30 +2148,30 @@ public class DreamBotMenu extends JFrame {
 
     private JPanel createScriptPanel() {
         return createSettingsGroup("Script",
-                settingClientChkStartScriptOnLoad = createSettingCheck("Start Script on Load",
-                        startScriptOnLoad, e ->
-                                startScriptOnLoad = !settingClientChkStartScriptOnLoad.isSelected()
-                ),
+            settingClientChkStartScriptOnLoad = createSettingCheck("Start Script on Load",
+                    startScriptOnLoad, e ->
+                            startScriptOnLoad = !settingClientChkStartScriptOnLoad.isSelected()
+            ),
 
-                settingClientChkExitOnStopWarning = createSettingCheck("Exit on Stop Warning",
-                        exitOnStopWarning, e ->
-                                exitOnStopWarning = !settingClientChkExitOnStopWarning.isSelected()
-                ),
+            settingClientChkExitOnStopWarning = createSettingCheck("Exit on Stop Warning",
+                    exitOnStopWarning, e ->
+                            exitOnStopWarning = !settingClientChkExitOnStopWarning.isSelected()
+            ),
 
-                chkAutoSave = createSettingCheck("Auto Save", true, e -> {
-                    // Check the ACTUAL checkmark state
-                    boolean isChecked = ((JCheckBox)e.getSource()).isSelected();
+            chkAutoSave = createSettingCheck("Auto Save", true, e -> {
+                // Check the ACTUAL checkmark state
+                boolean isChecked = ((JCheckBox)e.getSource()).isSelected();
 
-                    if (isChecked) {
-                        saveAll(); // Only trigger the heavy save when turned ON
-                        if (saveTimer != null)
-                            saveTimer.start();
-                    } else {
-                        if (saveTimer != null)
-                            saveTimer.stop();
-                        makeToast("Auto-save Disabled", chkAutoSave, false);
-                    }
-                })
+                if (isChecked) {
+                    saveAll(); // Only trigger the heavy save when turned ON
+                    if (saveTimer != null)
+                        saveTimer.start();
+                } else {
+                    if (saveTimer != null)
+                        saveTimer.stop();
+                    showToast("Auto-save Disabled", chkAutoSave, false);
+                }
+            })
         );
     }
 
@@ -2279,13 +2279,13 @@ public class DreamBotMenu extends JFrame {
                 isReverting = true;
                 c.setSelected(e.getStateChange() != ItemEvent.SELECTED);
                 isReverting = false;
-                makeToast("Bot is busy ingame...", c, false);
+                showToast("Bot is busy ingame...", c, false);
                 return;
             }
 
             isSettingProcessing = true;
             String originalStatus = lblStatus.getText();
-            setStatus("Status: Adjusting " + text + " ingame...");
+            setStatus("Adjusting " + text + " ingame...");
 
             new Thread(() -> {
                 try {
@@ -2302,7 +2302,7 @@ public class DreamBotMenu extends JFrame {
                     // Substance UI FIX: Move all UI feedback to the EDT
                     SwingUtilities.invokeLater(() -> {
                         setStatus(originalStatus);
-                        makeToast(text + " updated!", c, true);
+                        showToast(text + " updated!", c, true);
                     });
                 }
             }).start();
@@ -2334,7 +2334,7 @@ public class DreamBotMenu extends JFrame {
 
         new Thread(() -> {
             isDataLoading = true;
-            setStatus("Status: Waiting for login...");
+            setStatus("Waiting for login...");
 
             // 1. Wait for stable login
             while (!Client.isLoggedIn()) {
@@ -2381,7 +2381,7 @@ public class DreamBotMenu extends JFrame {
             if (!Client.isLoggedIn())
                 return;
 
-            setStatus("Status: Autosaving...");
+            setStatus("Autosaving...");
 
             dataMan.saveEverything(
                     listTaskList,
@@ -2393,7 +2393,7 @@ public class DreamBotMenu extends JFrame {
                     captureInventory(),
                     captureWorn(),
                     captureSkills(),
-                    () -> setStatus("Status: Autosave complete!")
+                    () -> setStatus("Autosave complete!")
             );
 
             Logger.log(Logger.LogType.INFO, "Autosaving all data columns...");
@@ -2615,14 +2615,14 @@ public class DreamBotMenu extends JFrame {
                 currentPresetPage++;
                 btnPageUp.setEnabled(true);
                 refreshPresetButtonLabels();
-                this.makeToast("Page " + (currentPresetPage + 1), btnPageDown, true);
+                this.showToast("Page " + (currentPresetPage + 1), btnPageDown, true);
             } else {
                 // Determine if failure is due to hard limit or empty slots on current page
                 String message = (currentPresetPage + 1) * 4 >= MAX_PRESETS ?
                         String.format("Max presets reached! (%d)", MAX_PRESETS)
                         : "Fill current slots first!";
 
-                this.makeToast(message, btnPageDown, false);
+                this.showToast(message, btnPageDown, false);
             }
         });
 
@@ -2662,7 +2662,7 @@ public class DreamBotMenu extends JFrame {
             // TODO decide whether or not to select the preset on save
             selectedPresetIndex = actualIndex; // Select it upon saving
             refreshPresetButtonLabels();
-            this.makeToast("Saved to " + currentName, presetButtons[slot], true);
+            this.showToast("Saved to " + currentName, presetButtons[slot], true);
 
         /// Normal click to load
         } else {
@@ -2670,7 +2670,7 @@ public class DreamBotMenu extends JFrame {
             Preset preset = allPresets.get(actualIndex);
 
             if (preset.tasks.isEmpty()) {
-                this.makeToast(preset.name + " is empty!", presetButtons[slot], false);
+                this.showToast(preset.name + " is empty!", presetButtons[slot], false);
             } else {
                 // store the total task count for this set
                 int taskCount = 0;
@@ -2685,7 +2685,7 @@ public class DreamBotMenu extends JFrame {
 
                 // inform the user that the preset has been loaded and how many tasks this set has.
                 loadPreset(actualIndex);
-                this.makeToast("Loaded " + taskCount + " tasks from " + preset.name, presetButtons[slot], true);
+                this.showToast("Loaded " + taskCount + " tasks from " + preset.name, presetButtons[slot], true);
             }
         }
     }
@@ -2745,7 +2745,7 @@ public class DreamBotMenu extends JFrame {
             }
 
             refreshPresetButtonLabels();
-            makeToast("Preset Deleted & Squashed", mainTabs, true);
+            showToast("Preset Deleted & Squashed", mainTabs, true);
         }
     }
 
@@ -2773,6 +2773,9 @@ public class DreamBotMenu extends JFrame {
                 presetButtons[i].setText("Preset " + (actualIndex + 1));
                 presetButtons[i].setBackground(actualIndex == selectedPresetIndex ? COLOR_ORANGE : COLOR_BTN_BACKGROUND);
             }
+
+            // repaint the whole tab to finalize gui update
+            listTaskList.repaint();
         }
     }
 
