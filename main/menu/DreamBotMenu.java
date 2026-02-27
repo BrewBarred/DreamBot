@@ -4,15 +4,11 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
-import com.google.gson.annotations.SerializedName;
 import com.google.gson.reflect.TypeToken;
 import main.managers.DataMan;
 import org.dreambot.api.Client;
 import org.dreambot.api.ClientSettings;
 import org.dreambot.api.methods.container.impl.Inventory;
-import org.dreambot.api.methods.container.impl.bank.Bank;
-import org.dreambot.api.methods.interactive.GameObjects;
-import org.dreambot.api.methods.interactive.NPCs;
 import org.dreambot.api.methods.interactive.Players;
 import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.methods.skills.Skills;
@@ -20,8 +16,6 @@ import org.dreambot.api.methods.world.Worlds;
 import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.utilities.AccountManager;
 import org.dreambot.api.utilities.Logger;
-import org.dreambot.api.wrappers.interactive.GameObject;
-import org.dreambot.api.wrappers.interactive.NPC;
 import org.dreambot.api.methods.container.impl.equipment.Equipment;
 import org.dreambot.api.wrappers.items.Item;
 import org.dreambot.api.methods.map.Tile;
@@ -37,6 +31,10 @@ import java.awt.event.*;
 import java.util.*;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import main.actions.Action;
+
+import static main.menu.MenuBuilder.*;
 
 /**
  * <h1>DreamBotMan</h1>
@@ -58,6 +56,10 @@ public class DreamBotMenu extends JFrame {
     private final Color COLOR_BUTTON_TEXT = Color.WHITE;
     private final Color COLOR_BUTTON_DEFAULT = Color.GRAY;
     private final Color COLOR_BUTTON_RED = Color.RED;
+
+
+    private final JPanel dynamicControlPanel = new JPanel(new BorderLayout());
+
 
     //TODO SETTINGS:
     ///  DEV Settings:
@@ -113,11 +115,9 @@ public class DreamBotMenu extends JFrame {
     private final Color COLOR_FAILURE = new Color(100, 0, 0);
     private final Color COLOR_SUCCESS = new Color(0, 100, 0);
     private final Color COLOR_LIGHT_GREEN = new Color(150, 200, 50);
-    private final Color COLOR_BTN_BACKGROUND = new Color(40,40,40);
-    private final Color COLOR_BTN_FOREGROUND = Color.WHITE;
 
     // --- Data & Presets ---
-    private final int MAX_TOAST_QUEUE = 10; // Only allow 3 toasts to be "waiting"
+    private final int MAX_TOAST_QUEUE = 1;
     private final Queue<ToastRequest> toastQueue = new LinkedList<>();
     private boolean isToastProcessing = false;
 
@@ -141,7 +141,7 @@ public class DreamBotMenu extends JFrame {
     private final int MAX_PRESETS = 16;
     private int currentPresetPage = 0;
     private int selectedPresetIndex = -1; // Tracks the currently active/selected preset index
-    private final List<Preset> allPresets = new ArrayList<>();
+    private final DefaultListModel<Preset> modelPresets = new DefaultListModel<>();
     private final JButton[] presetButtons = new JButton[4];
     private JButton btnPageUp, btnPageDown;
 
@@ -161,8 +161,8 @@ public class DreamBotMenu extends JFrame {
 
     private JList<String> nearbyList;
     private JTextArea libraryEditorArea, consoleArea;
-    private JTextField taskNameInput, taskDescriptionInput, taskStatusInput, inputTargetName, consoleSearch;
-    private JComboBox<ActionType> actionCombo;
+    private JTextField taskNameInput, taskDescriptionInput, taskStatusInput;
+    private JActionSelector actionSelector;
     private JButton btnPlayPause, btnInputToggle, btnCaptureToggle;
 
     // --- Client Checkboxes ---
@@ -187,11 +187,6 @@ public class DreamBotMenu extends JFrame {
     // --- Theme ---
     private final Map<JComponent, Color> originalColors = new WeakHashMap<>(); // Kept as requested, but no longer used by flashControl to prevent color bugs
     private final Color BG_BASE = new Color(12, 12, 12);
-    private final Color PANEL_SURFACE = new Color(24, 24, 24);
-    private final Color COLOR_BLOOD = new Color(150, 0, 0);
-    private final Color COLOR_ORANGE = new Color(220, 80, 0); // Restored from new builder
-    private final Color BORDER_DIM = new Color(45, 45, 45);
-    private final Color TEXT_MAIN = new Color(210, 210, 210);
     private final Color TEXT_DIM = new Color(140, 140, 140);
     private final Color TAB_SELECTED = new Color(60, 0, 0);
 
@@ -211,7 +206,7 @@ public class DreamBotMenu extends JFrame {
     private final int TIME_FLASH = 200;
 
 
-    public enum ActionType { ATTACK, BANK, BURY, CHOP, COOK, DROP, EXAMINE, FISH, MINE, OPEN, TALK_TO, USE_ON }
+    //public enum ActionType { ATTACK, BANK, BURY, CHOP, COOK, DROP, EXAMINE, FISH, MINE, OPEN, TALK_TO, USE_ON }
 
     private static final Skill[] OSRS_ORDER = { Skill.ATTACK, Skill.HITPOINTS, Skill.MINING, Skill.STRENGTH, Skill.AGILITY, Skill.SMITHING, Skill.DEFENCE, Skill.HERBLORE, Skill.FISHING, Skill.RANGED, Skill.THIEVING, Skill.COOKING, Skill.PRAYER, Skill.CRAFTING, Skill.FIREMAKING, Skill.MAGIC, Skill.FLETCHING, Skill.WOODCUTTING, Skill.RUNECRAFTING, Skill.SLAYER, Skill.FARMING, Skill.CONSTRUCTION, Skill.HUNTER, Skill.SAILING };
     private static final Set<Skill> F2P_SKILLS = new HashSet<>(Arrays.asList(Skill.ATTACK, Skill.STRENGTH, Skill.DEFENCE, Skill.RANGED, Skill.PRAYER, Skill.MAGIC, Skill.HITPOINTS, Skill.CRAFTING, Skill.MINING, Skill.SMITHING, Skill.FISHING, Skill.COOKING, Skill.FIREMAKING, Skill.WOODCUTTING, Skill.RUNECRAFTING));
@@ -228,16 +223,16 @@ public class DreamBotMenu extends JFrame {
         setLayout(new BorderLayout(0, 0));
         getContentPane().setBackground(BG_BASE);
 
-        JPanel header = createHeaderPanel();
         mainTabs.setBackground(PANEL_SURFACE);
         mainTabs.setForeground(TEXT_MAIN);
-
         mainTabs.addTab("Task List", loadTabIcon("task_list_tab"), createTaskListTab());
         mainTabs.addTab("Task Library", loadTabIcon("task_library_tab"),createTaskLibraryTab());
         mainTabs.addTab("Task Builder", loadTabIcon("task_builder_tab"),createTaskBuilderTab());
         mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
         mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
+
+        dynamicControlPanel.setOpaque(false);
 
         projectionSpinner = new JSpinner(new SpinnerNumberModel(24, 1, 999, 1));
         styleSpinner(projectionSpinner);
@@ -253,7 +248,7 @@ public class DreamBotMenu extends JFrame {
         JPanel sidePanelContent = new JPanel(new BorderLayout());
         sidePanelContent.setPreferredSize(new Dimension(360, 0));
         sidePanelContent.setBackground(PANEL_SURFACE);
-        sidePanelContent.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, BORDER_DIM));
+        sidePanelContent.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, COLOR_BORDER_DIM));
 
         ///  Add toggle button to show/hide side panel
         JButton btnToggleSidePanel = new JButton();
@@ -296,7 +291,7 @@ public class DreamBotMenu extends JFrame {
         btnToggleSidePanel.setPreferredSize(new Dimension(22, 0));
         btnToggleSidePanel.setBackground(PANEL_SURFACE);
         btnToggleSidePanel.setForeground(COLOR_BLOOD);
-        btnToggleSidePanel.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 1, BORDER_DIM));
+        btnToggleSidePanel.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 1, COLOR_BORDER_DIM));
 
         btnToggleSidePanel.addActionListener(e -> {
             sidePanelContent.setVisible(!sidePanelContent.isVisible());
@@ -304,7 +299,6 @@ public class DreamBotMenu extends JFrame {
             revalidate();
         });
 
-        add(header, BorderLayout.NORTH);
         add(mainTabs, BorderLayout.CENTER);
         add(this.sidePanel, BorderLayout.EAST);
         add(createProgressPanel(), BorderLayout.SOUTH);
@@ -373,40 +367,60 @@ public class DreamBotMenu extends JFrame {
     }
 
     private JPanel createProgressPanel() {
-        // Use a GridBagLayout for precise control or a 2-row GridLayout
         JPanel persistentStatus = new JPanel(new GridBagLayout());
         persistentStatus.setBackground(PANEL_SURFACE);
 
-        // Add a border to separate it from the tabs above
         persistentStatus.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, BORDER_DIM), // Top line
-                new EmptyBorder(8, 15, 8, 15) // Inner padding
+                BorderFactory.createMatteBorder(1, 0, 0, 0, COLOR_BORDER_DIM),
+                new EmptyBorder(8, 15, 8, 15)
         ));
 
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.weightx = 1.0;
-        gbc.gridx = 0;
 
-        // --- Row 1: The Progress Bar (Full Width) ---
-        statusProgress.setPreferredSize(new Dimension(0, 18)); // Width 0 is fine because weightx=1.0 stretches it
+        // --- Row 0: The Progress Bar (Full Width) ---
+        statusProgress.setPreferredSize(new Dimension(0, 18));
         statusProgress.setForeground(COLOR_BLOOD);
         statusProgress.setBackground(BG_BASE);
-        statusProgress.setBorder(new LineBorder(BORDER_DIM));
-        statusProgress.setStringPainted(true); // Shows % text
+        statusProgress.setBorder(new LineBorder(COLOR_BORDER_DIM));
+        statusProgress.setStringPainted(true);
 
+        gbc.gridx = 0;
         gbc.gridy = 0;
-        gbc.insets = new Insets(0, 0, 4, 0); // Small gap between bar and text
+        gbc.gridwidth = 2; // Spans across both the label and buttons columns
+        gbc.weightx = 1.0;
+        gbc.insets = new Insets(0, 0, 8, 0); // Gap below the bar
         persistentStatus.add(statusProgress, gbc);
 
-        // --- Row 2: The Status Text (Below) ---
+        // --- Row 1, Left: The Status Text ---
         lblStatus.setForeground(TEXT_DIM);
         lblStatus.setFont(new Font("Consolas", Font.PLAIN, 12));
         setStatus("Waiting instructions...");
 
+        gbc.gridx = 0;
         gbc.gridy = 1;
-        gbc.insets = new Insets(0, 2, 0, 0); // Slight left offset for text alignment
+        gbc.gridwidth = 1; // Occupies only the left column
+        gbc.weightx = 1.0; // Pushes the buttons to the right
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.insets = new Insets(0, 2, 0, 0);
         persistentStatus.add(lblStatus, gbc);
+
+        // --- Row 1, Right: The Buttons ---
+        JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        controls.setOpaque(false);
+        btnPlayPause = createIconButton("▶", "Play", e -> toggleScriptState());
+        JButton btnStop = createIconButton("■", "Stop", e -> stopScript());
+        btnInputToggle = createIconButton("🖱", "Input", e -> toggleUserInput());
+        controls.add(btnPlayPause);
+        controls.add(btnStop);
+        controls.add(btnInputToggle);
+
+        gbc.gridx = 1;
+        gbc.gridy = 1;
+        gbc.weightx = 0;    // Buttons only take as much space as they need
+        gbc.anchor = GridBagConstraints.EAST;
+        gbc.insets = new Insets(0, 0, 0, 0);
+        persistentStatus.add(controls, gbc);
 
         return persistentStatus;
     }
@@ -477,15 +491,15 @@ public class DreamBotMenu extends JFrame {
         listTaskList.setCellRenderer(new TaskCellRenderer());
         styleJList(listTaskList);
 
+
         /// WEST: Add up/down buttons to navigate through task list
+        // create task list navigation buttons (up/down arrows)
+        JButton btnUp = createNavButton("▲", modelTaskList, listTaskList);
+        JButton btnDown = createNavButton("▼", modelTaskList, listTaskList);
+
         // create west panel
         JPanel west = new JPanel(new GridLayout(0, 1, 0, 5));
         west.setOpaque(false);
-
-        // create task list navigation buttons (up/down arrows)
-        JButton btnUp = createNavButton("▲");
-        JButton btnDown = createNavButton("▼");
-
         // add navigation buttons (up/down arrows)
         west.add(btnUp);
         west.add(btnDown);
@@ -539,7 +553,7 @@ public class DreamBotMenu extends JFrame {
         });
 
         ///  Create Task List edit button
-        JButton btnTaskListView = createNavButton("View in builder...");
+        JButton btnTaskListView = createButton("View in builder...");
         btnTaskListView.addActionListener(e -> {
             loadIntoBuilder(listTaskList.getSelectedValue());
             this.showToast("Moving to builder for viewing...", btnTaskListView, true);
@@ -552,7 +566,7 @@ public class DreamBotMenu extends JFrame {
         btnResetAllPresets.addActionListener(e -> {
             int choice = JOptionPane.showConfirmDialog(this, "WARNING: This will delete ALL presets (could be 100s!). Continue?", "Nuclear Reset", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
             if (choice == JOptionPane.YES_OPTION) {
-                allPresets.clear();
+                modelPresets.clear();
                 currentPresetPage = 0;
                 selectedPresetIndex = -1;
                 btnPageUp.setEnabled(false);
@@ -609,6 +623,7 @@ public class DreamBotMenu extends JFrame {
                 super.componentShown(e);
                 refreshTaskListTab();
                 refreshPresetButtonLabels();
+                refreshDynamicControls();
             }
         });
 
@@ -622,8 +637,8 @@ public class DreamBotMenu extends JFrame {
         panelLibraryTab.setBackground(BG_BASE);
 
         // create navigation buttons (up/down arrows)
-        JButton btnUpList = createNavButton("▲");
-        JButton btnDownList = createNavButton("▼");
+        JButton btnUpList = createNavButton("▲", modelTaskLibrary,listTaskLibrary);
+        JButton btnDownList = createNavButton("▼", modelTaskLibrary,listTaskLibrary);
 
         JPanel panelNavButtons = new JPanel(new GridLayout(0, 1, 0, 5));
         panelNavButtons.setOpaque(false);
@@ -746,19 +761,15 @@ public class DreamBotMenu extends JFrame {
     }
 
     private void refreshTaskListTab(int index) {
-        Logger.log(Logger.LogType.ERROR, index);
         // ignore empty lists (but still refresh them in case of update after removal)
         if (!modelTaskList.isEmpty()) {
             index = index == -1 ? listTaskList.getSelectedIndex(): -1;
-            Logger.log(Logger.LogType.ERROR, index);
             // get the selected index (prefer passed index, default to selected, resort to first item worst case
             index = index == -1 ? 0 : index;
-            Logger.log(Logger.LogType.ERROR, index);
             // ensure index is still within bounds of list model
             if (index >= 0 && index < modelTaskList.size())
                 listTaskList.setSelectedIndex(index);
 
-            Logger.log(Logger.LogType.ERROR, index);
         }
 
         listTaskBuilder.ensureIndexIsVisible(index);
@@ -802,12 +813,12 @@ public class DreamBotMenu extends JFrame {
     private JPanel createTaskBuilderTab() {
         ///  Create the task builders title
         JPanel panelTaskBuilder = new JPanel(new BorderLayout(15, 15));
-        panelTaskBuilder.setBorder(new EmptyBorder(15, 15, 15, 15));
-        panelTaskBuilder.setBackground(BG_BASE);
+            panelTaskBuilder.setBorder(new EmptyBorder(15, 15, 15, 15));
+            panelTaskBuilder.setBackground(BG_BASE);
 
         ///  Create the task builders right panel
         JPanel east = new JPanel(new GridBagLayout());
-        east.setOpaque(false);
+            east.setOpaque(false);
 
         GridBagConstraints g = new GridBagConstraints();
         g.fill = GridBagConstraints.HORIZONTAL;
@@ -840,7 +851,7 @@ public class DreamBotMenu extends JFrame {
         g.gridy = 5;
         east.add(taskStatusInput, g);
 
-        btnTaskBuilderAddToLibrary = createButton("Add to library...", COLOR_ORANGE, null);
+        btnTaskBuilderAddToLibrary = createButton("Add to library...", COLOR_BTN_ADD, null);
         btnTaskBuilderAddToLibrary.addActionListener(e -> {
             List<Action> actions = new ArrayList<>();
             for(int i = 0; i< modelTaskBuilder.size(); i++)
@@ -877,6 +888,7 @@ public class DreamBotMenu extends JFrame {
                         for (int i = 0; i < modelTaskLibrary.getSize(); i++) {
                             if (modelTaskLibrary.getElementAt(i).toString().equals(task.toString())) {
                                 modelTaskLibrary.set(i, task);
+                                refreshTaskLibrary();
                                 break;
                             }
                         }
@@ -890,7 +902,7 @@ public class DreamBotMenu extends JFrame {
             }
         });
 
-        g.gridy = 6;
+        g.gridy = 8;
         g.insets = new Insets(20, 5, 5, 5);
         east.add(btnTaskBuilderAddToLibrary, g);
 
@@ -965,60 +977,121 @@ public class DreamBotMenu extends JFrame {
         center.add(panelActionButtons, BorderLayout.SOUTH);
 
         JPanel left = new JPanel(new BorderLayout(0, 10));
-        left.setOpaque(false);
-        JPanel config = new JPanel(new GridLayout(0, 1, 2, 5));
-        config.setOpaque(false);
-        actionCombo = new JComboBox<>(ActionType.values());
-        styleComp(actionCombo);
-        actionCombo.addActionListener(e -> {
-            scanNearbyTargets();
-        });
-        inputTargetName = new JTextField(); styleComp(inputTargetName);
-        config.add(new JLabel("Select action:"));
-        config.add(actionCombo);
-        config.add(new JLabel("Target name:"));
-        config.add(inputTargetName);
+            left.setOpaque(false);
+            left.setAlignmentX(Component.LEFT_ALIGNMENT);
+            left.setAutoscrolls(true);
 
-        JButton btnTaskBuilderAdd = createButton("Add to builder...", COLOR_ORANGE, null);
+//        JPanel config = new JPanel();
+//            // stack vertically (Y_AXIS)
+//            config.setLayout(new BoxLayout(config, BoxLayout.Y_AXIS));
+//            config.setOpaque(false);
+
+        JPanel config = new JPanel(new GridBagLayout());
+        config.setOpaque(false);
+        GridBagConstraints gbc = new GridBagConstraints();
+
+// Common constraints
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        // take up the whole width
+        gbc.weightx = 1.0;
+        gbc.insets = new java.awt.Insets(3, 3, 3, 3); // 3px padding
+
+        ///  Add "Select action:" label
+        // column 0, row 0
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        // balance height with other components
+        gbc.weighty = 0; // Don't stretch vertically
+        config.add(new JLabel("Select action:"), gbc);
+
+        ///  Add action selector
+        // column 0, row 1
+        gbc.gridy = 1;
+        // balance height with other components
+        gbc.weighty = 0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        actionSelector = new JActionSelector();
+        styleComp(actionSelector);
+        config.add(actionSelector, gbc);
+
+        ///  Add dynamic control panel (to adjust action parameters)
+        // column 0, row 2
+        gbc.gridy = 2;
+        // balance height with other components
+        gbc.weighty = 0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        config.add(dynamicControlPanel, gbc);
+//        actionSelector = new JActionSelector();
+//        styleComp(actionSelector);
+//        actionSelector.addActionListener(e -> {
+//            scanNearbyTargets();
+//            refreshDynamicControls();
+//            refreshTaskBuilderTab();
+//        });
+//
+//        ///  Label "Selection action:"
+//        JLabel labelSelect = new JLabel("Select action:");
+//            labelSelect.setAlignmentX(Component.LEFT_ALIGNMENT);
+//
+//        config.add(labelSelect);
+//        config.add(actionSelector);
+//        config.add(dynamicControlsPanel);
+
+
+        /// Add button "Add to builder..."
+        // column 0, row 3
+        gbc.gridy = 3;
+        // balance height with other components
+        gbc.weighty = 0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        JButton btnTaskBuilderAdd = MenuBuilder.createButton("Add to builder...", COLOR_BTN_ADD, null);
         btnTaskBuilderAdd.addActionListener(e -> {
-            if(!inputTargetName.getText().isEmpty()) {
-                modelTaskBuilder.addElement(
-                        new Action((ActionType) actionCombo.getSelectedItem(), inputTargetName.getText())
-                );
-                this.showToast("Added action to builder!", btnTaskBuilderAdd, true);
+            Action newAction = actionSelector.build();
+            if (newAction != null) {
+                modelTaskBuilder.addElement(newAction);
+                this.showToast("Added " + newAction.getClass().getSimpleName() + "!", btnTaskBuilderAdd, true);
                 refreshTaskBuilderTab(true);
             } else {
-                this.showToast("Enter a target name!", btnTaskBuilderAdd, false);
+                this.showToast("Invalid or incomplete action!", btnTaskBuilderAdd, false);
             }
         });
+        config.add(btnTaskBuilderAdd, gbc);
 
-        config.add(btnTaskBuilderAdd);
-        config.add(new JLabel("Nearby targets:"));
+        ///  Add label & list "Nearby targets:"
+        // column 0, row 4
+        gbc.gridy = 4;
+        // balance height with other components
+        gbc.weighty = 0;
+        JLabel nearbyLabel = new JLabel("Nearby targets:");
+            nearbyLabel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
+        config.add(nearbyLabel, gbc);
+//        ///  Add single/double click listeners to nearby list for quick-loading functionality
+////        nearbyList.addMouseListener(new MouseAdapter() {
+////            public void mouseClicked(MouseEvent e) {
+////                String val = nearbyList.getSelectedValue();
+////                if(val == null)
+////                    return;
+////
+////                // update target name on single click
+////                if(e.getClickCount() == 1) {
+////                    paramTarget.setText(val);
+////                }
+////                else if(e.getClickCount() == 2) {
+////                    Action action = actionSelector.createSelectedAction(val);
+////                    if (action != null)
+////                        modelTaskBuilder.addElement(action);
+////                    DreamBotMenu.this.showToast("Added action to builder!", btnTaskBuilderAdd, true);
+////                    refreshTaskBuilderTab(true);
+////                }
+////            }
+////        });
 
         nearbyList = new JList<>(nearbyEntitiesModel);
         styleJList(nearbyList);
-        nearbyList.addMouseListener(new MouseAdapter() {
-            public void mouseClicked(MouseEvent e) {
-                String val = nearbyList.getSelectedValue();
-                if(val == null)
-                    return;
-
-                // update target name on single click
-                if(e.getClickCount() == 1) {
-                    inputTargetName.setText(val);
-                }
-                else if(e.getClickCount() == 2) {
-                    modelTaskBuilder.addElement(new Action((ActionType) actionCombo.getSelectedItem(), val));
-                    DreamBotMenu.this.showToast("Added action to builder!", btnTaskBuilderAdd, true);
-                    refreshTaskBuilderTab(true);
-                }
-            }
-        });
-
         // Wrap the list in a scroll pane and LOCK the width
         JScrollPane entitiesScroll = new JScrollPane(nearbyList);
-        entitiesScroll.setPreferredSize(new Dimension(300, 0)); // 300px width, height 0 (BorderLayout will stretch height)
-        entitiesScroll.setMinimumSize(new Dimension(300, 0));
+            entitiesScroll.setPreferredSize(new Dimension(300, 150)); // 300px width, height 0 (BorderLayout will stretch height)
+            entitiesScroll.setMinimumSize(new Dimension(300, 150));
 
         JButton btnScanNearby = createButton("Scan nearby...");
         btnScanNearby.addActionListener(e -> {
@@ -1186,7 +1259,7 @@ public class DreamBotMenu extends JFrame {
 
         JPanel menuPanel = new JPanel(new GridLayout(10, 1, 0, 2));
         menuPanel.setPreferredSize(new Dimension(180, 0));
-        menuPanel.setBackground(PANEL_SURFACE); menuPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, BORDER_DIM));
+        menuPanel.setBackground(PANEL_SURFACE); menuPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, COLOR_BORDER_DIM));
 
         String[] groups = {"Client", "Script", "Display", "Audio", "Chat", "Controls", "Activities", "Warnings"};
         ButtonGroup btnGroup = new ButtonGroup();
@@ -1208,7 +1281,7 @@ public class DreamBotMenu extends JFrame {
     }
 
     private void resetTaskBuilder() {
-        inputTargetName.setText("");
+        //paramTarget.setText("");
 
         // clear task attribute inputs
         taskNameInput.setText("");
@@ -1223,56 +1296,14 @@ public class DreamBotMenu extends JFrame {
     }
 
     private void scanNearbyTargets() {
-        ActionType type = (ActionType) actionCombo.getSelectedItem();
-        if (type == null)
-            return;
+        // Each action subclass decides what to scan — no switch needed here
+        Set<String> names = actionSelector.scanTargets();
 
-        // Perform the heavy API scanning on the current thread (Script Thread)
-        Set<String> names;
-
-        switch (type) {
-            case ATTACK:
-                names = NPCs.all().stream()
-                        .filter(n -> n.hasAction("Attack"))
-                        .map(NPC::getName)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toSet());
-                break;
-
-            case CHOP:
-                names = GameObjects.all().stream()
-                        .filter(o -> o.hasAction("Chop down"))
-                        .map(GameObject::getName)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toSet());
-                break;
-
-            case MINE:
-                names = GameObjects.all().stream()
-                        .filter(o -> o.hasAction("Mine"))
-                        .map(GameObject::getName)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toSet());
-                break;
-
-            default:
-                names = NPCs.all().stream()
-                        .map(NPC::getName)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toSet());
-                break;
-        }
-
-        // Copy to a final list for the thread block
-        final List<String> sortedNames = names.stream().sorted().collect(Collectors.toList());
-        SwingUtilities.invokeLater(() -> { //TODO remove redundant? invoke later here
+        List<String> sortedNames = names.stream().sorted().collect(Collectors.toList());
+        SwingUtilities.invokeLater(() -> {
             nearbyEntitiesModel.clear();
-
-            for (String name : sortedNames)
-                nearbyEntitiesModel.addElement(name);
-
-            // Use your toast logic to confirm it finished
-            this.showToast("Found " + sortedNames.size() + " targets", btnTaskBuilderScanNearby, true);
+            sortedNames.forEach(nearbyEntitiesModel::addElement);
+            showToast("Found " + sortedNames.size() + " targets", btnTaskBuilderScanNearby, true);
         });
     }
 
@@ -1300,7 +1331,7 @@ public class DreamBotMenu extends JFrame {
             if (o.actions != null) {
                 for (Action originalAction : o.actions) {
                     // Create a brand new action object for the new list
-                    this.actions.add(new Action(originalAction));
+                            this.actions.add(originalAction.copy());
                 }
             }
         }
@@ -1348,68 +1379,68 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    public static class Action {
-        @SerializedName("type")
-        public ActionType actionType;
-        public String target;
-
-        public Action(ActionType t, String target) {
-            this.actionType = t;
-            this.target = target;
-        }
-
-        // copy-cat constructor
-        public Action(Action other) {
-            this.actionType = other.actionType;
-            this.target = other.target;
-        }
-
-        //TODO copy how CHOP has been done then extract out into their own action classes maybe?
-        public boolean execute() {
-            switch (actionType) {
-                case CHOP:
-                    // find the nearest target tree
-                    GameObject tree = GameObjects.closest(target);
-                    // return early if no nearby trees
-                    if (tree == null) {
-                        Logger.log(Logger.LogType.ERROR, "Unable to find a tree!");
-                        return false;
-                    }
-                    // attempt to chop the tree down
-                    return tree.interact("Chop down");
-
-                case ATTACK:
-                    // find the nearest target npc
-                    NPC npc = NPCs.closest(target);
-
-                    // return early if no npcs found
-                    if (npc == null) {
-                        Logger.log(Logger.LogType.ERROR, "Unable to find a npc!");
-                        return false;
-                    }
-
-                    // attempt to attack the target npc
-                    return  npc.interact("Attack");
-
-                case BANK:
-                    return Bank.open();
-
-                case MINE:
-                    return GameObjects.closest(target) != null && GameObjects.closest(target).interact("Mine");
-
-                case TALK_TO:
-                    return NPCs.closest(target) != null && NPCs.closest(target).interact("Talk-to");
-
-                case DROP:
-                    return Inventory.dropAll(target);
-
-                default:
-                    Logger.log("Action " + actionType + " not implemented in Action.execute()");
-                    return false;
-            }
-        }
-        @Override public String toString() { return actionType.name() + " -> " + target; }
-    }
+//    public static class Action {
+//        @SerializedName("type")
+//        public ActionType actionType;
+//        public String target;
+//
+//        public Action(ActionType t, String target) {
+//            this.actionType = t;
+//            this.target = target;
+//        }
+//
+//        // copy-cat constructor
+//        public Action(Action other) {
+//            this.actionType = other.actionType;
+//            this.target = other.target;
+//        }
+//
+//        //TODO copy how CHOP has been done then extract out into their own action classes maybe?
+//        public boolean execute() {
+//            switch (actionType) {
+//                case CHOP:
+//                    // find the nearest target tree
+//                    GameObject tree = GameObjects.closest(target);
+//                    // return early if no nearby trees
+//                    if (tree == null) {
+//                        Logger.log(Logger.LogType.ERROR, "Unable to find a tree!");
+//                        return false;
+//                    }
+//                    // attempt to chop the tree down
+//                    return tree.interact("Chop down");
+//
+//                case ATTACK:
+//                    // find the nearest target npc
+//                    NPC npc = NPCs.closest(target);
+//
+//                    // return early if no npcs found
+//                    if (npc == null) {
+//                        Logger.log(Logger.LogType.ERROR, "Unable to find a npc!");
+//                        return false;
+//                    }
+//
+//                    // attempt to attack the target npc
+//                    return  npc.interact("Attack");
+//
+//                case BANK:
+//                    return Bank.open();
+//
+//                case MINE:
+//                    return GameObjects.closest(target) != null && GameObjects.closest(target).interact("Mine");
+//
+//                case TALK_TO:
+//                    return NPCs.closest(target) != null && NPCs.closest(target).interact("Talk-to");
+//
+//                case DROP:
+//                    return Inventory.dropAll(target);
+//
+//                default:
+//                    Logger.log("Action " + actionType + " not implemented in Action.execute()");
+//                    return false;
+//            }
+//        }
+//        @Override public String toString() { return actionType.name() + " -> " + target; }
+//    }
 
     public static class Preset {
         String name;
@@ -1646,13 +1677,10 @@ public class DreamBotMenu extends JFrame {
                     taskNameInput.setText(snap.taskName != null ? snap.taskName : "");
                     taskDescriptionInput.setText(snap.taskDescription != null ? snap.taskDescription : "");
                     taskStatusInput.setText(snap.taskStatus != null ? snap.taskStatus : "");
-                    inputTargetName.setText(snap.targetName != null ? snap.targetName : "");
+                    //paramTarget.setText(snap.targetName != null ? snap.targetName : "");
 
-                    if (snap.selectedAction != null && !snap.selectedAction.isEmpty()) {
-                        try {
-                            actionCombo.setSelectedItem(ActionType.valueOf(snap.selectedAction));
-                        } catch (Exception ignored) {}
-                    }
+                    if (snap.selectedAction != null && !snap.selectedAction.isEmpty())
+                        actionSelector.setSelectedItem(snap.selectedAction);
 
                     refreshTaskBuilderTab();
                     Logger.log(Logger.LogType.SCRIPT, "Successfully unpacked Task Builder data");
@@ -1753,13 +1781,14 @@ public class DreamBotMenu extends JFrame {
             java.lang.reflect.Type presetType = new TypeToken<List<Preset>>(){}.getType();
             List<Preset> fetchedPresets = gson.fromJson(columnData, presetType);
 
-            if (fetchedPresets != null) {
+            if (fetchedPresets != null && !fetchedPresets.isEmpty()) {
                 SwingUtilities.invokeLater(() -> {
-                    allPresets.clear();
-                    allPresets.addAll(fetchedPresets);
-                    selectedPresetIndex = -1; // Reset selection on fresh load
+                    modelPresets.clear();
+                    for (Preset preset : fetchedPresets)
+                        modelPresets.addElement(preset);
+                    selectedPresetIndex = -1;
                     refreshPresetButtonLabels();
-                    Logger.log(Logger.LogType.SCRIPT, "Successfully unpacked " + allPresets.size() + " presets from the presets column.");
+                    Logger.log(Logger.LogType.SCRIPT, "Successfully unpacked " + modelPresets.size() + " presets.");
                 });
             }
         } catch (Exception e) {
@@ -1839,14 +1868,21 @@ public class DreamBotMenu extends JFrame {
         if (component.getBackground().equals(flashColor))
             return;
 
-        // dynamically capture the current background color to restore it later
-        Color original = component.getBackground();
+        // Only capture the restore color if we aren't already flashing
+        final Color restoreColor = component.getClientProperty("originalColor") != null
+                ? (Color) component.getClientProperty("originalColor")
+                : component.getBackground();
+
+        // Store the original color on first flash only
+        component.putClientProperty("originalColor", restoreColor);
 
         component.setBackground(flashColor);
+        component.setOpaque(true);
         component.repaint();
 
         Timer revertTimer = new Timer(TIME_FLASH, e -> {
-            component.setBackground(original);
+            component.setBackground(restoreColor);
+            component.putClientProperty("originalColor", null); // Clear it after revert
             component.repaint();
         });
 
@@ -1868,37 +1904,37 @@ public class DreamBotMenu extends JFrame {
         if (action == null)
             return;
 
-        actionCombo.setSelectedItem(action.actionType);
-        inputTargetName.setText(action.target);
+        actionSelector.setSelectedItem(action.getType());
+    }
+
+    private void refreshDynamicControls() {
+        dynamicControlPanel.removeAll();
+        dynamicControlPanel.setOpaque(false);
+
+        JPanel controls = actionSelector.getCurrentPanel();
+        if (controls != null) {
+            for (Component component : controls.getComponents()) {
+                // style all JComponents to match current theme
+                if (component instanceof JComponent)
+                    styleComp((JComponent) component);
+            }
+            // Style it to match your theme
+            styleComp(controls);
+            dynamicControlPanel.add(controls, BorderLayout.CENTER);
+        }
+
+        dynamicControlPanel.revalidate();
+        dynamicControlPanel.repaint();
     }
 
     private JPanel createHeaderPanel() {
         JPanel header = new JPanel(new BorderLayout());
         header.setBackground(PANEL_SURFACE);
         header.setPreferredSize(new Dimension(0, 85));
-        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_DIM));
-        JLabel titleLabel = new JLabel(" DreamBotMan", SwingConstants.LEFT);
-        titleLabel.setForeground(COLOR_BLOOD);
-        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 32));
-        titleLabel.setBorder(new EmptyBorder(0, 25, 0, 0));
+        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, COLOR_BORDER_DIM));
         JPanel rightContainer = new JPanel(new BorderLayout());
         rightContainer.setOpaque(false);
         rightContainer.setBorder(new EmptyBorder(0, 0, 0, 20));
-        JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 20));
-        controls.setOpaque(false);
-        btnPlayPause = createIconButton("▶", "Play", e -> toggleScriptState());
-        JButton btnStop = createIconButton("■", "Stop", e -> stopScript());
-        btnInputToggle = createIconButton("🖱", "Input", e -> toggleUserInput());
-        controls.add(btnPlayPause);
-        controls.add(btnStop); controls.add(btnInputToggle);
-        JPanel headerStats = new JPanel(new GridLayout(2, 1));
-        headerStats.setOpaque(false);
-        headerStats.setBorder(new EmptyBorder(10, 20, 10, 10));
-        rightContainer.add(controls, BorderLayout.CENTER);
-        rightContainer.add(headerStats, BorderLayout.EAST);
-        header.add(titleLabel, BorderLayout.WEST);
-        header.add(rightContainer, BorderLayout.EAST);
-
         return header;
     }
 
@@ -1907,15 +1943,9 @@ public class DreamBotMenu extends JFrame {
             return;
 
         if (isScriptPaused) {
-            script.getScriptManager().resume();
-            btnPlayPause.setText("▮▮");
-            isScriptPaused = false;
-            setStatus("Running");
+            play();
         } else {
-            script.getScriptManager().pause();
-            btnPlayPause.setText("▶");
-            isScriptPaused = true;
-            setStatus("Script paused");
+            pause();
         }
     }
 
@@ -1927,9 +1957,23 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
+    public void play() {
+        script.getScriptManager().resume();
+        btnPlayPause.setText("▮▮");
+        isScriptPaused = false;
+        setStatus("Running");
+    }
+
+    public void pause() {
+        script.getScriptManager().pause();
+        btnPlayPause.setText("▶");
+        isScriptPaused = true;
+        setStatus("Script paused");
+    }
+
     private void toggleUserInput() { isUserInputAllowed = !isUserInputAllowed; Client.getInstance().setMouseInputEnabled(isUserInputAllowed); Client.getInstance().setKeyboardInputEnabled(isUserInputAllowed); btnInputToggle.setText(isUserInputAllowed ? "🖱" : "🚫"); }
     private void styleHeaderLabel(JLabel l) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.BOLD, 15)); l.setHorizontalAlignment(SwingConstants.RIGHT); }
-    private void styleSpinner(JSpinner s) { JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField(); field.setBackground(new Color(30, 30, 30)); field.setForeground(COLOR_BLOOD); s.setBorder(new LineBorder(BORDER_DIM)); }
+    private void styleSpinner(JSpinner s) { JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField(); field.setBackground(new Color(30, 30, 30)); field.setForeground(COLOR_BLOOD); s.setBorder(new LineBorder(COLOR_BORDER_DIM)); }
     private JButton createIconButton(String symbol, String tooltip, ActionListener action) { JButton btn = new JButton(symbol); btn.setPreferredSize(new Dimension(40, 40)); btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18)); btn.setBackground(new Color(30, 0, 0)); btn.setForeground(COLOR_BLOOD); btn.addActionListener(action); return btn; }
 
     private <T> boolean navigateQueue(int dir, JList<T> list, DefaultListModel<T> model) {
@@ -1946,14 +1990,6 @@ public class DreamBotMenu extends JFrame {
         return true;
     }
 
-    private void styleComp(JComponent c) {
-        c.setBackground(PANEL_SURFACE);
-        c.setForeground(TEXT_MAIN);
-
-        if(c instanceof JTextField)
-            ((JTextField)c).setCaretColor(COLOR_BLOOD);
-    }
-
     private void styleJList(JList<?> l) {
         l.setBackground(PANEL_SURFACE);
         l.setForeground(TEXT_MAIN);
@@ -1966,17 +2002,8 @@ public class DreamBotMenu extends JFrame {
      * @param btnText The text displayed on the button.
      * @return A {@link JButton} component styled to match the default theme.
      */
-    private JButton createNavButton(@NotNull String btnText) {
+    private <T> JButton createNavButton(@NotNull String btnText, @NotNull DefaultListModel<T> model, JList<T> list) {
         JButton btn = createButton(btnText);
-            btn.setBackground(COLOR_BTN_BACKGROUND);
-            btn.setForeground(COLOR_BTN_FOREGROUND);
-            btn.setFocusPainted(false);
-            btn.setBorder(new LineBorder(BORDER_DIM));
-
-       return addButtonFeatures(btn);
-    }
-
-    private JButton addButtonFeatures(JButton btn) {
         // determine if this button is a navigation button or not to add extra features
         int dir = btn.getText().equals("▲") ? -1 : btn.getText().equals("▼") ? 1 : 0;
         // return early if this is not a navigation button to avoid adding features to the wrong button type
@@ -1986,32 +2013,16 @@ public class DreamBotMenu extends JFrame {
         // add the button on-click event for navigation buttons
         btn.addActionListener(e -> {
             // determine if this button event is successful or not
-            boolean success = navigateQueue(dir, listTaskList, modelTaskList);
+            boolean success = list == null || navigateQueue(dir, list, model);
             // add a flash to this control to flicker colors on click
             flashControl(btn, success ? COLOR_SUCCESS : COLOR_FAILURE);
         });
 
-        return btn;
+       return btn;
     }
 
-    private JButton createButton(@NotNull String btnText, Color backgroundColor, Color foregroundColor) {
-        // validate button text
-        if (btnText.isEmpty())
-            throw new IllegalArgumentException("Error creating button! Button text cannot be empty");
-
-        // create button object
-        JButton btn = new JButton(btnText);
-            // set button properties
-            btn.setBackground(backgroundColor == null ? COLOR_BTN_BACKGROUND : backgroundColor);
-            btn.setForeground(foregroundColor == null ? COLOR_BTN_FOREGROUND : foregroundColor);
-            btn.setFocusPainted(false);
-            btn.setBorder(new LineBorder(BORDER_DIM));
-
-        return btn;
-    }
-
-    private JButton createButton(@NotNull String btnText) {
-        return createButton(btnText, null, null);
+    private <T> JButton createNavButton(@NotNull String btnText, @NotNull DefaultListModel<Preset> model) {
+        return createNavButton(btnText, model, null);
     }
 
     private ImageIcon loadMiscIcon(String name) {
@@ -2133,7 +2144,7 @@ public class DreamBotMenu extends JFrame {
         });
     }
 
-    private JPanel createInfoCard(String title) { JPanel p = new JPanel(new GridLayout(0, 1, 5, 10)); p.setBackground(PANEL_SURFACE); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + title + " "); b.setTitleColor(COLOR_BLOOD); b.setTitleFont(new Font("Segoe UI", Font.BOLD, 16)); p.setBorder(BorderFactory.createCompoundBorder(b, new EmptyBorder(15, 15, 15, 15))); return p; }
+    private JPanel createInfoCard(String title) { JPanel p = new JPanel(new GridLayout(0, 1, 5, 10)); p.setBackground(PANEL_SURFACE); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(COLOR_BORDER_DIM), " " + title + " "); b.setTitleColor(COLOR_BLOOD); b.setTitleFont(new Font("Segoe UI", Font.BOLD, 16)); p.setBorder(BorderFactory.createCompoundBorder(b, new EmptyBorder(15, 15, 15, 15))); return p; }
     private void addInfoRow(JPanel p, String key, JLabel valLabel) { JPanel row = new JPanel(new BorderLayout()); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); valLabel.setForeground(TEXT_MAIN); valLabel.setFont(new Font("Consolas", Font.BOLD, 14)); row.add(k, BorderLayout.WEST); row.add(valLabel, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
     private void addInfoRowWithIcon(JPanel p, String key, JLabel valLabel, JLabel iconLabel) { JPanel row = new JPanel(new BorderLayout(5, 0)); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); JPanel rightSide = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0)); rightSide.setOpaque(false); valLabel.setForeground(TEXT_MAIN); rightSide.add(valLabel); rightSide.add(iconLabel); row.add(k, BorderLayout.WEST); row.add(rightSide, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
 
@@ -2313,12 +2324,12 @@ public class DreamBotMenu extends JFrame {
 
     private JToggleButton createMenuButton(String text) { JToggleButton btn = new JToggleButton(text) { protected void paintComponent(Graphics g) { g.setColor(isSelected() ? TAB_SELECTED : PANEL_SURFACE); g.fillRect(0, 0, getWidth(), getHeight()); super.paintComponent(g); } }; btn.setFocusPainted(false); btn.setContentAreaFilled(false); btn.setForeground(TEXT_MAIN); btn.setFont(new Font("Segoe UI", Font.BOLD, 14)); btn.setHorizontalAlignment(SwingConstants.LEFT); btn.setBorder(new EmptyBorder(0, 20, 0, 0)); return btn; }
 
-    private JPanel createSkillTile(SkillData data) { JPanel tile = new JPanel(new GridBagLayout()); tile.setBackground(PANEL_SURFACE); tile.setBorder(new LineBorder(BORDER_DIM)); GridBagConstraints gbc = new GridBagConstraints(); gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.gridx = 0; JPanel top = new JPanel(new BorderLayout()); top.setOpaque(false); JLabel icon = new JLabel(loadSkillIcon(data.skill)); data.lblLevel.setForeground(COLOR_BLOOD); data.lblLevel.setFont(new Font("Arial", Font.BOLD, 18)); top.add(icon, BorderLayout.WEST); top.add(data.lblLevel, BorderLayout.EAST); data.lblXpString.setForeground(TEXT_DIM); data.lblXpString.setFont(new Font("Monospaced", Font.PLAIN, 10)); data.mainBar.setForeground(COLOR_BLOOD); data.mainBar.setBackground(Color.BLACK); gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1; tile.add(data.lblXpString, gbc); gbc.gridy = 2; tile.add(data.mainBar, gbc);
+    private JPanel createSkillTile(SkillData data) { JPanel tile = new JPanel(new GridBagLayout()); tile.setBackground(PANEL_SURFACE); tile.setBorder(new LineBorder(COLOR_BORDER_DIM)); GridBagConstraints gbc = new GridBagConstraints(); gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.gridx = 0; JPanel top = new JPanel(new BorderLayout()); top.setOpaque(false); JLabel icon = new JLabel(loadSkillIcon(data.skill)); data.lblLevel.setForeground(COLOR_BLOOD); data.lblLevel.setFont(new Font("Arial", Font.BOLD, 18)); top.add(icon, BorderLayout.WEST); top.add(data.lblLevel, BorderLayout.EAST); data.lblXpString.setForeground(TEXT_DIM); data.lblXpString.setFont(new Font("Monospaced", Font.PLAIN, 10)); data.mainBar.setForeground(COLOR_BLOOD); data.mainBar.setBackground(Color.BLACK); gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1; tile.add(data.lblXpString, gbc); gbc.gridy = 2; tile.add(data.mainBar, gbc);
         tile.addMouseListener(new MouseAdapter() {
             @Override public void mousePressed(MouseEvent e) {
                 if (e.getButton() == MouseEvent.BUTTON1) {
                     data.isTracking = !data.isTracking;
-                    tile.setBorder(new LineBorder(data.isTracking ? COLOR_BLOOD : BORDER_DIM, 1));
+                    tile.setBorder(new LineBorder(data.isTracking ? COLOR_BLOOD : COLOR_BORDER_DIM, 1));
                     refreshTrackerList();
                 }
             }
@@ -2349,7 +2360,7 @@ public class DreamBotMenu extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 modelTaskList.clear();
                 modelTaskLibrary.clear();
-                allPresets.clear(); // Clear presets before loading fresh from the presets column
+                modelPresets.clear(); // Clear presets before loading fresh from the presets column
                 updateUI();
             });
 
@@ -2370,7 +2381,8 @@ public class DreamBotMenu extends JFrame {
      */
     private List<Preset> capturePresets() {
         List<Preset> snapshot = new ArrayList<>();
-        for (Preset p : allPresets) {
+        for (Object obj : modelPresets.toArray()) {
+            Preset p = (Preset) obj;
             snapshot.add(new Preset(p.name, new ArrayList<>(p.tasks)));
         }
         return snapshot;
@@ -2393,7 +2405,7 @@ public class DreamBotMenu extends JFrame {
                     captureInventory(),
                     captureWorn(),
                     captureSkills(),
-                    () -> setStatus("Autosave complete!")
+                    () -> setStatus("Save successful!")
             );
 
             Logger.log(Logger.LogType.INFO, "Autosaving all data columns...");
@@ -2416,7 +2428,7 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    private class SkillData { final Skill skill; final JProgressBar mainBar = new JProgressBar(0, 100); final JLabel lblLevel = new JLabel("1"), lblXpString = new JLabel("0/0"); final JPanel trackerPanel = new JPanel(new GridLayout(0, 1, 2, 2)); final JLabel lblGained = new JLabel(), lblPerHour = new JLabel(), lblRemaining = new JLabel(), lblTTL = new JLabel(), lblProj = new JLabel(), lblActs = new JLabel(); final int startXP, startLevel; boolean isTracking = false; SkillData(Skill s) { this.skill = s; this.startXP = Skills.getExperience(s); this.startLevel = Skills.getRealLevel(s); trackerPanel.setBackground(new Color(30, 30, 30)); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(BORDER_DIM), " " + s.name() + " "); b.setTitleColor(COLOR_BLOOD); trackerPanel.setBorder(b); JLabel[] ls = {lblGained, lblPerHour, lblRemaining, lblActs, lblTTL, lblProj}; for (JLabel l : ls) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.PLAIN, 12)); trackerPanel.add(l); } } void update(int curXp, int curLvl, long start, int ph) { int curMin = Skills.getExperienceForLevel(curLvl), curMax = Skills.getExperienceForLevel(curLvl + 1); lblLevel.setText(String.valueOf(curLvl)); lblXpString.setText(String.format("%,d / %,d XP", curXp, curMax)); mainBar.setValue((int) (((double)(curXp - curMin) / Math.max(1, curMax - curMin)) * 100)); long elapsed = System.currentTimeMillis() - start; int xph = (int) (Math.max(0, curXp - startXP) / Math.max(0.0001, elapsed / 3600000.0)); int rem = Math.max(0, curMax - curXp); lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP)); lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph)); lblRemaining.setText(" TO LEVEL: " + String.format("%,d", rem)); if (xph > 0) { lblTTL.setText(String.format(" TIME TO L: %.2f hrs", (double) rem / xph)); lblProj.setText(String.format(" PROJ (%dH): Lvl %d", ph, curLvl + (xph * ph / 100000))); } } }
+    private class SkillData { final Skill skill; final JProgressBar mainBar = new JProgressBar(0, 100); final JLabel lblLevel = new JLabel("1"), lblXpString = new JLabel("0/0"); final JPanel trackerPanel = new JPanel(new GridLayout(0, 1, 2, 2)); final JLabel lblGained = new JLabel(), lblPerHour = new JLabel(), lblRemaining = new JLabel(), lblTTL = new JLabel(), lblProj = new JLabel(), lblActs = new JLabel(); final int startXP, startLevel; boolean isTracking = false; SkillData(Skill s) { this.skill = s; this.startXP = Skills.getExperience(s); this.startLevel = Skills.getRealLevel(s); trackerPanel.setBackground(new Color(30, 30, 30)); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(COLOR_BORDER_DIM), " " + s.name() + " "); b.setTitleColor(COLOR_BLOOD); trackerPanel.setBorder(b); JLabel[] ls = {lblGained, lblPerHour, lblRemaining, lblActs, lblTTL, lblProj}; for (JLabel l : ls) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.PLAIN, 12)); trackerPanel.add(l); } } void update(int curXp, int curLvl, long start, int ph) { int curMin = Skills.getExperienceForLevel(curLvl), curMax = Skills.getExperienceForLevel(curLvl + 1); lblLevel.setText(String.valueOf(curLvl)); lblXpString.setText(String.format("%,d / %,d XP", curXp, curMax)); mainBar.setValue((int) (((double)(curXp - curMin) / Math.max(1, curMax - curMin)) * 100)); long elapsed = System.currentTimeMillis() - start; int xph = (int) (Math.max(0, curXp - startXP) / Math.max(0.0001, elapsed / 3600000.0)); int rem = Math.max(0, curMax - curXp); lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP)); lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph)); lblRemaining.setText(" TO LEVEL: " + String.format("%,d", rem)); if (xph > 0) { lblTTL.setText(String.format(" TIME TO L: %.2f hrs", (double) rem / xph)); lblProj.setText(String.format(" PROJ (%dH): Lvl %d", ph, curLvl + (xph * ph / 100000))); } } }
 
     // --- Snapshot Classes & Capture Methods ---
     public static class BuilderSnapshot {
@@ -2433,9 +2445,9 @@ public class DreamBotMenu extends JFrame {
         snapshot.taskName = taskNameInput != null ? taskNameInput.getText() : "";
         snapshot.taskDescription = taskDescriptionInput != null ? taskDescriptionInput.getText() : "";
         snapshot.taskStatus = taskStatusInput != null ? taskStatusInput.getText() : "";
-        snapshot.selectedAction = actionCombo != null && actionCombo.getSelectedItem() != null
-                ? actionCombo.getSelectedItem().toString() : "";
-        snapshot.targetName = inputTargetName != null ? inputTargetName.getText() : "";
+        snapshot.selectedAction = actionSelector != null && actionSelector.getSelectedItem() != null
+                ? actionSelector.getSelectedItem().toString() : "";
+        //snapshot.targetName = paramTarget != null ? paramTarget.getText() : "";
         snapshot.actions = new ArrayList<>();
         for (int i = 0; i < modelTaskBuilder.getSize(); i++)
             snapshot.actions.add(modelTaskBuilder.getElementAt(i));
@@ -2548,8 +2560,6 @@ public class DreamBotMenu extends JFrame {
         return xp;
     }
 
-    // --- PRESET LOGIC ADDITIONS ---
-
     private JPanel createPresetControlPanel() {
         JPanel container = new JPanel(new BorderLayout(5, 0));
         container.setOpaque(false);
@@ -2578,8 +2588,36 @@ public class DreamBotMenu extends JFrame {
 
         JPanel nav = new JPanel(new GridLayout(2, 1, 0, 2));
         nav.setOpaque(false);
+
+        // Navigation Up (Previous Page)
         btnPageUp = createButton("▲");
+        btnPageUp.setPreferredSize(new Dimension(30, 0));
+        // Ensure the button remains enabled so the user can click it to see the toast
+        btnPageUp.setEnabled(true);
+        btnPageUp.addActionListener(e -> {
+            if (currentPresetPage > 0) {
+                currentPresetPage--;
+                refreshPresetButtonLabels();
+                this.showToast("Page " + (currentPresetPage + 1), btnPageUp, true);
+            } else {
+                // Literal requirement: feedback when no more pages exist upwards
+                this.showToast("No more presets!", btnPageUp, false);
+            }
+        });
+
+        // Navigation Down (Next Page)
         btnPageDown = createButton("▼");
+        btnPageDown.setEnabled(true);
+        btnPageDown.addActionListener(e -> {
+            if (canExpandPresets()) {
+                currentPresetPage++;
+                refreshPresetButtonLabels();
+                this.showToast("Page " + (currentPresetPage + 1), btnPageDown, true);
+            } else {
+                // Literal requirement: feedback when no more pages exist downwards
+                this.showToast("No more presets!", btnPageDown, false);
+            }
+        });
 
         btnPageUp.setPreferredSize(new Dimension(30, 0));
 
@@ -2634,21 +2672,36 @@ public class DreamBotMenu extends JFrame {
         return container;
     }
 
+    private String getPresetsForDatabase() {
+        if (modelPresets == null || modelPresets.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < modelPresets.size(); i++) {
+            Preset p = modelPresets.get(i);
+            // Using the pipe (|) to separate Name and Script, and semicolon (;) to separate Presets
+            sb.append(p.name).append("|").append(p.tasks);
+            if (i < modelPresets.size() - 1)
+                sb.append(";");
+
+        }
+        return sb.toString();
+    }
+
     private void handlePresetClick(int slot, ActionEvent e) {
         int actualIndex = (currentPresetPage * 4) + slot;
         boolean shift = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
         boolean ctrl = (e.getModifiers() & ActionEvent.CTRL_MASK) != 0;
 
         // Ensure list growth defaults to proper "Preset X" formatting
-        while (allPresets.size() <= actualIndex) {
-            allPresets.add(new Preset("Preset " + (allPresets.size() + 1), new ArrayList<>()));
-        }
+        while (modelPresets.size() <= actualIndex)
+            modelPresets.addElement(new Preset("Preset " + (modelPresets.size() + 1), new ArrayList<>()));
 
         ///  Ctrl + shift click preset to rename
         if (ctrl && shift) {
             String newName = JOptionPane.showInputDialog(this, "Enter preset name:");
             if (newName != null && !newName.trim().isEmpty())
-                allPresets.get(actualIndex).name = newName.trim();
+                modelPresets.get(actualIndex).name = newName.trim();
 
         /// Shift click preset to save
         } else if (shift) {
@@ -2657,8 +2710,8 @@ public class DreamBotMenu extends JFrame {
             for (int i = 0; i < modelTaskList.size(); i++)
                 currentTasks.add(new Task(modelTaskList.getElementAt(i)));
 
-            String currentName = allPresets.get(actualIndex).name;
-            allPresets.set(actualIndex, new Preset(currentName, currentTasks));
+            String currentName = modelPresets.get(actualIndex).name;
+            modelPresets.set(actualIndex, new Preset(currentName, currentTasks));
             // TODO decide whether or not to select the preset on save
             selectedPresetIndex = actualIndex; // Select it upon saving
             refreshPresetButtonLabels();
@@ -2667,7 +2720,7 @@ public class DreamBotMenu extends JFrame {
         /// Normal click to load
         } else {
             // fetch the selected preset object using the preset buttons index
-            Preset preset = allPresets.get(actualIndex);
+            Preset preset = modelPresets.get(actualIndex);
 
             if (preset.tasks.isEmpty()) {
                 this.showToast(preset.name + " is empty!", presetButtons[slot], false);
@@ -2692,39 +2745,34 @@ public class DreamBotMenu extends JFrame {
 
     private void loadPreset(int index) {
         try {
-            ///  Fetch the preset object using the passed index
-            Preset p = allPresets.get(index);
+            Preset p = modelPresets.get(index);
 
-            ///  Validate the passed index
             if (p == null)
                 throw new IndexOutOfBoundsException("Unable to index a null preset object!");
 
             if (p.tasks.isEmpty())
                 throw new IndexOutOfBoundsException("Unable to index a empty preset object!");
 
-            ///  Perform the load operation
-            // update selected preset index
             selectedPresetIndex = index;
-            // highlight the preset button by using index modulus preset_columns
-            int localButtonIndex = index % PRESET_COLUMNS;
 
-            // highlight the specific button from your array
-            presetButtons[localButtonIndex].setSelected(true);
-            refreshTaskListTab();
+            // Force color update on EDT
+            SwingUtilities.invokeLater(() -> {
+                refreshPresetButtonLabels();
+                refreshTaskListTab();
+            });
 
         } catch (IndexOutOfBoundsException i) {
             Logger.log(Logger.LogType.ERROR, i.getMessage());
             i.printStackTrace();
         }
-        
     }
 
     private void promptAndDeletePreset() {
-        if (selectedPresetIndex == -1 || selectedPresetIndex >= allPresets.size()) {
+        if (selectedPresetIndex == -1 || selectedPresetIndex >= modelPresets.size()) {
             return; // Safety guard: ignore delete press if nothing valid is selected
         }
 
-        Preset p = allPresets.get(selectedPresetIndex);
+        Preset p = modelPresets.get(selectedPresetIndex);
         int choice = JOptionPane.showConfirmDialog(this,
                 "WARNING: You are about to delete '" + p.name + "'.\nThis will shift all subsequent presets down. Continue?",
                 "Delete Preset?",
@@ -2733,13 +2781,13 @@ public class DreamBotMenu extends JFrame {
 
         if (choice == JOptionPane.YES_OPTION) {
             // Squashes the ArrayList left automatically
-            allPresets.remove(selectedPresetIndex);
+            modelPresets.remove(selectedPresetIndex);
 
             // Clear selection because it's been removed
             selectedPresetIndex = -1;
 
             // If squashing makes the current page completely empty, bump back a page
-            if (currentPresetPage > 0 && (currentPresetPage * 4) >= allPresets.size()) {
+            if (currentPresetPage > 0 && (currentPresetPage * 4) >= modelPresets.size()) {
                 currentPresetPage--;
                 if (currentPresetPage == 0) btnPageUp.setEnabled(false);
             }
@@ -2752,26 +2800,25 @@ public class DreamBotMenu extends JFrame {
     private void refreshPresetButtonLabels() {
         for (int i = 0; i < 4; i++) {
             int actualIndex = (currentPresetPage * 4) + i;
-
             // Reset foreground explicitly to prevent unreadable text
             presetButtons[i].setForeground(Color.WHITE);
 
-            if (actualIndex < allPresets.size()) {
-                Preset p = allPresets.get(actualIndex);
+            if (actualIndex < modelPresets.size()) {
+                Preset p = modelPresets.get(actualIndex);
                 presetButtons[i].setText(p.name);
 
                 // Color Logic mapped exactly to your request:
-                if (actualIndex == selectedPresetIndex) {
-                    presetButtons[i].setBackground(COLOR_ORANGE); // Selected
-                } else if (p.tasks.isEmpty()) {
-                    presetButtons[i].setBackground(COLOR_BTN_BACKGROUND);   // Empty
-                } else {
-                    presetButtons[i].setBackground(COLOR_BLOOD);  // Filled
-                }
+                if (actualIndex == selectedPresetIndex)
+                    presetButtons[i].setBackground(COLOR_BTN_ADD); // Selected
+                 else if (p.tasks.isEmpty())
+                    presetButtons[i].setBackground(COLOR_BTN_BACKGROUND); // Empty
+                 else
+                    presetButtons[i].setBackground(COLOR_BLOOD); // Filled
+
             } else {
                 // Formatting for uninitialized presets beyond current size
                 presetButtons[i].setText("Preset " + (actualIndex + 1));
-                presetButtons[i].setBackground(actualIndex == selectedPresetIndex ? COLOR_ORANGE : COLOR_BTN_BACKGROUND);
+                presetButtons[i].setBackground(actualIndex == selectedPresetIndex ? COLOR_BTN_ADD : COLOR_BTN_BACKGROUND);
             }
 
             // repaint the whole tab to finalize gui update
@@ -2783,7 +2830,7 @@ public class DreamBotMenu extends JFrame {
         // Check if current 4 are filled
         for (int i = 0; i < 4; i++) {
             int idx = (currentPresetPage * 4) + i;
-            if (idx >= allPresets.size() || allPresets.get(idx).tasks.isEmpty())
+            if (idx >= modelPresets.size() || modelPresets.get(idx).tasks.isEmpty())
                 return false;
         }
 

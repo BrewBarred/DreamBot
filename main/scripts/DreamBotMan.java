@@ -11,6 +11,8 @@ import org.dreambot.api.wrappers.interactive.Player;
 import javax.swing.*;
 import java.awt.*;
 
+import main.actions.Action;
+
 public abstract class DreamBotMan extends AbstractScript implements GameStateListener {
     ///  Class scope fields
 
@@ -100,7 +102,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     }
 
     @Override
-    public final int onLoop() {
+    public int onLoop() {
         try {
             if (!preLoop())
                 throw new Exception("Error executing pre loop logic!");
@@ -116,7 +118,8 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             // access the queue and return early if its invalid
             DefaultListModel<DreamBotMenu.Task> queue = menu.getModelTaskList();
             if (queue == null || queue.isEmpty()) {
-                menu.setStatus("Status: Queue Empty");
+                menu.setStatus("Queue Empty");
+                menu.pause();
                 return 1000;
             }
 
@@ -133,14 +136,14 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             if (currentTask != null) {
                 // update status using task status field which is always the initial message to display
                 // (develops further as actions are executed)
-                menu.setStatus("Status: " + currentTask.getStatus());
+                menu.setStatus(currentTask.getStatus());
 
                 // if this task still has actions to complete
                 boolean taskComplete = true;
                 if (currentTask.getActions() != null) {
                     // for each action in this task
-                    for (DreamBotMenu.Action action : currentTask.getActions()) {
-                        if (action == null){ //|| action.actionType == null) {
+                    for (Action action : currentTask.getActions()) {
+                        if (action == null){
                             Logger.log("Skipping null/invalid action in task: " + currentTask.getName());
                             continue;
                         }

@@ -12,6 +12,7 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
+import main.actions.Action;
 /**
  * DataMan (Data Manager) handles all HTTP communication with the Supabase database.
  * It provides methods to save and load player-specific settings and presets.
@@ -362,6 +363,7 @@ public class DataMan {
                 payload.put("last_accessed", sdf.format(new java.util.Date()));
                 payload.put("tasks", taskListData);
                 payload.put("library", libraryMap);
+                payload.put("presets", presets);
                 payload.put("builder", builder);
                 payload.put("settings", settings);
                 payload.put("last_known_location", loc);

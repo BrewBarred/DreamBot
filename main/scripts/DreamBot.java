@@ -9,11 +9,10 @@ import java.awt.*;
 @ScriptManifest(
         author = "ETA",
         name = "DreamBot",
-        version = 2.0,
+        version = 3.0,
         category = Category.MISC
 )
 public class DreamBot extends DreamBotMan {
-
     @Override
     public void postResume() {
 
