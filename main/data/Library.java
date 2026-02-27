@@ -2,30 +2,22 @@ package main.data;
 
 import org.dreambot.api.methods.interactive.NPCs;
 import org.dreambot.api.methods.interactive.Players;
+import org.dreambot.api.methods.map.Map;
 import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.walking.impl.Walking;
+import org.dreambot.api.methods.walking.pathfinding.impl.local.LocalPathFinder;
 import org.dreambot.api.utilities.Logger;
 import org.dreambot.api.wrappers.interactive.NPC;
+import org.dreambot.api.wrappers.interactive.GameObject;
 
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static main.actions.Action.parseStringIntoTile;
 
-/**
- * F2P OSRS Game Library
- *
- * A single-file reference library for common F2P entities.
- * Usage examples:
- *   Library.Npcs.BANKER.walkTo();
- *   Library.GameObjects.BANK_BOOTH.walkTo();
- *   Library.GroundItems.CHAOS_RUNE_DARK_WARRIORS_FORTRESS.walkTo();
- *   Library.Locations.Varrock.GENERAL_STORE.walkTo();
- *   Library.Npcs.find("Banker").walkTo();
- */
 public final class Library {
+
+    public enum TargetType { COORDINATE, PLAYER, GAME_OBJECT, NPC, INVENTORY_ITEM, GROUND_ITEM, UNKNOWN }
 
     private Library() {}
 
@@ -33,10 +25,9 @@ public final class Library {
     // NPCs
     // =========================================================================
     public enum Npcs {
-
         // --- Bankers ---
-        BANKER                          ("Banker", new Tile(3218, 3218, 0), "Lumbridge", "Bank"),
-        BANK_TUTOR                      ("Bank Tutor", new Tile(3232, 3226, 0), "Lumbridge", "Talk-to"),
+        BANKER                          ("Banker", new Tile(3208, 3221, 2), "Lumbridge", "Bank"),
+        BANK_TUTOR                      ("Bank Tutor", new Tile(3209, 3221, 2), "Lumbridge", "Talk-to"),
 
         // --- Shops ---
         GRAND_EXCHANGE_CLERK            ("Exchange Worker", new Tile(3164, 3487, 0), "Grand Exchange", "Exchange"),
@@ -99,37 +90,29 @@ public final class Library {
             this.primaryInteraction = primaryInteraction;
         }
 
-        /**
-         * Gets the current tile of the nearest matching NPC in the game world.
-         * Falls back to the static spawnTile if the NPC is not found.
-         */
+        public NPC getEntity() {
+            return NPCs.closest(n -> n != null && n.getName() != null && n.getName().equalsIgnoreCase(npcName));
+        }
+
         public Tile getTile() {
-            NPC npc = NPCs.closest(n -> n != null && n.getName() != null
-                    && n.getName().equalsIgnoreCase(npcName));
+            NPC npc = getEntity();
             return npc != null ? npc.getTile() : approxTile;
         }
 
         public boolean walkTo() {
             Tile tile = getTile();
-            if (tile != null)
-                return Walking.walk(tile);
-
-            return false;
+            return tile != null && Walking.walk(tile);
         }
 
         public static Npcs find(String name) {
-            return Arrays.stream(values())
-                    .filter(n -> n.npcName.equalsIgnoreCase(name))
-                    .findFirst().orElse(null);
+            return Arrays.stream(values()).filter(n -> n.npcName.equalsIgnoreCase(name)).findFirst().orElse(null);
         }
     }
 
     // =========================================================================
     // GAME OBJECTS
     // =========================================================================
-
     public enum GameObjects {
-
         // --- Banking ---
         BANK_BOOTH                      ("Bank booth"),
         BANK_CHEST                      ("Bank chest"),
@@ -201,37 +184,31 @@ public final class Library {
         BARREL                          ("Barrel");
 
         public final String objectName;
+        GameObjects(String objectName) { this.objectName = objectName; }
 
-        GameObjects(String objectName) {
-            this.objectName = objectName;
+        public GameObject getEntity() {
+            return org.dreambot.api.methods.interactive.GameObjects.closest(o -> o != null && o.getName() != null && o.getName().equalsIgnoreCase(objectName));
         }
 
         public Tile getTile() {
-            var obj = org.dreambot.api.methods.interactive.GameObjects.closest(o -> o != null && o.getName() != null
-                    && o.getName().equalsIgnoreCase(objectName));
+            GameObject obj = getEntity();
             return obj != null ? obj.getTile() : null;
         }
 
-        public void walkTo() {
+        public boolean walkTo() {
             Tile tile = getTile();
-            if (tile != null) Walking.walk(tile);
+            return tile != null && Walking.walk(tile);
         }
 
         public static GameObjects find(String name) {
-            return Arrays.stream(values())
-                    .filter(o -> o.objectName.equalsIgnoreCase(name))
-                    .findFirst().orElse(null);
+            return Arrays.stream(values()).filter(o -> o.objectName.equalsIgnoreCase(name)).findFirst().orElse(null);
         }
     }
 
     // =========================================================================
-    // GROUND ITEM SPAWNS  (F2P only, static spawns — not monster drops)
-    // Tile coordinates: (x, y, plane)
-    // Respawn times are approximate base rates on a standard world.
+    // GROUND ITEMS
     // =========================================================================
-
     public enum GroundItems {
-
         // --- Runes ---
         // Air runes — just outside Lumbridge Castle, near the Lumbridge Swamp
         AIR_RUNE_LUMBRIDGE              ("Air rune",    new Tile(3244, 3162, 0), 30),
@@ -290,383 +267,383 @@ public final class Library {
 
         public final String itemName;
         public final Tile spawnTile;
-        /** Base respawn time in seconds (on a standard world). 0 = always present. */
         public final int respawnSeconds;
 
         GroundItems(String itemName, Tile spawnTile, int respawnSeconds) {
-            this.itemName       = itemName;
-            this.spawnTile      = spawnTile;
+            this.itemName = itemName;
+            this.spawnTile = spawnTile;
             this.respawnSeconds = respawnSeconds;
         }
-
-        /** Walk to the known static spawn tile. */
-        public void walkTo() {
-            Walking.walk(spawnTile);
-        }
-
         /**
-         * Try to find the item as a live GroundItem near the spawn tile, then walk to it.
-         * Falls back to the static spawn tile if not currently visible.
-         */
-        public void walkToLive() {
-            var item = org.dreambot.api.methods.item.GroundItems.closest(i -> i != null && i.getName() != null
-                    && i.getName().equalsIgnoreCase(itemName));
-            if (item != null) Walking.walk(item.getTile());
+         //         * Try to find the item as a live GroundItem near the spawn tile, then walk to it.
+         //         * Falls back to the static spawn tile if not currently visible.
+         //         */
+        public void walkTo() {
+            var item = org.dreambot.api.methods.item.GroundItems.closest(
+                    i -> i != null
+                            && i.getName() != null
+                            && i.getName().equalsIgnoreCase(itemName));
+
+            if (item != null)
+                Walking.walk(item.getTile());
             else Walking.walk(spawnTile);
         }
 
         public static GroundItems find(String name) {
-            return Arrays.stream(values())
-                    .filter(i -> i.itemName.equalsIgnoreCase(name))
-                    .findFirst().orElse(null);
+            return Arrays.stream(values()).filter(i -> i.itemName.equalsIgnoreCase(name)).findFirst().orElse(null);
         }
     }
+
+    //    // =========================================================================
+//    // LOCATIONS — cities and named points of interest within them
+//    // Named exactly as they appear on the in-game map where possible.
+//    // =========================================================================
+//
+//    /** Top-level city/region tiles (central reference points). */
+//    public enum Cities {
+//        LUMBRIDGE        (3222, 3218, 0),
+//        VARROCK          (3210, 3424, 0),
+//        FALADOR          (2964, 3378, 0),
+//        DRAYNOR_VILLAGE  (3093, 3244, 0),
+//        AL_KHARID        (3293, 3163, 0),
+//        EDGEVILLE        (3087, 3490, 0),
+//        BARBARIAN_VILLAGE(3105, 3421, 0),
+//        PORT_SARIM       (3015, 3193, 0),
+//        RIMMINGTON       (2954, 3211, 0),
+//        WIZARDS_TOWER    (3104, 3162, 0),
+//        DWARVEN_MINE     (3025, 3339, 0), // surface entrance
+//        GRAND_EXCHANGE   (3164, 3479, 0);
+//
+//        public final Tile tile;
+//        Cities(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//        public void walkTo() { Walking.walk(tile); }
+//    }
+//
+//    // -------------------------------------------------------------------------
+//
+//    public static final class Lumbridge {
+//        private Lumbridge() {}
+//        public enum Location {
+//            CASTLE                  (3222, 3218, 0),
+//            CASTLE_KITCHEN          (3209, 3215, 0),
+//            CASTLE_BASEMENT         (3209, 3209, 0),
+//            BANK                    (3208, 3220, 2),  // 2nd floor
+//            GENERAL_STORE           (3212, 3247, 0),
+//            LUMBRIDGE_SWAMP         (3183, 3175, 0),
+//            LUMBRIDGE_SWAMP_FISHING (3238, 3165, 0),
+//            CHICKEN_FARM            (3185, 3268, 0),
+//            COW_FIELD               (3258, 3266, 0),
+//            GRAVEYARD               (3231, 3190, 0),
+//            MILL                    (3166, 3308, 0),
+//            FISHING_SHOP            (3239, 3166, 0),
+//            GOBLIN_HUT              (3245, 3238, 0),
+//            RIVER_LUM_CROSSING      (3229, 3230, 0),
+//            LUMBRIDGE_GUIDE         (3232, 3232, 0);
+//
+//            public final Tile tile;
+//            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//            public void walkTo() { Walking.walk(tile); }
+//        }
+//    }
+//
+//    // -------------------------------------------------------------------------
+//
+//    public static final class Varrock {
+//        private Varrock() {}
+//        public enum Location {
+//            CENTRE                  (3210, 3424, 0),
+//            EAST_BANK               (3253, 3420, 0),
+//            WEST_BANK               (3185, 3436, 0),
+//            GRAND_EXCHANGE          (3164, 3479, 0),
+//            GENERAL_STORE           (3212, 3415, 0),
+//            SWORD_SHOP              (3252, 3402, 0),  // Scavvo's Rune Store (also swords)
+//            STAFF_SHOP              (3203, 3419, 0),  // Zaff's Superior Staffs
+//            ARMOUR_SHOP             (3258, 3432, 0),  // Horvik's Armour Shop
+//            RUNE_SHOP               (3253, 3401, 0),  // Aubury's Rune Shop
+//            VARROCK_PALACE          (3210, 3468, 0),
+//            PALACE_LIBRARY          (3209, 3494, 0),
+//            VARROCK_MUSEUM          (3256, 3449, 0),
+//            CHAMPIONS_GUILD         (3190, 3363, 0),
+//            DARK_WIZARDS_SOUTH      (3183, 3368, 0),
+//            ANVIL_WEST              (3188, 3426, 0),
+//            CLOTHING_STORE          (3213, 3416, 0),  // Thessalia's Fine Clothes
+//            ROMEO_LOCATION          (3211, 3422, 0),
+//            JULIET_HOUSE            (3159, 3427, 1);  // upstairs, west Varrock
+//
+//            public final Tile tile;
+//            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//            public void walkTo() { Walking.walk(tile); }
+//        }
+//    }
+//
+//    // -------------------------------------------------------------------------
+//
+//    public static final class Falador {
+//        private Falador() {}
+//        public enum Location {
+//            CENTRE                  (2964, 3378, 0),
+//            EAST_BANK               (3013, 3355, 0),
+//            WEST_BANK               (2946, 3368, 0),
+//            GENERAL_STORE           (2955, 3390, 0),
+//            SHIELD_SHOP             (2971, 3387, 0),  // Cassie's Shield Shop
+//            MINING_SHOP             (3013, 3376, 0),  // Nurmof's Pickaxe Shop (Dwarven Mine area)
+//            PARTY_ROOM              (3046, 3376, 0),
+//            FALADOR_PARK            (2990, 3374, 0),
+//            WHITE_KNIGHTS_CASTLE    (2976, 3343, 0),
+//            DWARVEN_MINE_ENTRANCE   (3025, 3339, 0),
+//            HAIRDRESSER             (2944, 3381, 0),
+//            CHEMIST                 (2932, 3213, 0),  // south, near Rimmington road
+//            ESTATE_AGENT            (3040, 3334, 0),
+//            CRAFTING_SHOP           (2971, 3405, 0),  // Peksa's Helmet Shop
+//            ANVIL_SOUTH             (2974, 3313, 0);
+//
+//            public final Tile tile;
+//            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//            public void walkTo() { Walking.walk(tile); }
+//        }
+//    }
+//
+//    // -------------------------------------------------------------------------
+//
+//    public static final class Draynor {
+//        private Draynor() {}
+//        public enum Location {
+//            CENTRE                  (3093, 3244, 0),
+//            BANK                    (3092, 3243, 0),
+//            DRAYNOR_MANOR           (3108, 3353, 0),
+//            MARKET                  (3083, 3253, 0),
+//            FISHING_SPOT_WILLOWS    (3087, 3229, 0),
+//            JAIL                    (3128, 3245, 0),
+//            CHAMPIONS_CAPE_SHOP     (3083, 3254, 0),
+//            SKULLS_FISHING_SHOP     (3086, 3232, 0),
+//            WIZARD_TOWER_ROAD       (3104, 3200, 0);
+//
+//            public final Tile tile;
+//            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//            public void walkTo() { Walking.walk(tile); }
+//        }
+//    }
+//
+//    // -------------------------------------------------------------------------
+//
+//    public static final class AlKharid {
+//        private AlKharid() {}
+//        public enum Location {
+//            CENTRE                  (3293, 3163, 0),
+//            BANK                    (3269, 3167, 0),
+//            GENERAL_STORE           (3286, 3185, 0),
+//            WEAPON_SHOP             (3300, 3185, 0),  // Zeke's Superior Scimitars
+//            ARMOUR_SHOP             (3301, 3172, 0),  // Louie Legs' Armoured Legs
+//            SILK_MERCHANT           (3312, 3170, 0),
+//            CRAFTING_SHOP           (3285, 3190, 0),  // Dommik's Crafting Store
+//            MINING_SITE             (3299, 3283, 0),
+//            TOLL_GATE               (3268, 3229, 0),
+//            PALACE                  (3293, 3173, 0),
+//            RANGE_SHOP              (3232, 3171, 0),  // Ranael's Super Skirt Store
+//            DUEL_ARENA              (3315, 3236, 0);
+//
+//            public final Tile tile;
+//            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//            public void walkTo() { Walking.walk(tile); }
+//        }
+//    }
+//
+//    // -------------------------------------------------------------------------
+//
+//    public static final class Edgeville {
+//        private Edgeville() {}
+//        public enum Location {
+//            CENTRE                  (3087, 3490, 0),
+//            BANK                    (3094, 3491, 0),
+//            GENERAL_STORE           (3080, 3509, 0),
+//            DUNGEON_ENTRANCE        (3096, 3468, 0),  // trapdoor
+//            EDGEVILLE_MONASTERY     (3048, 3488, 0),
+//            RIVER_CROSSING          (3088, 3488, 0),
+//            WILDERNESS_DITCH        (3087, 3522, 0);
+//
+//            public final Tile tile;
+//            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//            public void walkTo() { Walking.walk(tile); }
+//        }
+//    }
+//
+//    // -------------------------------------------------------------------------
+//
+//    public static final class PortSarim {
+//        private PortSarim() {}
+//        public enum Location {
+//            CENTRE                  (3015, 3193, 0),
+//            GENERAL_STORE           (3012, 3213, 0),
+//            FISHING_SHOP            (3014, 3223, 0),  // Gerrant's Fishy Business
+//            RUNE_SHOP               (3013, 3228, 0),  // Betty's Magic Emporium
+//            FOOD_STORE              (3013, 3222, 0),  // Wydin's Food Store
+//            DOCK_TO_KARAMJA         (3029, 3217, 0),
+//            DOCK_TO_ENTRANA         (3041, 3236, 0),
+//            PUB_RUSTY_ANCHOR        (3045, 3256, 0),
+//            JAIL                    (3013, 3179, 0);
+//
+//            public final Tile tile;
+//            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//            public void walkTo() { Walking.walk(tile); }
+//        }
+//    }
+//
+//    // -------------------------------------------------------------------------
+//
+//    public static final class BarbarianVillage {
+//        private BarbarianVillage() {}
+//        public enum Location {
+//            CENTRE                  (3105, 3421, 0),
+//            BARBARIAN_HALL          (3101, 3434, 0),
+//            FISHING_SPOT            (3106, 3434, 0),
+//            STRONGHOLD_ENTRANCE     (3082, 3421, 0);
+//
+//            public final Tile tile;
+//            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//            public void walkTo() { Walking.walk(tile); }
+//        }
+//    }
+//
+//    // -------------------------------------------------------------------------
+//
+//    public static final class Rimmington {
+//        private Rimmington() {}
+//        public enum Location {
+//            CENTRE                  (2954, 3211, 0),
+//            GENERAL_STORE           (2969, 3212, 0),  // Rommik's Crafty Supplies
+//            MINING_SITE             (2975, 3240, 0),
+//            HOUSE_PORTAL            (2954, 3224, 0),
+//            SPAWN_BUILDING          (2976, 3362, 0);  // Bronze pickaxe / scimitar spawn building
+//
+//            public final Tile tile;
+//            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//            public void walkTo() { Walking.walk(tile); }
+//        }
+//    }
+//
+//    // -------------------------------------------------------------------------
+//
+//    public static final class WizardsTower {
+//        private WizardsTower() {}
+//        public enum Location {
+//            ENTRANCE                (3104, 3162, 0),
+//            GROUND_FLOOR            (3104, 3162, 0),
+//            FIRST_FLOOR             (3104, 3162, 1),
+//            SECOND_FLOOR            (3104, 3162, 2), // Wizard Mizgog
+//            ISLAND_SOUTH            (3104, 3155, 0);
+//
+//            public final Tile tile;
+//            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//            public void walkTo() { Walking.walk(tile); }
+//        }
+//    }
+//
+//    // -------------------------------------------------------------------------
+//
+//    public static final class DwarvenMine {
+//        private DwarvenMine() {}
+//        public enum Location {
+//            SURFACE_ENTRANCE        (3025, 3339, 0),
+//            UNDERGROUND_ENTRANCE    (3025, 9806, 0),
+//            IRON_ROCKS              (3017, 9805, 0),
+//            COAL_ROCKS              (3036, 9820, 0),
+//            MITHRIL_ROCKS           (3045, 9849, 0),
+//            GOLD_ROCKS              (3026, 9849, 0),
+//            NURMOF_PICKAXE_SHOP     (3013, 9796, 0);
+//
+//            public final Tile tile;
+//            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
+//            public void walkTo() { Walking.walk(tile); }
+//        }
+//    }
+
+    //    public static Npcs nearestNpc() {
+//        return Arrays.stream(Npcs.values())
+//                .filter(n -> n.getTile() != null)
+//                .min(Comparator.comparingInt(n -> (int) n.getTile().distance(Players.getLocal().getTile())))
+//                .orElse(null);
+//    }
+//
+//    public static GameObjects nearestObject() {
+//        return Arrays.stream(GameObjects.values())
+//                .filter(o -> o.getTile() != null)
+//                .min(Comparator.comparingInt(o -> (int) o.getTile().distance(Players.getLocal().getTile())))
+//                .orElse(null);
+//    }
+//
+//    public static GroundItems nearestGroundItem() {
+//        return Arrays.stream(GroundItems.values())
+//                .filter(i -> Players.getLocal().getTile().distance(i.spawnTile) < 20)
+//                .min(Comparator.comparingInt(i -> (int) Players.getLocal().getTile().distance(i.spawnTile)))
+//                .orElse(null);
+//    }
+//
+//    // --- Find all currently loaded/visible entries ---
+//
+//    public static List<Npcs> visibleNpcs() {
+//        return Arrays.stream(Npcs.values())
+//                .filter(n -> n.getTile() != null)
+//                .collect(Collectors.toList());
+//    }
+//
+//    public static List<GameObjects> visibleObjects() {
+//        return Arrays.stream(GameObjects.values())
+//                .filter(o -> o.getTile() != null)
+//                .collect(Collectors.toList());
+//    }
+//
+//    public static List<GroundItems> nearbySpawns(int radius) {
+//        Tile local = Players.getLocal().getTile();
+//        return Arrays.stream(GroundItems.values())
+//                .filter(i -> local.distance(i.spawnTile) <= radius)
+//                .collect(Collectors.toList());
+//    }
+//
+//    // --- Search by name across ALL enum types ---
+//
+//    public static void walkToAny(String name) {
+//        // Try NPCs first, then objects, then ground items
+//        Npcs npc = Npcs.find(name);
+//        if (npc != null) {
+//            npc.walkTo();
+//            return;
+//        }
+//
+//        GameObjects obj = GameObjects.find(name);
+//        if (obj != null) {
+//            obj.walkTo();
+//            return;
+//        }
+//
+//        GroundItems item = GroundItems.find(name);
+//        if (item != null) {
+//            item.walkTo();
+//        }
+//    }
+//
+//    // --- Dump everything to console (useful for debugging) ---
+//
+//    public static void printAll() {
+//        System.out.println("=== NPCs ===");
+//        Arrays.stream(Npcs.values()).forEach(n ->
+//                System.out.printf("%-40s visible=%-5s%n", n.name(), n.getTile() != null));
+//
+//        System.out.println("\n=== GAME OBJECTS ===");
+//        Arrays.stream(GameObjects.values()).forEach(o ->
+//                System.out.printf("%-40s visible=%-5s%n", o.name(), o.getTile() != null));
+//
+//        System.out.println("\n=== GROUND ITEM SPAWNS ===");
+//        Arrays.stream(GroundItems.values()).forEach(i ->
+//                System.out.printf("%-50s tile=%-20s respawn=%ds%n",
+//                        i.name(), i.spawnTile, i.respawnSeconds));
+//    }
 
     // =========================================================================
-    // LOCATIONS — cities and named points of interest within them
-    // Named exactly as they appear on the in-game map where possible.
+    // UTILITY METHODS
     // =========================================================================
-
-    /** Top-level city/region tiles (central reference points). */
-    public enum Cities {
-        LUMBRIDGE        (3222, 3218, 0),
-        VARROCK          (3210, 3424, 0),
-        FALADOR          (2964, 3378, 0),
-        DRAYNOR_VILLAGE  (3093, 3244, 0),
-        AL_KHARID        (3293, 3163, 0),
-        EDGEVILLE        (3087, 3490, 0),
-        BARBARIAN_VILLAGE(3105, 3421, 0),
-        PORT_SARIM       (3015, 3193, 0),
-        RIMMINGTON       (2954, 3211, 0),
-        WIZARDS_TOWER    (3104, 3162, 0),
-        DWARVEN_MINE     (3025, 3339, 0), // surface entrance
-        GRAND_EXCHANGE   (3164, 3479, 0);
-
-        public final Tile tile;
-        Cities(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-        public void walkTo() { Walking.walk(tile); }
-    }
-
-    // -------------------------------------------------------------------------
-
-    public static final class Lumbridge {
-        private Lumbridge() {}
-        public enum Location {
-            CASTLE                  (3222, 3218, 0),
-            CASTLE_KITCHEN          (3209, 3215, 0),
-            CASTLE_BASEMENT         (3209, 3209, 0),
-            BANK                    (3208, 3220, 2),  // 2nd floor
-            GENERAL_STORE           (3212, 3247, 0),
-            LUMBRIDGE_SWAMP         (3183, 3175, 0),
-            LUMBRIDGE_SWAMP_FISHING (3238, 3165, 0),
-            CHICKEN_FARM            (3185, 3268, 0),
-            COW_FIELD               (3258, 3266, 0),
-            GRAVEYARD               (3231, 3190, 0),
-            MILL                    (3166, 3308, 0),
-            FISHING_SHOP            (3239, 3166, 0),
-            GOBLIN_HUT              (3245, 3238, 0),
-            RIVER_LUM_CROSSING      (3229, 3230, 0),
-            LUMBRIDGE_GUIDE         (3232, 3232, 0);
-
-            public final Tile tile;
-            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-            public void walkTo() { Walking.walk(tile); }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-
-    public static final class Varrock {
-        private Varrock() {}
-        public enum Location {
-            CENTRE                  (3210, 3424, 0),
-            EAST_BANK               (3253, 3420, 0),
-            WEST_BANK               (3185, 3436, 0),
-            GRAND_EXCHANGE          (3164, 3479, 0),
-            GENERAL_STORE           (3212, 3415, 0),
-            SWORD_SHOP              (3252, 3402, 0),  // Scavvo's Rune Store (also swords)
-            STAFF_SHOP              (3203, 3419, 0),  // Zaff's Superior Staffs
-            ARMOUR_SHOP             (3258, 3432, 0),  // Horvik's Armour Shop
-            RUNE_SHOP               (3253, 3401, 0),  // Aubury's Rune Shop
-            VARROCK_PALACE          (3210, 3468, 0),
-            PALACE_LIBRARY          (3209, 3494, 0),
-            VARROCK_MUSEUM          (3256, 3449, 0),
-            CHAMPIONS_GUILD         (3190, 3363, 0),
-            DARK_WIZARDS_SOUTH      (3183, 3368, 0),
-            ANVIL_WEST              (3188, 3426, 0),
-            CLOTHING_STORE          (3213, 3416, 0),  // Thessalia's Fine Clothes
-            ROMEO_LOCATION          (3211, 3422, 0),
-            JULIET_HOUSE            (3159, 3427, 1);  // upstairs, west Varrock
-
-            public final Tile tile;
-            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-            public void walkTo() { Walking.walk(tile); }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-
-    public static final class Falador {
-        private Falador() {}
-        public enum Location {
-            CENTRE                  (2964, 3378, 0),
-            EAST_BANK               (3013, 3355, 0),
-            WEST_BANK               (2946, 3368, 0),
-            GENERAL_STORE           (2955, 3390, 0),
-            SHIELD_SHOP             (2971, 3387, 0),  // Cassie's Shield Shop
-            MINING_SHOP             (3013, 3376, 0),  // Nurmof's Pickaxe Shop (Dwarven Mine area)
-            PARTY_ROOM              (3046, 3376, 0),
-            FALADOR_PARK            (2990, 3374, 0),
-            WHITE_KNIGHTS_CASTLE    (2976, 3343, 0),
-            DWARVEN_MINE_ENTRANCE   (3025, 3339, 0),
-            HAIRDRESSER             (2944, 3381, 0),
-            CHEMIST                 (2932, 3213, 0),  // south, near Rimmington road
-            ESTATE_AGENT            (3040, 3334, 0),
-            CRAFTING_SHOP           (2971, 3405, 0),  // Peksa's Helmet Shop
-            ANVIL_SOUTH             (2974, 3313, 0);
-
-            public final Tile tile;
-            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-            public void walkTo() { Walking.walk(tile); }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-
-    public static final class Draynor {
-        private Draynor() {}
-        public enum Location {
-            CENTRE                  (3093, 3244, 0),
-            BANK                    (3092, 3243, 0),
-            DRAYNOR_MANOR           (3108, 3353, 0),
-            MARKET                  (3083, 3253, 0),
-            FISHING_SPOT_WILLOWS    (3087, 3229, 0),
-            JAIL                    (3128, 3245, 0),
-            CHAMPIONS_CAPE_SHOP     (3083, 3254, 0),
-            SKULLS_FISHING_SHOP     (3086, 3232, 0),
-            WIZARD_TOWER_ROAD       (3104, 3200, 0);
-
-            public final Tile tile;
-            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-            public void walkTo() { Walking.walk(tile); }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-
-    public static final class AlKharid {
-        private AlKharid() {}
-        public enum Location {
-            CENTRE                  (3293, 3163, 0),
-            BANK                    (3269, 3167, 0),
-            GENERAL_STORE           (3286, 3185, 0),
-            WEAPON_SHOP             (3300, 3185, 0),  // Zeke's Superior Scimitars
-            ARMOUR_SHOP             (3301, 3172, 0),  // Louie Legs' Armoured Legs
-            SILK_MERCHANT           (3312, 3170, 0),
-            CRAFTING_SHOP           (3285, 3190, 0),  // Dommik's Crafting Store
-            MINING_SITE             (3299, 3283, 0),
-            TOLL_GATE               (3268, 3229, 0),
-            PALACE                  (3293, 3173, 0),
-            RANGE_SHOP              (3232, 3171, 0),  // Ranael's Super Skirt Store
-            DUEL_ARENA              (3315, 3236, 0);
-
-            public final Tile tile;
-            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-            public void walkTo() { Walking.walk(tile); }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-
-    public static final class Edgeville {
-        private Edgeville() {}
-        public enum Location {
-            CENTRE                  (3087, 3490, 0),
-            BANK                    (3094, 3491, 0),
-            GENERAL_STORE           (3080, 3509, 0),
-            DUNGEON_ENTRANCE        (3096, 3468, 0),  // trapdoor
-            EDGEVILLE_MONASTERY     (3048, 3488, 0),
-            RIVER_CROSSING          (3088, 3488, 0),
-            WILDERNESS_DITCH        (3087, 3522, 0);
-
-            public final Tile tile;
-            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-            public void walkTo() { Walking.walk(tile); }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-
-    public static final class PortSarim {
-        private PortSarim() {}
-        public enum Location {
-            CENTRE                  (3015, 3193, 0),
-            GENERAL_STORE           (3012, 3213, 0),
-            FISHING_SHOP            (3014, 3223, 0),  // Gerrant's Fishy Business
-            RUNE_SHOP               (3013, 3228, 0),  // Betty's Magic Emporium
-            FOOD_STORE              (3013, 3222, 0),  // Wydin's Food Store
-            DOCK_TO_KARAMJA         (3029, 3217, 0),
-            DOCK_TO_ENTRANA         (3041, 3236, 0),
-            PUB_RUSTY_ANCHOR        (3045, 3256, 0),
-            JAIL                    (3013, 3179, 0);
-
-            public final Tile tile;
-            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-            public void walkTo() { Walking.walk(tile); }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-
-    public static final class BarbarianVillage {
-        private BarbarianVillage() {}
-        public enum Location {
-            CENTRE                  (3105, 3421, 0),
-            BARBARIAN_HALL          (3101, 3434, 0),
-            FISHING_SPOT            (3106, 3434, 0),
-            STRONGHOLD_ENTRANCE     (3082, 3421, 0);
-
-            public final Tile tile;
-            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-            public void walkTo() { Walking.walk(tile); }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-
-    public static final class Rimmington {
-        private Rimmington() {}
-        public enum Location {
-            CENTRE                  (2954, 3211, 0),
-            GENERAL_STORE           (2969, 3212, 0),  // Rommik's Crafty Supplies
-            MINING_SITE             (2975, 3240, 0),
-            HOUSE_PORTAL            (2954, 3224, 0),
-            SPAWN_BUILDING          (2976, 3362, 0);  // Bronze pickaxe / scimitar spawn building
-
-            public final Tile tile;
-            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-            public void walkTo() { Walking.walk(tile); }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-
-    public static final class WizardsTower {
-        private WizardsTower() {}
-        public enum Location {
-            ENTRANCE                (3104, 3162, 0),
-            GROUND_FLOOR            (3104, 3162, 0),
-            FIRST_FLOOR             (3104, 3162, 1),
-            SECOND_FLOOR            (3104, 3162, 2), // Wizard Mizgog
-            ISLAND_SOUTH            (3104, 3155, 0);
-
-            public final Tile tile;
-            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-            public void walkTo() { Walking.walk(tile); }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-
-    public static final class DwarvenMine {
-        private DwarvenMine() {}
-        public enum Location {
-            SURFACE_ENTRANCE        (3025, 3339, 0),
-            UNDERGROUND_ENTRANCE    (3025, 9806, 0),
-            IRON_ROCKS              (3017, 9805, 0),
-            COAL_ROCKS              (3036, 9820, 0),
-            MITHRIL_ROCKS           (3045, 9849, 0),
-            GOLD_ROCKS              (3026, 9849, 0),
-            NURMOF_PICKAXE_SHOP     (3013, 9796, 0);
-
-            public final Tile tile;
-            Location(int x, int y, int z) { this.tile = new Tile(x, y, z); }
-            public void walkTo() { Walking.walk(tile); }
-        }
-    }
-
-    public static Npcs nearestNpc() {
-        return Arrays.stream(Npcs.values())
-                .filter(n -> n.getTile() != null)
-                .min(Comparator.comparingInt(n -> (int) n.getTile().distance(Players.getLocal().getTile())))
-                .orElse(null);
-    }
-
-    public static GameObjects nearestObject() {
-        return Arrays.stream(GameObjects.values())
-                .filter(o -> o.getTile() != null)
-                .min(Comparator.comparingInt(o -> (int) o.getTile().distance(Players.getLocal().getTile())))
-                .orElse(null);
-    }
-
-    public static GroundItems nearestGroundItem() {
-        return Arrays.stream(GroundItems.values())
-                .filter(i -> Players.getLocal().getTile().distance(i.spawnTile) < 20)
-                .min(Comparator.comparingInt(i -> (int) Players.getLocal().getTile().distance(i.spawnTile)))
-                .orElse(null);
-    }
-
-    // --- Find all currently loaded/visible entries ---
-
-    public static List<Npcs> visibleNpcs() {
-        return Arrays.stream(Npcs.values())
-                .filter(n -> n.getTile() != null)
-                .collect(Collectors.toList());
-    }
-
-    public static List<GameObjects> visibleObjects() {
-        return Arrays.stream(GameObjects.values())
-                .filter(o -> o.getTile() != null)
-                .collect(Collectors.toList());
-    }
-
-    public static List<GroundItems> nearbySpawns(int radius) {
-        Tile local = Players.getLocal().getTile();
-        return Arrays.stream(GroundItems.values())
-                .filter(i -> local.distance(i.spawnTile) <= radius)
-                .collect(Collectors.toList());
-    }
-
-    // --- Search by name across ALL enum types ---
-
-    public static void walkToAny(String name) {
-        // Try NPCs first, then objects, then ground items
-        Npcs npc = Npcs.find(name);
-        if (npc != null) { npc.walkTo(); return; }
-
-        GameObjects obj = GameObjects.find(name);
-        if (obj != null) { obj.walkTo(); return; }
-
-        GroundItems item = GroundItems.find(name);
-        if (item != null) { item.walkTo(); }
-    }
-
-    // --- Dump everything to console (useful for debugging) ---
-
-    public static void printAll() {
-        System.out.println("=== NPCs ===");
-        Arrays.stream(Npcs.values()).forEach(n ->
-                System.out.printf("%-40s visible=%-5s%n", n.name(), n.getTile() != null));
-
-        System.out.println("\n=== GAME OBJECTS ===");
-        Arrays.stream(GameObjects.values()).forEach(o ->
-                System.out.printf("%-40s visible=%-5s%n", o.name(), o.getTile() != null));
-
-        System.out.println("\n=== GROUND ITEM SPAWNS ===");
-        Arrays.stream(GroundItems.values()).forEach(i ->
-                System.out.printf("%-50s tile=%-20s respawn=%ds%n",
-                        i.name(), i.spawnTile, i.respawnSeconds));
-    }
-
     public static Tile resolveToTile(String target) {
-
-        // 1. Coordinate
         Tile coord = parseStringIntoTile(target);
         if (coord != null) return coord;
-
-        // 2. Live scene
-        var player = Players.closest(p -> p != null && p.getName() != null && p.getName().equalsIgnoreCase(target));
-        if (player != null) return player.getTile();
 
         var npc = NPCs.closest(n -> n != null && n.getName() != null && n.getName().equalsIgnoreCase(target));
         if (npc != null) return npc.getTile();
@@ -674,10 +651,6 @@ public final class Library {
         var obj = org.dreambot.api.methods.interactive.GameObjects.closest(o -> o != null && o.getName() != null && o.getName().equalsIgnoreCase(target));
         if (obj != null) return obj.getTile();
 
-        var item = org.dreambot.api.methods.item.GroundItems.closest(i -> i != null && i.getName() != null && i.getName().equalsIgnoreCase(target));
-        if (item != null) return item.getTile();
-
-        // 3. Library fallback
         Npcs libNpc = Npcs.find(target);
         if (libNpc != null)
             return libNpc.getTile();
@@ -686,11 +659,88 @@ public final class Library {
         if (libObj != null)
             return libObj.getTile();
 
-        GroundItems libItem = GroundItems.find(target);
-        if (libItem != null)
-            return libItem.spawnTile;
-
-        Logger.log(Logger.LogType.ERROR, "[RESOLVE] unable to find target: " + target);
+        Logger.log("[RESOLVE] Unable to find target: " + target);
         return null;
+    }
+
+    /**
+     * Returns a list of all library entries that contain the search string.
+     */
+    public static List<String> searchLibrary(String query) {
+        String lowerQuery = query.toLowerCase();
+        List<String> results = new ArrayList<>();
+
+        results.addAll(Arrays.stream(Npcs.values())
+                .filter(n -> n.npcName.toLowerCase().contains(lowerQuery))
+                .map(n -> "NPC: " + n.npcName)
+                .collect(Collectors.toList()));
+
+        results.addAll(Arrays.stream(GameObjects.values())
+                .filter(o -> o.objectName.toLowerCase().contains(lowerQuery))
+                .map(o -> "OBJ: " + o.objectName)
+                .collect(Collectors.toList()));
+
+        return results;
+    }
+
+    /**
+     * Calculates the exact walking distance without moving the character.
+     * Uses the LocalPathFinder to calculate the path in memory.
+     */
+    public static int getDistanceToTarget(String targetName) {
+        Tile targetTile = resolveToTile(targetName);
+        Tile myTile = Players.getLocal().getTile();
+
+        if (targetTile == null || myTile == null)
+            return Integer.MAX_VALUE;
+
+        return (int) myTile.walkingDistance(targetTile);
+    }
+
+    /**
+     * Searches the library and live environment based on the specified TargetTypes.
+     */
+    public static List<String> searchLibrary(String query, TargetType... types) {
+        String lowerQuery = query.toLowerCase();
+        List<String> results = new ArrayList<>();
+        List<TargetType> filter = Arrays.asList(types);
+
+        // If no types are passed, we search the standard library types by default
+        boolean searchAll = filter.isEmpty();
+
+        // 1. Search NPC Library
+        if (searchAll || filter.contains(TargetType.NPC)) {
+            results.addAll(Arrays.stream(Npcs.values())
+                    .filter(n -> n.npcName.toLowerCase().contains(lowerQuery))
+                    .map(n -> "NPC: " + n.npcName)
+                    .collect(Collectors.toList()));
+        }
+
+        // 2. Search Game Object Library
+        if (searchAll || filter.contains(TargetType.GAME_OBJECT)) {
+            results.addAll(Arrays.stream(GameObjects.values())
+                    .filter(o -> o.objectName.toLowerCase().contains(lowerQuery))
+                    .map(o -> "OBJ: " + o.objectName)
+                    .collect(Collectors.toList()));
+        }
+
+        // 3. Search Ground Item Spawns
+        if (searchAll || filter.contains(TargetType.GROUND_ITEM)) {
+            results.addAll(Arrays.stream(GroundItems.values())
+                    .filter(i -> i.itemName.toLowerCase().contains(lowerQuery))
+                    .map(i -> "GROUND: " + i.itemName)
+                    .collect(Collectors.toList()));
+        }
+
+        // 4. Live Inventory Search (Dynamic)
+        if (filter.contains(TargetType.INVENTORY_ITEM)) {
+            results.addAll(org.dreambot.api.methods.container.impl.Inventory.all().stream()
+                    .filter(i -> i != null && i.getName().toLowerCase().contains(lowerQuery))
+                    .map(i -> "INV: " + i.getName())
+                    .distinct()
+                    .collect(Collectors.toList()));
+        }
+
+        return results;
     }
 }

@@ -231,6 +231,7 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
         mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
+        mainTabs.addTab("Developers Console", new LibraryTesterPanel());
 
         dynamicControlPanel.setOpaque(false);
 
