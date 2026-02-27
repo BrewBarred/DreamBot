@@ -72,8 +72,11 @@ public class JActionSelector extends JComboBox<String> {
     }
 
     public Set<String> scanTargets() {
-        String selected = this.toString();
-        if (selected == null) return Set.of();
+        String selected = getSelected();
+
+        if (selected == null)
+            return Set.of();
+
         ActionLoader entry = REGISTRY.get(selected);
         return entry != null ? entry.scanner.get() : Set.of();
     }

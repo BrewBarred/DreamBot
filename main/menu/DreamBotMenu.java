@@ -813,12 +813,12 @@ public class DreamBotMenu extends JFrame {
     private JPanel createTaskBuilderTab() {
         ///  Create the task builders title
         JPanel panelTaskBuilder = new JPanel(new BorderLayout(15, 15));
-            panelTaskBuilder.setBorder(new EmptyBorder(15, 15, 15, 15));
-            panelTaskBuilder.setBackground(BG_BASE);
+        panelTaskBuilder.setBorder(new EmptyBorder(15, 15, 15, 15));
+        panelTaskBuilder.setBackground(BG_BASE);
 
         ///  Create the task builders right panel
         JPanel east = new JPanel(new GridBagLayout());
-            east.setOpaque(false);
+        east.setOpaque(false);
 
         GridBagConstraints g = new GridBagConstraints();
         g.fill = GridBagConstraints.HORIZONTAL;
@@ -917,23 +917,23 @@ public class DreamBotMenu extends JFrame {
         JButton btnDown = createButton("▼");
 
         JPanel navButtons = new JPanel(new GridLayout(0, 1, 0, 5));
-            navButtons.setOpaque(false);
-            navButtons.add(btnUp);
-            navButtons.add(btnDown);
+        navButtons.setOpaque(false);
+        navButtons.add(btnUp);
+        navButtons.add(btnDown);
 
         JButton btnTaskBuilderRemove = createButton("Remove", COLOR_BUTTON_RED, null);
-            // disable remove button when nothing is selected
-            btnTaskBuilderRemove.setEnabled(listTaskBuilder.getSelectedIndex() != -1);
-            btnTaskBuilderRemove.addActionListener(e -> {
-                int selectedIndex = listTaskBuilder.getSelectedIndex();
-                if (selectedIndex != -1) {
-                    modelTaskBuilder.remove(selectedIndex);
-                    showToast("Action removed!", btnTaskBuilderRemove, true);
-                    refreshTaskBuilderTab();
-                } else {
-                    showToast("You must select an action first!", btnTaskBuilderRemove, false);
-                }
-            });
+        // disable remove button when nothing is selected
+        btnTaskBuilderRemove.setEnabled(listTaskBuilder.getSelectedIndex() != -1);
+        btnTaskBuilderRemove.addActionListener(e -> {
+            int selectedIndex = listTaskBuilder.getSelectedIndex();
+            if (selectedIndex != -1) {
+                modelTaskBuilder.remove(selectedIndex);
+                showToast("Action removed!", btnTaskBuilderRemove, true);
+                refreshTaskBuilderTab();
+            } else {
+                showToast("You must select an action first!", btnTaskBuilderRemove, false);
+            }
+        });
 
         listTaskBuilder.addListSelectionListener(e -> {
             btnTaskBuilderRemove.setEnabled(!listTaskBuilder.isSelectionEmpty());
@@ -977,9 +977,9 @@ public class DreamBotMenu extends JFrame {
         center.add(panelActionButtons, BorderLayout.SOUTH);
 
         JPanel left = new JPanel(new BorderLayout(0, 10));
-            left.setOpaque(false);
-            left.setAlignmentX(Component.LEFT_ALIGNMENT);
-            left.setAutoscrolls(true);
+        left.setOpaque(false);
+        left.setAlignmentX(Component.LEFT_ALIGNMENT);
+        left.setAutoscrolls(true);
 
 //        JPanel config = new JPanel();
 //            // stack vertically (Y_AXIS)
@@ -1013,6 +1013,11 @@ public class DreamBotMenu extends JFrame {
         actionSelector = new JActionSelector();
         styleComp(actionSelector);
         config.add(actionSelector, gbc);
+        actionSelector.addActionListener(e -> {
+            scanNearbyTargets();
+            refreshDynamicControls();
+            //refreshTaskBuilderTab();
+        });
 
         ///  Add dynamic control panel (to adjust action parameters)
         // column 0, row 2
@@ -1021,22 +1026,6 @@ public class DreamBotMenu extends JFrame {
         gbc.weighty = 0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         config.add(dynamicControlPanel, gbc);
-//        actionSelector = new JActionSelector();
-//        styleComp(actionSelector);
-//        actionSelector.addActionListener(e -> {
-//            scanNearbyTargets();
-//            refreshDynamicControls();
-//            refreshTaskBuilderTab();
-//        });
-//
-//        ///  Label "Selection action:"
-//        JLabel labelSelect = new JLabel("Select action:");
-//            labelSelect.setAlignmentX(Component.LEFT_ALIGNMENT);
-//
-//        config.add(labelSelect);
-//        config.add(actionSelector);
-//        config.add(dynamicControlsPanel);
-
 
         /// Add button "Add to builder..."
         // column 0, row 3
@@ -1063,7 +1052,7 @@ public class DreamBotMenu extends JFrame {
         // balance height with other components
         gbc.weighty = 0;
         JLabel nearbyLabel = new JLabel("Nearby targets:");
-            nearbyLabel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
+        nearbyLabel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
         config.add(nearbyLabel, gbc);
 //        ///  Add single/double click listeners to nearby list for quick-loading functionality
 ////        nearbyList.addMouseListener(new MouseAdapter() {
@@ -1090,8 +1079,8 @@ public class DreamBotMenu extends JFrame {
         styleJList(nearbyList);
         // Wrap the list in a scroll pane and LOCK the width
         JScrollPane entitiesScroll = new JScrollPane(nearbyList);
-            entitiesScroll.setPreferredSize(new Dimension(300, 150)); // 300px width, height 0 (BorderLayout will stretch height)
-            entitiesScroll.setMinimumSize(new Dimension(300, 150));
+        entitiesScroll.setPreferredSize(new Dimension(300, 150)); // 300px width, height 0 (BorderLayout will stretch height)
+        entitiesScroll.setMinimumSize(new Dimension(300, 150));
 
         JButton btnScanNearby = createButton("Scan nearby...");
         btnScanNearby.addActionListener(e -> {
@@ -1298,8 +1287,8 @@ public class DreamBotMenu extends JFrame {
     private void scanNearbyTargets() {
         // Each action subclass decides what to scan — no switch needed here
         Set<String> names = actionSelector.scanTargets();
-
         List<String> sortedNames = names.stream().sorted().collect(Collectors.toList());
+
         SwingUtilities.invokeLater(() -> {
             nearbyEntitiesModel.clear();
             sortedNames.forEach(nearbyEntitiesModel::addElement);
@@ -1331,7 +1320,7 @@ public class DreamBotMenu extends JFrame {
             if (o.actions != null) {
                 for (Action originalAction : o.actions) {
                     // Create a brand new action object for the new list
-                            this.actions.add(originalAction.copy());
+                    this.actions.add(originalAction.copy());
                 }
             }
         }
@@ -2018,7 +2007,7 @@ public class DreamBotMenu extends JFrame {
             flashControl(btn, success ? COLOR_SUCCESS : COLOR_FAILURE);
         });
 
-       return btn;
+        return btn;
     }
 
     private <T> JButton createNavButton(@NotNull String btnText, @NotNull DefaultListModel<Preset> model) {
@@ -2029,9 +2018,9 @@ public class DreamBotMenu extends JFrame {
         try {
             return new ImageIcon(new ImageIcon(
                     Objects.requireNonNull(getClass()
-                        .getResource("/resources/icons/misc/" + name + ".png")))
-                        .getImage()
-                        .getScaledInstance(18, 18, Image.SCALE_SMOOTH));
+                            .getResource("/resources/icons/misc/" + name + ".png")))
+                    .getImage()
+                    .getScaledInstance(18, 18, Image.SCALE_SMOOTH));
         } catch (Exception e) {
             return null;
         }
@@ -2159,30 +2148,30 @@ public class DreamBotMenu extends JFrame {
 
     private JPanel createScriptPanel() {
         return createSettingsGroup("Script",
-            settingClientChkStartScriptOnLoad = createSettingCheck("Start Script on Load",
-                    startScriptOnLoad, e ->
-                            startScriptOnLoad = !settingClientChkStartScriptOnLoad.isSelected()
-            ),
+                settingClientChkStartScriptOnLoad = createSettingCheck("Start Script on Load",
+                        startScriptOnLoad, e ->
+                                startScriptOnLoad = !settingClientChkStartScriptOnLoad.isSelected()
+                ),
 
-            settingClientChkExitOnStopWarning = createSettingCheck("Exit on Stop Warning",
-                    exitOnStopWarning, e ->
-                            exitOnStopWarning = !settingClientChkExitOnStopWarning.isSelected()
-            ),
+                settingClientChkExitOnStopWarning = createSettingCheck("Exit on Stop Warning",
+                        exitOnStopWarning, e ->
+                                exitOnStopWarning = !settingClientChkExitOnStopWarning.isSelected()
+                ),
 
-            chkAutoSave = createSettingCheck("Auto Save", true, e -> {
-                // Check the ACTUAL checkmark state
-                boolean isChecked = ((JCheckBox)e.getSource()).isSelected();
+                chkAutoSave = createSettingCheck("Auto Save", true, e -> {
+                    // Check the ACTUAL checkmark state
+                    boolean isChecked = ((JCheckBox)e.getSource()).isSelected();
 
-                if (isChecked) {
-                    saveAll(); // Only trigger the heavy save when turned ON
-                    if (saveTimer != null)
-                        saveTimer.start();
-                } else {
-                    if (saveTimer != null)
-                        saveTimer.stop();
-                    showToast("Auto-save Disabled", chkAutoSave, false);
-                }
-            })
+                    if (isChecked) {
+                        saveAll(); // Only trigger the heavy save when turned ON
+                        if (saveTimer != null)
+                            saveTimer.start();
+                    } else {
+                        if (saveTimer != null)
+                            saveTimer.stop();
+                        showToast("Auto-save Disabled", chkAutoSave, false);
+                    }
+                })
         );
     }
 
@@ -2703,7 +2692,7 @@ public class DreamBotMenu extends JFrame {
             if (newName != null && !newName.trim().isEmpty())
                 modelPresets.get(actualIndex).name = newName.trim();
 
-        /// Shift click preset to save
+            /// Shift click preset to save
         } else if (shift) {
             List<Task> currentTasks = new ArrayList<>();
 
@@ -2717,7 +2706,7 @@ public class DreamBotMenu extends JFrame {
             refreshPresetButtonLabels();
             this.showToast("Saved to " + currentName, presetButtons[slot], true);
 
-        /// Normal click to load
+            /// Normal click to load
         } else {
             // fetch the selected preset object using the preset buttons index
             Preset preset = modelPresets.get(actualIndex);
@@ -2810,9 +2799,9 @@ public class DreamBotMenu extends JFrame {
                 // Color Logic mapped exactly to your request:
                 if (actualIndex == selectedPresetIndex)
                     presetButtons[i].setBackground(COLOR_BTN_ADD); // Selected
-                 else if (p.tasks.isEmpty())
+                else if (p.tasks.isEmpty())
                     presetButtons[i].setBackground(COLOR_BTN_BACKGROUND); // Empty
-                 else
+                else
                     presetButtons[i].setBackground(COLOR_BLOOD); // Filled
 
             } else {
