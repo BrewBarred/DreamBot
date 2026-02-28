@@ -97,7 +97,7 @@ public class TaskBuilder extends JPanel {
         setBorder(new EmptyBorder(15, 15, 15, 15));
         setBackground(PANEL_SURFACE);
 
-        add(buildTitle(),  BorderLayout.NORTH);
+        add(createSubtitle("Task Builder"),  BorderLayout.NORTH);
         add(buildLeft(),   BorderLayout.WEST);
         add(buildCenter(), BorderLayout.CENTER);
         add(buildRight(),  BorderLayout.EAST);
@@ -150,17 +150,7 @@ public class TaskBuilder extends JPanel {
         refreshList();
     }
 
-    // =========================================================================
-    // Panel construction
-    // =========================================================================
-
-    private JLabel buildTitle() {
-        JLabel title = new JLabel("Task Builder", SwingConstants.LEFT);
-        title.setForeground(COLOR_SUBTITLE);
-        title.setFont(new Font("Consolas", Font.BOLD, 22));
-        title.setBorder(BorderFactory.createMatteBorder(0, 5, 0, 0, COLOR_SUBTITLE));
-        return title;
-    }
+    ///  Panel construction
 
     private JPanel buildLeft() {
         JPanel left = new JPanel(new BorderLayout(0, 10));

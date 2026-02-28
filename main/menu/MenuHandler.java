@@ -54,7 +54,7 @@ public class MenuHandler {
      * @return
      */
     public static JPanel createParameterPanel(String title, String description, JComponent input, String example) {
-        JPanel targetTitle = createSubtitle(title);
+        JPanel targetTitle = createParamTitle(title);
         JTextArea targetDescription = createParamDescription(description);
         JTextArea targetExample = createParamExample(example);
 
@@ -74,19 +74,27 @@ public class MenuHandler {
         return parameterPanel;
     }
 
-    public static JPanel createSubtitle(String rawTitle) {
-        ///  Create the title label (text)
-        JLabel titleLabel = new JLabel(rawTitle);
-            titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 13));
-            titleLabel.setForeground(COLOR_SUBTITLE);
+    public static JPanel createParamTitle(String rawTitle) {
+        ///  Create the subtitle label (text)
+        JLabel paramLabel = new JLabel(rawTitle);
+            paramLabel.setFont(new Font("Segoe UI", Font.BOLD, 13));
+            paramLabel.setForeground(COLOR_SUBTITLE);
 
-        ///  Place parameter input labels into grid layouts for full left-alignment.
-        JPanel titlePanel = new JPanel(new GridLayout(1, 1, 0, 0));
-            titlePanel.setOpaque(false);
-            titlePanel.add(titleLabel, BorderLayout.WEST);
-            titlePanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 0, 0));
+        JPanel paramPanel = new JPanel(new GridLayout(1, 1, 0, 0));
+            paramPanel.setOpaque(false);
+            paramPanel.add(paramLabel, BorderLayout.WEST);
+            paramPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 0, 0));
 
-        return titlePanel;
+        return paramPanel;
+    }
+
+    public static JLabel createSubtitle(String subtitle) {
+        JLabel title = new JLabel(subtitle, SwingConstants.CENTER);
+        title.setForeground(COLOR_BLOOD);
+        title.setFont(new Font("Consolas", Font.BOLD, 22));
+        title.setBorder(BorderFactory.createMatteBorder(0, 5, 0, 0, COLOR_BLOOD));
+
+        return title;
     }
 
     public static JTextArea createParamDescription(@NotNull String rawDescription) {

@@ -232,13 +232,9 @@ public class DreamBotMenu extends JFrame {
         mainTabs.setBackground(PANEL_SURFACE);
         mainTabs.setForeground(TEXT_MAIN);
         mainTabs.addTab("Task List", loadTabIcon("task_list_tab"), createTaskListTab());
-        Logger.log(Logger.LogType.DEBUG, "Setup task list...");
         mainTabs.addTab("Task Library", loadTabIcon("task_library_tab"), createTaskLibraryTab());
-        Logger.log(Logger.LogType.DEBUG, "Setup task library...");
         actionSelector = new JActionSelector();
-        Logger.log(Logger.LogType.DEBUG, "Setup actoin selector...");
         taskBuilder = new TaskBuilder(this);
-        Logger.log(Logger.LogType.DEBUG, "Setup task builder...");
         mainTabs.addTab("Task Builder", loadTabIcon("task_builder_tab"), taskBuilder);
         mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
         mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
@@ -484,15 +480,6 @@ public class DreamBotMenu extends JFrame {
         }
 
         listTaskList.repaint();
-    }
-
-    private JLabel createSubtitle(String subtitle) {
-        JLabel title = new JLabel(subtitle, SwingConstants.CENTER);
-        title.setForeground(COLOR_BLOOD);
-        title.setFont(new Font("Consolas", Font.BOLD, 22));
-        title.setBorder(BorderFactory.createMatteBorder(0, 5, 0, 0, COLOR_BLOOD));
-
-        return title;
     }
 
     /**
