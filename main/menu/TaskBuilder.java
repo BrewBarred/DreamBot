@@ -37,7 +37,7 @@ public class TaskBuilder extends JPanel {
 
     // ── Internal UI refs ──────────────────────────────────────────────────────
     private final JList<Action> listTaskBuilder;
-    private final JLibraryList libraryList;
+    private final JLibraryList listLibrary;
     private JPanel dynamicControlPanel;
     private JTextField taskNameInput;
     private JTextField taskDescriptionInput;
@@ -50,52 +50,38 @@ public class TaskBuilder extends JPanel {
 
     private JPanel currentParamPanel;
 
-    // ── Toast callback ────────────────────────────────────────────────────────
-    @FunctionalInterface
-    public interface ToastCallback {
-        void show(String message, JComponent anchor, boolean success);
-    }
-
     // =========================================================================
     // Constructor
     // =========================================================================
-    public TaskBuilder(
-            DreamBotMenu                        botMenu
-    ) {
+    public TaskBuilder(DreamBotMenu botMenu) {
         super(new BorderLayout(15, 15));
+        setBorder(new EmptyBorder(15, 15, 15, 15));
+        setBackground(PANEL_SURFACE);
 
         this.botMenu = botMenu;
+        this.actionSelector   = botMenu.actionSelector;
 
         this.modelTaskBuilder = botMenu.modelTaskBuilder;
         this.modelTaskLibrary = botMenu.modelTaskLibrary;
-        this.actionSelector   = botMenu.actionSelector;
-
         this.listTaskBuilder = new JList<>(modelTaskBuilder);
+        this.listLibrary = new JLibraryList();
+
         ///  Override how this list displays its items to give more detailed information about each item in the builder.
         listTaskBuilder.setCellRenderer(new DefaultListCellRenderer() {
             @Override
-            public Component getListCellRendererComponent(
-                    JList<?> list,
-                    Object value,
-                    int index,
-                    boolean isSelected,
-                    boolean cellHasFocus) {
-
-                super.getListCellRendererComponent(
-                        list, value, index, isSelected, cellHasFocus);
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                                                          boolean isSelected, boolean cellHasFocus) {
+                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
 
                 if (value instanceof Action) {
                     Action action = (Action) value;
+                    // write as build string to task builder display
                     setText(action.toBuildString());
                 }
 
                 return this;
             }
         });
-        this.libraryList     = new JLibraryList();
-
-        setBorder(new EmptyBorder(15, 15, 15, 15));
-        setBackground(PANEL_SURFACE);
 
         add(createSubtitle("Task Builder"),  BorderLayout.NORTH);
         add(buildLeft(),   BorderLayout.WEST);
@@ -115,7 +101,7 @@ public class TaskBuilder extends JPanel {
 
     /** Call from scanTimer when this tab is active. */
     public void scanNearby() {
-        libraryList.rescanNearby();
+        listLibrary.rescanNearby();
     }
 
     public void onTabShown() {
@@ -153,7 +139,7 @@ public class TaskBuilder extends JPanel {
     ///  Panel construction
 
     private JPanel buildLeft() {
-        JPanel left = new JPanel(new BorderLayout(0, 10));
+        JPanel left = createPanelBorderLayout(0, 10);
         left.setOpaque(false);
 
         JPanel config = new JPanel(new GridBagLayout());
@@ -204,7 +190,7 @@ public class TaskBuilder extends JPanel {
         config.add(btnAdd, gbc);
 
         left.add(config,      BorderLayout.NORTH);
-        left.add(libraryList, BorderLayout.CENTER);
+        left.add(listLibrary, BorderLayout.CENTER);
 
         return left;
     }

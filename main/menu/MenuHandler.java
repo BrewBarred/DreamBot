@@ -29,6 +29,14 @@ public class MenuHandler {
         return styleComp(new JPanel(new BorderLayout()));
     }
 
+    public static JPanel createPanelBorderLayout(int hgap, int vgap) {
+        return styleComp(new JPanel(new BorderLayout(hgap, vgap)));
+    }
+
+    public static JPanel createPanelGridBagLayout() {
+        return styleComp(new JPanel(new GridBagLayout()));
+    }
+
     public static JLabel createLabel(@NotNull String text) {
         return styleComp(new JLabel(text));
     }
