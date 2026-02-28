@@ -1,49 +1,57 @@
-package main.menu;
+package main.menu.components;
 
 import main.actions.Action;
-import main.actions.ActionLoader;
 import main.actions.Walk;
 
 import javax.swing.*;
+import java.awt.event.ActionListener;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
 
-public class JActionSelector extends JComboBox<String> {
-    private static final Map<String, ActionLoader> REGISTRY = new LinkedHashMap<>();
+public class JActionSelector extends JComboBox<Action> {
+    private static final Map<String, Action> REGISTRY = new LinkedHashMap<>();
     /**
      * The currently active "template" Action instance whose controls are shown in the UI.
      * Rebuilt whenever the selection changes.
      */
-    private Action currentAction;
+    private Action selectedAction;
     private JPanel currentPanel;
 
     static {
-        REGISTRY.put("Walk",        new ActionLoader(Walk::new,       Walk::scanTargets));
+        REGISTRY.put("Walk",        new Walk());
         //REGISTRY.put("Walk to NPC", new ActionLoader(WalkToNpc::new,  WalkToNpc::scanTargets));
     }
 
     public JActionSelector() {
-        super(REGISTRY.keySet().toArray(new String[0]));
-        rebuildTemplate();
+        super(REGISTRY.values().toArray(new Action[0]));
+        selectedAction = REGISTRY.values().iterator().next().copy();
+        currentPanel  = selectedAction.getParamPanel();
         addActionListener(e -> rebuildTemplate());
+    }
+
+    public void setSelectedAction(Action action) {
+        selectedAction = action.copy();
+        currentPanel = selectedAction.getParamPanel();
+        setSelectedItem(selectedAction);
+    }
+
+    public Action getSelectedAction() {
+        return selectedAction;
     }
 
     /**
      * Replaces the template instance (and therefore the live controls) for the selected action type.
      */
     private void rebuildTemplate() {
-        String selected = getSelected();
-        if (selected == null) return;
-
-        if (currentAction != null && currentAction.getType().equals(selected))
+        if (selectedAction == null)
             return;
 
-        ActionLoader actionHandler = REGISTRY.get(selected);
-        if (actionHandler == null) return;
+        selectedAction = getSelectedAction().copy();
+        currentPanel = selectedAction.getParamPanel();
+    }
 
-        currentAction = actionHandler.constructor.get();
-        currentPanel = currentAction.getParameterControls();
+    public void addSelectionListener(ActionListener l) {
+        addActionListener(l);
     }
 
     /**
@@ -51,39 +59,50 @@ public class JActionSelector extends JComboBox<String> {
      * Embed this into your DreamBotMenu layout; it updates automatically on selection change.
      */
     public JPanel getCurrentPanel() {
-        return currentPanel; // may be null if the action has no extra params
+        return currentPanel;
     }
 
-    /**
-     * Builds a fully-configured Action from the current control values.
-     * Returns null (with a reason) if validation fails — caller should show a toast.
-     */
-    public Action build() {
-        if (currentAction == null)
-            return null;
+//    /**
+//     * Builds a fully-configured Action from the current control values.
+//     * Returns null (with a reason) if validation fails — caller should show a toast.
+//     */
+//    public Action build() {
+//        if (currentAction == null)
+//            return null;
+//
+//        // If the action has live controls, read from the existing template instance
+//        if (currentPanel != null)
+//            return currentAction.buildFromControls();
+//
+//        // Fallback for simple actions with only a target string
+//        ActionLoader selectedAction = REGISTRY.get(getSelected());
+//        return selectedAction != null ? selectedAction.constructor.get() : null;
+//    }
 
-        // If the action has live controls, read from the existing template instance
-        if (currentPanel != null)
-            return currentAction.buildFromControls();
-
-        // Fallback for simple actions with only a target string
-        ActionLoader selectedAction = REGISTRY.get(getSelected());
-        return selectedAction != null ? selectedAction.constructor.get() : null;
-    }
-
-    public Set<String> scanTargets() {
-        String selected = getSelected();
-
-        if (selected == null)
-            return Set.of();
-
-        ActionLoader entry = REGISTRY.get(selected);
-        return entry != null ? entry.scanner.get() : Set.of();
-    }
-
-    private String getSelected() {
-        return (String) getSelectedItem();
-    }
+//    public Set<String> scanTargets() {
+//        String selected = getSelected();
+//
+//        if (selected == null)
+//            return Set.of();
+//
+//        ActionLoader entry = REGISTRY.get(selected);
+//        return entry != null ? entry.scanner.get() : Set.of();
+//    }
+//
+//    public boolean updateControls() {
+//        String selected = getSelected();
+//
+//        if (selected == null)
+//            return false;
+//
+//        ActionLoader entry = REGISTRY.get(selected);
+//        if (entry == null)
+//            return false;
+//
+//        // call the update function
+//        entry.updater.get();
+//        return true;
+//    }
 }
 
 //package main.menu;

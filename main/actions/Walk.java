@@ -12,11 +12,10 @@ import javax.swing.*;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-import static main.menu.MenuBuilder.*;
+import static main.menu.MenuHandler.*;
 
 public class Walk extends Action {
-    private static final String DEFAULT_TARGET = "3217, 3238, 0"; // Lumbridge magic tutor
-    private final JTextField targetField = new JTextField();
+    private final String DEFAULT_TARGET = "3217, 3238, 0"; // Lumbridge magic tutor
     private Runnable variation;
 
     // Existing empty constructor for initial UI setup
@@ -27,6 +26,11 @@ public class Walk extends Action {
     // New constructor for the actual functional action
     public Walk(String target) {
         super(target);
+    }
+
+    public Walk(Walk w) {
+        this.paramTarget.setParam(w.getParamTarget());
+        this.variation = w.variation;
     }
 
     private void load(String target) {
@@ -87,50 +91,11 @@ public class Walk extends Action {
 //        }
 //    }
 
-    @Override
-    public JPanel getParameterControls() {
-        ///  Define target parameter values
-        String subtitle = "Target:";
-        String description = "Target input is dynamically converted into a tile, custom " +
-                "data-type or nearby object, player or ground/inventory item.";
-        String example = "  e.g. \"X, Y\" or \"X, Y, Z\" -> Tile\n" +
-                        "        \"Oak Tree\" -> GameObject\n" +
-                        "        \"Zezima\" -> Player, etc...";
-
-        return createParameterPanel(subtitle, description, targetField, example);
-    }
-
-    @Override
-    public Action buildFromControls() {
-        target = targetField.getText();
-        // adjust more params here such as loop count
-
-        // create a new target and return to prevent the editing of one task affecting another
-        return new Walk(target);
-    }
-
-    @Override
-    public boolean execute() {
-        // Call load every time to refresh the 'variation' lambda logic
-        load(target);
-
-        if (variation != null)
-            variation.run();
-
-        return isComplete();
-    }
-
     private boolean isComplete() {
-        Tile tile = Library.resolveToTile(target);
+        Tile tile = Library.resolveToTile(paramTarget.getParam());
         if (tile == null) return true; // can't find it, give up
         return Players.getLocal().getTile().distance(tile) <= 3 && !Players.getLocal().isMoving();
     }
-
-    @Override public String getType() { return "Walk"; }
-    @Override public String getTarget() {
-        return target;
-    }
-    @Override public Action copy() { return new Walk(targetField.getText()); }
 
     public static Set<String> scanTargets() {
         Set<String> targets = new LinkedHashSet<>();
@@ -156,5 +121,38 @@ public class Walk extends Action {
         });
 
         return targets;
+    }
+
+    @Override
+    public JPanel createParamPanel() {
+        ///  Define target parameter values
+        String subtitle = "Target:";
+        String description = "Target input is dynamically converted into a tile, custom " +
+                "data-type or nearby object, player or ground/inventory item.";
+        String example = "  e.g. \"X, Y\" or \"X, Y, Z\" -> Tile\n" +
+                "        \"Oak Tree\" -> GameObject\n" +
+                "        \"Zezima\" -> Player, etc...";
+
+        return createParameterPanel(subtitle, description, paramTarget, example);
+    }
+
+    @Override
+    public boolean execute() {
+        // Call load every time to refresh the 'variation' lambda logic
+        load(paramTarget.getParam());
+
+        if (variation != null)
+            variation.run();
+
+        return isComplete();
+    }
+
+    @Override
+    public String getParamTarget() {
+        return paramTarget.getText();
+    }
+
+    @Override public Action copy() {
+        return new Walk(this);
     }
 }

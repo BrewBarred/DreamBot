@@ -1,6 +1,7 @@
 package main.scripts;
 
 import main.menu.DreamBotMenu;
+import main.tools.Rand;
 import org.dreambot.api.data.GameState;
 import org.dreambot.api.methods.interactive.Players;
 import org.dreambot.api.script.AbstractScript;
@@ -35,7 +36,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
      *
      * @return True if the pre-loop logic returns successful, else false.
      */
-    public abstract boolean preStart();
+    public abstract boolean postStart();
     /**
      * Provides a function which is automatically called before each task list loop, that is, once all tasks have been
      * completed in a particular task-set.
@@ -85,6 +86,8 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     public abstract void postStop();
     public abstract void postExit();
 
+    private DefaultListModel<DreamBotMenu.Task> queue;
+
     @Override
     public final void onStart() {
         super.onStart();
@@ -94,41 +97,57 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             menu = new DreamBotMenu(this);
             menu.setAlwaysOnTop(true); //TODO add to "Client" settings
             menu.setVisible(true);
+
+            // fetch the task queue only after menu is instantiated
+            queue = menu.getModelTaskList();
         });
 
         // call child on-start for script-specific on-start setup
-        if (!preStart())
-            throw new RuntimeException("Error while setting up bot!");
+        if (!postStart())
+            throw new RuntimeException("Error running post-start functions!");
+        else
+            Logger.log(Logger.LogType.DEBUG, "Loading script...");
     }
 
     @Override
     public int onLoop() {
         try {
-            if (!preLoop())
-                throw new Exception("Error executing pre loop logic!");
-
-            // prevent null pointer exception by waiting for the GUI to load
+            ///  Don't start looping until the menu has been fully instantiated
             if (menu == null)
                 return 1000;
 
-            // check every 1s to see if script is still paused
-            if (menu.isScriptPaused())
-                return 1000;
+            ///  Pause if the menu has
+            if (menu.isMenuPaused)
+                pause("Script paused via DreamBotMenu!");
 
-            // access the queue and return early if its invalid
-            DefaultListModel<DreamBotMenu.Task> queue = menu.getModelTaskList();
+            ///  Ensure inheritors pre-loop checks are performed before every loop
+            if (!preLoop())
+                throw new Exception("Error executing pre loop logic!");
+
+//            ///  Check if the menu has been paused, if so, run the pause function. //TODO check possibility of this, i think its impossible?
+//            if (getScriptManager().isPaused())
+//                pause("Script paused.");
+
             if (queue == null || queue.isEmpty()) {
-                menu.setStatus("Queue Empty");
-                menu.pause();
+                pause("Task list is empty!");
                 return 1000;
             }
 
-            // fetch the execution index and validate it
-            int index = menu.getCurrentExecutionIndex();
-            if (index < 0 || index >= queue.size()) {
-                // set it to the first item in the list if its invalid
-                menu.setCurrentExecutionIndex(0);
-                return 100;
+            // fetch the current execution index, automatically correcting setting invalid indices to the first item
+            int index = Math.max(0, menu.getCurrentExecutionIndex());
+
+            // reset the list pointer
+            menu.setCurrentExecutionIndex(index);
+
+            // TODO add loop check here to continue from the top
+            if (index >= queue.size()) {
+                //if (menu.getTaskList().getLoopsLeft() > 0) {
+                    // set it to the first item in the list if its invalid
+                    menu.setCurrentExecutionIndex(0);
+                    // pause the script
+                    pause("Tasks complete!");
+                    return Rand.nextInt(983);
+                //}
             }
 
             // fetch the current task from the head of the queue
@@ -153,8 +172,9 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
                             break;
                         }
 
-                        if (!postAction())
-                            throw new Exception("Error executing after action logic!");
+                        if (postAction())
+                            Logger.log(Logger.LogType.DEBUG, "Action complete!");
+                        else throw new Exception("Error executing after action logic!");
                     }
                 }
 
@@ -181,10 +201,13 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
         if (gameState == GameState.LOGGED_IN) {
             ///  Trigger onLogin() logic
             postLogin();
+            Logger.log(Logger.LogType.DEBUG, "Login success!");
+
             Player player = Players.getLocal();
             if (player.getName() != null) {
                 ///  Trigger onNewLogin() logic
                 postLoginNew();
+                Logger.log(Logger.LogType.DEBUG, "New login detected!");
                 String currentPlayer = player.getName();
                 if (!currentPlayer.equals(lastPlayerName)) {
                     lastPlayerName = currentPlayer;
@@ -194,18 +217,36 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             }
         }
         postGameStateChange(gameState);
+        Logger.log(Logger.LogType.DEBUG, "New game state change detected!");
     }
 
     @Override
     public final void onResume() {
-        super.onResume();
+        // super.onResume();\
+        resume("Client start triggered...");
+        Logger.log(Logger.LogType.DEBUG, "Resuming script...");
+    }
+
+    public final void resume(String status) {
+        if (menu != null)
+            menu.resume(status);
+
         postResume();
     }
 
     @Override
     public final void onPause() {
-        super.onPause();
+        //super.onPause();
+        pause("Client pause triggered...");
+    }
+
+    public final void pause(String status) {
+        ///  Scripts shouldn't be executing without a valid menu!
+        if (menu != null)
+            menu.pause(status);
+
         postPause();
+        Logger.log(Logger.LogType.DEBUG, "Script paused: " + status);
     }
 
     @Override
@@ -224,17 +265,15 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
         // safely dispose menu and menu components
         if (menu != null)
             menu.onExit();
+
+        Logger.log(Logger.LogType.DEBUG, "Successfully exited DreamBotMan by ETA.");
     }
 
     @Override
     public final void stop() {
         super.stop();
         postStop();
-    }
-
-    @Override
-    public final boolean isPaused() {
-        return super.isPaused();
+        Logger.log(Logger.LogType.DEBUG, "Stopping DreamBotMan...");
     }
 
     private void updateAccountData(String name) {

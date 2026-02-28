@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import com.google.gson.reflect.TypeToken;
 import main.managers.DataMan;
+import main.menu.components.JActionSelector;
 import org.dreambot.api.Client;
 import org.dreambot.api.ClientSettings;
 import org.dreambot.api.methods.container.impl.Inventory;
@@ -14,6 +15,7 @@ import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.methods.skills.Skills;
 import org.dreambot.api.methods.world.Worlds;
 import org.dreambot.api.script.AbstractScript;
+import org.dreambot.api.script.ScriptManager;
 import org.dreambot.api.utilities.AccountManager;
 import org.dreambot.api.utilities.Logger;
 import org.dreambot.api.methods.container.impl.equipment.Equipment;
@@ -30,11 +32,10 @@ import java.awt.*;
 import java.awt.event.*;
 import java.util.*;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import main.actions.Action;
 
-import static main.menu.MenuBuilder.*;
+import static main.menu.MenuHandler.*;
 
 /**
  * <h1>DreamBotMan</h1>
@@ -42,6 +43,9 @@ import static main.menu.MenuBuilder.*;
  * @version 15.0.0-Elite
  */
 public class DreamBotMenu extends JFrame {
+    private final ScriptManager scriptManager;
+    public boolean isMenuPaused;
+    private final TaskBuilder taskBuilder;
     private static final int PRESET_COLUMNS = 4;
     /**
      * The amount of time (ms) before the status is automatically reverted to the {@link #DEFAULT_STATUS_STRING}
@@ -56,9 +60,6 @@ public class DreamBotMenu extends JFrame {
     private final Color COLOR_BUTTON_TEXT = Color.WHITE;
     private final Color COLOR_BUTTON_DEFAULT = Color.GRAY;
     private final Color COLOR_BUTTON_RED = Color.RED;
-
-
-    private final JPanel dynamicControlPanel = new JPanel(new BorderLayout());
 
 
     //TODO SETTINGS:
@@ -76,7 +77,6 @@ public class DreamBotMenu extends JFrame {
     boolean isTaskDescriptionRequired = false;
     boolean isTaskStatusRequired = false;
     // --- State ---
-    private boolean isScriptPaused = true;
     private boolean isUserInputAllowed = true;
     private boolean isDataLoading = false;
     private int currentExecutionIndex = -1;
@@ -109,7 +109,6 @@ public class DreamBotMenu extends JFrame {
     private boolean isReverting = false;
     private final int TOAST_DELAY = 300;
 
-    private final AbstractScript script;
     private final JPanel sidePanel;
 
     private final Color COLOR_FAILURE = new Color(100, 0, 0);
@@ -128,10 +127,10 @@ public class DreamBotMenu extends JFrame {
     private final DefaultListModel<Task> modelTaskList = new DefaultListModel<>();
     private final JList<Task> listTaskList = new JList<>(modelTaskList);
 
-    private final DefaultListModel<Task> modelTaskLibrary = new DefaultListModel<>();
+    final DefaultListModel<Task> modelTaskLibrary = new DefaultListModel<>();
     private final JList<Task> listTaskLibrary = new JList<>(modelTaskLibrary);
 
-    private final DefaultListModel<Action> modelTaskBuilder = new DefaultListModel<>();
+    final DefaultListModel<Action> modelTaskBuilder = new DefaultListModel<>();
     private final JList<Action> listTaskBuilder = new JList<>(modelTaskBuilder);
 
     private final DefaultListModel<String> nearbyEntitiesModel = new DefaultListModel<>();
@@ -162,7 +161,7 @@ public class DreamBotMenu extends JFrame {
     private JList<String> nearbyList;
     private JTextArea libraryEditorArea, consoleArea;
     private JTextField taskNameInput, taskDescriptionInput, taskStatusInput;
-    private JActionSelector actionSelector;
+    JActionSelector actionSelector;
     private JButton btnPlayPause, btnInputToggle, btnCaptureToggle;
 
     // --- Client Checkboxes ---
@@ -212,7 +211,10 @@ public class DreamBotMenu extends JFrame {
     private static final Set<Skill> F2P_SKILLS = new HashSet<>(Arrays.asList(Skill.ATTACK, Skill.STRENGTH, Skill.DEFENCE, Skill.RANGED, Skill.PRAYER, Skill.MAGIC, Skill.HITPOINTS, Skill.CRAFTING, Skill.MINING, Skill.SMITHING, Skill.FISHING, Skill.COOKING, Skill.FIREMAKING, Skill.WOODCUTTING, Skill.RUNECRAFTING));
 
     public DreamBotMenu(AbstractScript script) {
-        this.script = script;
+        ///  Provide a reference to the original script manager objects, this clouds the user from the original script
+        ///     object as well, to avoid confusion, anything this class needs will be pulled in the constructor.
+        this.scriptManager = script.getScriptManager();
+        this.isMenuPaused = scriptManager.isPaused();
         this.startTime = System.currentTimeMillis();
         this.setIconImage(Objects.requireNonNull(loadStatusIcon("Hardcore_ironman")).getImage());
         setTitle("DreamBotMan | OSRS DreamBot Manager v1");
@@ -226,14 +228,14 @@ public class DreamBotMenu extends JFrame {
         mainTabs.setBackground(PANEL_SURFACE);
         mainTabs.setForeground(TEXT_MAIN);
         mainTabs.addTab("Task List", loadTabIcon("task_list_tab"), createTaskListTab());
-        mainTabs.addTab("Task Library", loadTabIcon("task_library_tab"),createTaskLibraryTab());
-        mainTabs.addTab("Task Builder", loadTabIcon("task_builder_tab"),createTaskBuilderTab());
+        mainTabs.addTab("Task Library", loadTabIcon("task_library_tab"), createTaskLibraryTab());
+        actionSelector = new JActionSelector();
+        taskBuilder = new TaskBuilder(this);
+        mainTabs.addTab("Task Builder", loadTabIcon("task_builder_tab"), taskBuilder);
         mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
         mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
-        mainTabs.addTab("Developers Console", new LibraryTesterPanel());
-
-        dynamicControlPanel.setOpaque(false);
+        mainTabs.addTab("Developers Console", new DevelopersConsole());
 
         projectionSpinner = new JSpinner(new SpinnerNumberModel(24, 1, 999, 1));
         styleSpinner(projectionSpinner);
@@ -314,13 +316,13 @@ public class DreamBotMenu extends JFrame {
             );
             uiTimer.start();
 
-            ///  Start another timer to scan for nearby targets every n seconds while task builder is open.
-            scanTimer = new Timer(4000, e -> {
-                // scan for nearby targets every n seconds while the task builder tab is open
-                if (mainTabs.getSelectedIndex() == 2)
-                    scanNearbyTargets();
-            });
-            scanTimer.start();
+//            ///  Start another timer to scan for nearby targets every n seconds while task builder is open.
+//            scanTimer = new Timer(4000, e -> {
+//                // scan for nearby targets every n seconds while the task builder tab is open
+//                if (mainTabs.getSelectedIndex() == 2)
+//                    scanNearbyTargets();
+//            });
+//            scanTimer.start();
 
             ///  Start a third timer to auto-save everything periodically
             saveTimer = new Timer(60000, e -> {
@@ -410,7 +412,7 @@ public class DreamBotMenu extends JFrame {
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         controls.setOpaque(false);
         btnPlayPause = createIconButton("▶", "Play", e -> toggleScriptState());
-        JButton btnStop = createIconButton("■", "Stop", e -> stopScript());
+        JButton btnStop = createIconButton("■", "Stop", e -> stop());
         btnInputToggle = createIconButton("🖱", "Input", e -> toggleUserInput());
         controls.add(btnPlayPause);
         controls.add(btnStop);
@@ -426,10 +428,13 @@ public class DreamBotMenu extends JFrame {
         return persistentStatus;
     }
 
-    // --- Bridge Methods for Main Script ---
-    public boolean isScriptPaused() { return isScriptPaused; }
-    public DefaultListModel<Task> getModelTaskList() { return modelTaskList; }
-    public int getCurrentExecutionIndex() { return currentExecutionIndex; }
+    public DefaultListModel<Task> getModelTaskList() {
+        return modelTaskList;
+    }
+
+    public int getCurrentExecutionIndex() {
+        return currentExecutionIndex;
+    }
 
     public void setCurrentExecutionIndex(int i) {
         this.currentExecutionIndex = i;
@@ -456,14 +461,17 @@ public class DreamBotMenu extends JFrame {
     }
 
     public void incrementExecutionIndex() {
+        // if there are tasks left to complete in the task list
         if (currentExecutionIndex < modelTaskList.size() - 1) {
             currentExecutionIndex++;
+        // else, we can't increment anymore
         } else {
-            currentExecutionIndex = -1; // reset to "idle" state
-            isScriptPaused = true;
-            if (btnPlayPause != null)
-                btnPlayPause.setText("▶");
+            // reset selection index
+            currentExecutionIndex = -1;
+            // pause the script. // TODO check if this pause is triggering a pause before loops expire
+            pause("End of task list!");
         }
+
         listTaskList.repaint();
     }
 
@@ -788,7 +796,7 @@ public class DreamBotMenu extends JFrame {
         listTaskLibrary.repaint();
 
         // scan for nearby targets to update the nearby targets list
-        scanNearbyTargets();
+        //scanNearbyTargets();
     }
 
     private void refreshTaskBuilderTab(boolean forceSelectLast) {
@@ -809,312 +817,6 @@ public class DreamBotMenu extends JFrame {
             skillRegistry.put(skill, data);
             gridSkills.add(createSkillTile(data));
         }
-    }
-
-    private JPanel createTaskBuilderTab() {
-        ///  Create the task builders title
-        JPanel panelTaskBuilder = new JPanel(new BorderLayout(15, 15));
-        panelTaskBuilder.setBorder(new EmptyBorder(15, 15, 15, 15));
-        panelTaskBuilder.setBackground(BG_BASE);
-
-        ///  Create the task builders right panel
-        JPanel east = new JPanel(new GridBagLayout());
-        east.setOpaque(false);
-
-        GridBagConstraints g = new GridBagConstraints();
-        g.fill = GridBagConstraints.HORIZONTAL;
-        g.weightx = 1.0;
-        g.insets = new Insets(5, 5, 5, 5);
-
-        taskNameInput = new JTextField(25);
-        taskDescriptionInput = new JTextField(25);
-        taskStatusInput = new JTextField(25);
-
-        styleComp(taskNameInput);
-        styleComp(taskDescriptionInput);
-        styleComp(taskStatusInput);
-
-        g.gridy = 0;
-        east.add(new JLabel("Task name:"), g);
-
-        g.gridy = 1;
-        east.add(taskNameInput, g);
-
-        g.gridy = 2;
-        east.add(new JLabel("Description:"), g);
-
-        g.gridy = 3;
-        east.add(taskDescriptionInput, g);
-
-        g.gridy = 4;
-        east.add(new JLabel("Status:"), g);
-
-        g.gridy = 5;
-        east.add(taskStatusInput, g);
-
-        btnTaskBuilderAddToLibrary = createButton("Add to library...", COLOR_BTN_ADD, null);
-        btnTaskBuilderAddToLibrary.addActionListener(e -> {
-            List<Action> actions = new ArrayList<>();
-            for(int i = 0; i< modelTaskBuilder.size(); i++)
-                actions.add(modelTaskBuilder.get(i));
-
-            Task task = createTask(actions);
-            if (task != null) {
-                boolean exists = false;
-
-                for (int i = 0; i < modelTaskLibrary.getSize(); i++) {
-                    if (modelTaskLibrary.getElementAt(i).getName().equalsIgnoreCase(task.getName())) {
-                        exists = true;
-                        break;
-                    }
-                }
-
-                if (!exists) {
-                    // Standard logic for a new task
-                    modelTaskLibrary.addElement(task);
-                    this.showToast("Added to library!", btnTaskBuilderAddToLibrary, true);
-                    resetTaskBuilder();
-                } else {
-                    // Task name already exists, trigger the overwrite dialogue
-                    int choice = JOptionPane.showConfirmDialog(
-                            this,
-                            task.getName() + " task already exists, would you like to overwrite it?",
-                            "Overwrite task?",
-                            JOptionPane.YES_NO_OPTION,
-                            JOptionPane.QUESTION_MESSAGE
-                    );
-
-                    if (choice == JOptionPane.YES_OPTION) {
-                        // find and replace the existing task
-                        for (int i = 0; i < modelTaskLibrary.getSize(); i++) {
-                            if (modelTaskLibrary.getElementAt(i).toString().equals(task.toString())) {
-                                modelTaskLibrary.set(i, task);
-                                refreshTaskLibrary();
-                                break;
-                            }
-                        }
-                        this.showToast("Task updated!", btnTaskBuilderAddToLibrary, true);
-                        resetTaskBuilder();
-                    } else {
-                        // User clicked 'No'
-                        this.showToast("Task creation failed!", btnTaskBuilderAddToLibrary, false);
-                    }
-                }
-            }
-        });
-
-        g.gridy = 8;
-        g.insets = new Insets(20, 5, 5, 5);
-        east.add(btnTaskBuilderAddToLibrary, g);
-
-        JPanel center = new JPanel(new BorderLayout(5, 5)); center.setOpaque(false);
-        JLabel setLabel = new JLabel("Action List:", SwingConstants.CENTER);
-        setLabel.setForeground(COLOR_BLOOD);
-        setLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        styleJList(listTaskBuilder);
-
-        // create navigation buttons (up/down arrows)
-        JButton btnUp = createButton("▲");
-        JButton btnDown = createButton("▼");
-
-        JPanel navButtons = new JPanel(new GridLayout(0, 1, 0, 5));
-        navButtons.setOpaque(false);
-        navButtons.add(btnUp);
-        navButtons.add(btnDown);
-
-        JButton btnTaskBuilderRemove = createButton("Remove", COLOR_BUTTON_RED, null);
-        // disable remove button when nothing is selected
-        btnTaskBuilderRemove.setEnabled(listTaskBuilder.getSelectedIndex() != -1);
-        btnTaskBuilderRemove.addActionListener(e -> {
-            int selectedIndex = listTaskBuilder.getSelectedIndex();
-            if (selectedIndex != -1) {
-                modelTaskBuilder.remove(selectedIndex);
-                showToast("Action removed!", btnTaskBuilderRemove, true);
-                refreshTaskBuilderTab();
-            } else {
-                showToast("You must select an action first!", btnTaskBuilderRemove, false);
-            }
-        });
-
-        listTaskBuilder.addListSelectionListener(e -> {
-            btnTaskBuilderRemove.setEnabled(!listTaskBuilder.isSelectionEmpty());
-        });
-
-        listTaskBuilder.addMouseListener(new MouseAdapter() {
-            public void mouseClicked(MouseEvent e) {
-                int selectedIndex = listTaskBuilder.getSelectedIndex();
-                if (selectedIndex == -1)
-                    return;
-
-                if (e.getClickCount() == 1) {
-                    // Pre-fill the action type and target name inputs from the selected action
-                    loadIntoBuilder(modelTaskBuilder.getElementAt(selectedIndex));
-                } else if (e.getClickCount() == 2) {
-                    // Remove all selected actions
-                    int[] selected = listTaskBuilder.getSelectedIndices();
-                    for (int i = selected.length - 1; i >= 0; i--)
-                        modelTaskBuilder.remove(selected[i]);
-                    DreamBotMenu.this.showToast("Removed " + selected.length + " action(s)!", btnTaskBuilderRemove, true);
-                    refreshTaskBuilderTab();
-                }
-            }
-        });
-
-        // create reset button to reset task builder inputs, ready for next task to be created
-        JButton btnTaskBuilderReset = createButton("Reset", new Color(50, 50, 50), null);
-        btnTaskBuilderReset.addActionListener(e -> {
-            this.showToast("Task builder reset!", btnTaskBuilderReset, true);
-            resetTaskBuilder();
-        });
-
-        JPanel panelActionButtons = new JPanel(new GridLayout(1, 2, 5, 5));
-        panelActionButtons.setOpaque(false);
-        panelActionButtons.add(btnTaskBuilderRemove);
-        panelActionButtons.add(btnTaskBuilderReset);
-
-        center.add(setLabel, BorderLayout.NORTH);
-        center.add(navButtons, BorderLayout.WEST);
-        center.add(new JScrollPane(listTaskBuilder), BorderLayout.CENTER);
-        center.add(panelActionButtons, BorderLayout.SOUTH);
-
-        JPanel left = new JPanel(new BorderLayout(0, 10));
-        left.setOpaque(false);
-        left.setAlignmentX(Component.LEFT_ALIGNMENT);
-        left.setAutoscrolls(true);
-
-//        JPanel config = new JPanel();
-//            // stack vertically (Y_AXIS)
-//            config.setLayout(new BoxLayout(config, BoxLayout.Y_AXIS));
-//            config.setOpaque(false);
-
-        JPanel config = new JPanel(new GridBagLayout());
-        config.setOpaque(false);
-        GridBagConstraints gbc = new GridBagConstraints();
-
-// Common constraints
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        // take up the whole width
-        gbc.weightx = 1.0;
-        gbc.insets = new java.awt.Insets(3, 3, 3, 3); // 3px padding
-
-        ///  Add "Select action:" label
-        // column 0, row 0
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        // balance height with other components
-        gbc.weighty = 0; // Don't stretch vertically
-        config.add(new JLabel("Select action:"), gbc);
-
-        ///  Add action selector
-        // column 0, row 1
-        gbc.gridy = 1;
-        // balance height with other components
-        gbc.weighty = 0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        actionSelector = new JActionSelector();
-        styleComp(actionSelector);
-        config.add(actionSelector, gbc);
-        actionSelector.addActionListener(e -> {
-            scanNearbyTargets();
-            refreshDynamicControls();
-            //refreshTaskBuilderTab();
-        });
-
-        ///  Add dynamic control panel (to adjust action parameters)
-        // column 0, row 2
-        gbc.gridy = 2;
-        // balance height with other components
-        gbc.weighty = 0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        config.add(dynamicControlPanel, gbc);
-
-        /// Add button "Add to builder..."
-        // column 0, row 3
-        gbc.gridy = 3;
-        // balance height with other components
-        gbc.weighty = 0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        JButton btnTaskBuilderAdd = MenuBuilder.createButton("Add to builder...", COLOR_BTN_ADD, null);
-        btnTaskBuilderAdd.addActionListener(e -> {
-            Action newAction = actionSelector.build();
-            if (newAction != null) {
-                modelTaskBuilder.addElement(newAction);
-                this.showToast("Added " + newAction.getClass().getSimpleName() + "!", btnTaskBuilderAdd, true);
-                refreshTaskBuilderTab(true);
-            } else {
-                this.showToast("Invalid or incomplete action!", btnTaskBuilderAdd, false);
-            }
-        });
-        config.add(btnTaskBuilderAdd, gbc);
-
-        ///  Add label & list "Nearby targets:"
-        // column 0, row 4
-        gbc.gridy = 4;
-        // balance height with other components
-        gbc.weighty = 0;
-        JLabel nearbyLabel = new JLabel("Nearby targets:");
-        nearbyLabel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
-        config.add(nearbyLabel, gbc);
-//        ///  Add single/double click listeners to nearby list for quick-loading functionality
-////        nearbyList.addMouseListener(new MouseAdapter() {
-////            public void mouseClicked(MouseEvent e) {
-////                String val = nearbyList.getSelectedValue();
-////                if(val == null)
-////                    return;
-////
-////                // update target name on single click
-////                if(e.getClickCount() == 1) {
-////                    paramTarget.setText(val);
-////                }
-////                else if(e.getClickCount() == 2) {
-////                    Action action = actionSelector.createSelectedAction(val);
-////                    if (action != null)
-////                        modelTaskBuilder.addElement(action);
-////                    DreamBotMenu.this.showToast("Added action to builder!", btnTaskBuilderAdd, true);
-////                    refreshTaskBuilderTab(true);
-////                }
-////            }
-////        });
-
-        nearbyList = new JList<>(nearbyEntitiesModel);
-        styleJList(nearbyList);
-        // Wrap the list in a scroll pane and LOCK the width
-        JScrollPane entitiesScroll = new JScrollPane(nearbyList);
-        entitiesScroll.setPreferredSize(new Dimension(300, 150)); // 300px width, height 0 (BorderLayout will stretch height)
-        entitiesScroll.setMinimumSize(new Dimension(300, 150));
-
-        JButton btnScanNearby = createButton("Scan nearby...");
-        btnScanNearby.addActionListener(e -> {
-            this.showToast("Scanning for nearby targets...",  btnScanNearby, true);
-            scanNearbyTargets();
-        });
-
-        left.add(config, BorderLayout.NORTH);
-        left.add(entitiesScroll, BorderLayout.CENTER);
-        left.add(btnScanNearby, BorderLayout.SOUTH);
-
-        panelTaskBuilder.add(createSubtitle("Task Builder"), BorderLayout.NORTH);
-        panelTaskBuilder.add(left, BorderLayout.WEST);
-        panelTaskBuilder.add(center, BorderLayout.CENTER);
-        panelTaskBuilder.add(east, BorderLayout.EAST);
-
-        ///  Add listeners
-        // add component listener to update task builder on show
-        panelTaskBuilder.addComponentListener(new ComponentAdapter() {
-            @Override
-            public void componentShown(ComponentEvent e) {
-                refreshTaskBuilderTab();
-            }
-        });
-
-        listTaskLibrary.addListSelectionListener(e -> {
-            Task t = listTaskLibrary.getSelectedValue();
-            if (t != null)
-                libraryEditorArea.setText(t.getEditableString());
-        });
-
-
-        return panelTaskBuilder;
     }
 
     public void removeTask(JList<Task> list, DefaultListModel<Task> model, JButton btn) {
@@ -1282,20 +984,20 @@ public class DreamBotMenu extends JFrame {
         modelTaskBuilder.clear();
 
         // clear/refresh target inputs
-        scanNearbyTargets();
+        //scanNearbyTargets();
     }
 
-    private void scanNearbyTargets() {
-        // Each action subclass decides what to scan — no switch needed here
-        Set<String> names = actionSelector.scanTargets();
-        List<String> sortedNames = names.stream().sorted().collect(Collectors.toList());
-
-        SwingUtilities.invokeLater(() -> {
-            nearbyEntitiesModel.clear();
-            sortedNames.forEach(nearbyEntitiesModel::addElement);
-            showToast("Found " + sortedNames.size() + " targets", btnTaskBuilderScanNearby, true);
-        });
-    }
+//    private void scanNearbyTargets() {
+//        // Each action subclass decides what to scan — no switch needed here
+//        Set<String> names = actionSelector.scanTargets();
+//        List<String> sortedNames = names.stream().sorted().collect(Collectors.toList());
+//
+//        SwingUtilities.invokeLater(() -> {
+//            nearbyEntitiesModel.clear();
+//            sortedNames.forEach(nearbyEntitiesModel::addElement);
+//            showToast("Found " + sortedNames.size() + " targets", btnTaskBuilderScanNearby, true);
+//        });
+//    }
 
     // --- Inner Classes ---
     public static class Task {
@@ -1746,7 +1448,8 @@ public class DreamBotMenu extends JFrame {
 
                     if (snap.startScriptOnLoadDisabled) { // or your renamed field
                         Logger.log("Auto-start detected! Starting script...");
-                        toggleScriptState();
+                        startScriptOnLoad = true;
+                        resume("Auto-start detected! Resuming script...");
                     }
 
                 });
@@ -1884,37 +1587,12 @@ public class DreamBotMenu extends JFrame {
         if(task == null)
             return;
 
-        taskNameInput.setText(task.name);
-        taskDescriptionInput.setText(task.description);
-        taskStatusInput.setText(task.status);
-        modelTaskBuilder.clear(); task.actions.forEach(modelTaskBuilder::addElement);
-    }
-
-    private void loadIntoBuilder(Action action) {
-        if (action == null)
-            return;
-
-        actionSelector.setSelectedItem(action.getType());
+        taskBuilder.loadTask(task);
     }
 
     private void refreshDynamicControls() {
-        dynamicControlPanel.removeAll();
-        dynamicControlPanel.setOpaque(false);
-
-        JPanel controls = actionSelector.getCurrentPanel();
-        if (controls != null) {
-            for (Component component : controls.getComponents()) {
-                // style all JComponents to match current theme
-                if (component instanceof JComponent)
-                    styleComp((JComponent) component);
-            }
-            // Style it to match your theme
-            styleComp(controls);
-            dynamicControlPanel.add(controls, BorderLayout.CENTER);
-        }
-
-        dynamicControlPanel.revalidate();
-        dynamicControlPanel.repaint();
+        if (taskBuilder != null)
+            taskBuilder.refresh();
     }
 
     private JPanel createHeaderPanel() {
@@ -1929,36 +1607,48 @@ public class DreamBotMenu extends JFrame {
     }
 
     private void toggleScriptState() {
-        if (script == null)
+        if (scriptManager == null)
             return;
 
-        if (isScriptPaused) {
-            play();
-        } else {
-            pause();
+        if (isMenuPaused)
+            resume("Script resumed!");
+        else
+            pause("Script paused!");
+    }
+
+    public void resume(String status) {
+        if (isMenuPaused) {
+            btnPlayPause.setText("▮▮");
+            setStatus(status);
+            ///  MUST SET MENU STATE BEFORE SCRIPT STATE TO PREVENT INFINITE LOOPS
+            isMenuPaused = false;
+            scriptManager.resume();
         }
     }
 
-    private final void stopScript() {
+    public boolean pause(String status) {
+        if (!isMenuPaused) {
+            btnPlayPause.setText("▶");
+            setStatus(status);
+            ///  MUST SET MENU STATE BEFORE SCRIPT STATE TO PREVENT INFINITE LOOPS
+            isMenuPaused = true;
+            scriptManager.pause();
+        }
+
+        return isMenuPaused;
+    }
+
+    private void stop() {
         //TODO see if this needs to be called from Dream Bot when children call stop()?
-        if (!exitOnStopWarning || JOptionPane.showConfirmDialog(this, "This may result in the loss of unsaved changes.\nAre you sure you want to exit?") == JOptionPane.YES_OPTION) {
-            script.stop();
+        if (!exitOnStopWarning
+                || JOptionPane.showConfirmDialog(
+                this,
+                "This may result in the loss of unsaved changes.\nAre you sure you want to exit?"
+        ) == JOptionPane.YES_OPTION) {
+
+            scriptManager.stop();
             dispose();
         }
-    }
-
-    public void play() {
-        script.getScriptManager().resume();
-        btnPlayPause.setText("▮▮");
-        isScriptPaused = false;
-        setStatus("Running");
-    }
-
-    public void pause() {
-        script.getScriptManager().pause();
-        btnPlayPause.setText("▶");
-        isScriptPaused = true;
-        setStatus("Script paused");
     }
 
     private void toggleUserInput() { isUserInputAllowed = !isUserInputAllowed; Client.getInstance().setMouseInputEnabled(isUserInputAllowed); Client.getInstance().setKeyboardInputEnabled(isUserInputAllowed); btnInputToggle.setText(isUserInputAllowed ? "🖱" : "🚫"); }

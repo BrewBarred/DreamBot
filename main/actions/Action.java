@@ -1,42 +1,60 @@
 package main.actions;
 
+import main.components.JParamTextField;
 import org.dreambot.api.methods.map.Tile;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 
+import static main.menu.MenuHandler.*;
+
 public abstract class Action {
-    String target;
+    JParamTextField paramTarget;
+    JPanel paramPanel;
 
-    public Action() {}
-
-    public Action(String target) {
-        this.target = target;
+    public Action() {
+        super();
+        paramTarget = new JParamTextField();
     }
 
-    // Every subclass must implement these:
+    public Action(@NotNull String defaultTarget) {
+        this();
+        paramTarget.setParam(defaultTarget);
+    }
+
+    /// Every subclass must implement these:
     public abstract boolean execute();
-    public abstract String getType();
-    public abstract String getTarget();
+    public abstract String getParamTarget();
     public abstract Action copy();
-    /**
-     * Returns a JPanel containing all the UI controls for this action's parameters.
-     * The panel is "live" — reading its fields at any time gives the current values.
-     * Return null if this action has no configurable parameters beyond target.
-     */
-    public abstract JPanel getParameterControls();
 
-    /**
-     * Builds and returns a fully-configured copy of this action
-     * using the current state of its parameter controls.
-     * Called by JActionSelector when "Add to builder" is clicked.
-     */
-    public abstract Action buildFromControls();
-
-    @Override
-    public String toString() {
-        return getType() + " → " + getTarget();
+    ///  Getters/setters
+    public Class<? extends Action> getType() {
+        return getClass();
     }
 
+    /**
+     * Returns a JPanel containing both the compulsory AND dynamic controls for the selected {@link Action} in the
+     * {@link main.menu.components.JActionSelector}.
+     */
+    public JPanel getParamPanel() {
+        if (paramPanel == null) {
+            paramPanel = new JPanel();
+
+            // get the base panel from the child
+            JPanel dynamicPanel = createParamPanel();
+
+            styleComp(dynamicPanel);
+            styleComp(paramPanel);
+
+            paramPanel.add(dynamicPanel);
+        }
+
+        return paramPanel;
+    }
+
+    public abstract JPanel createParamPanel();
+
+    ///  Helper functions
     public static Tile parseStringIntoTile(String input) {
         if (input == null || input.isEmpty()) {
             return null;
@@ -78,6 +96,15 @@ public abstract class Action {
         return x >= 0 && x <= 16383 &&
                 y >= 0 && y <= 16383 &&
                 z >= 0 && z <= 3;
+    }
+
+    public String toBuildString() {
+        return this + " → " + getParamTarget();
+    }
+
+    @Override
+    public final String toString() {
+        return getClass().getSimpleName();
     }
 }
 //package main.actions;

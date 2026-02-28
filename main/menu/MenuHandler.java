@@ -6,7 +6,7 @@ import javax.swing.*;
 import javax.swing.border.LineBorder;
 import java.awt.*;
 
-public class MenuBuilder {
+public class MenuHandler {
     static final Color COLOR_BTN_BACKGROUND = new Color(40,40,40);
     static final Color COLOR_BTN_FOREGROUND = Color.WHITE;
 
@@ -23,6 +23,14 @@ public class MenuBuilder {
 
     static JButton createButton(@NotNull String btnText) {
         return createButton(btnText, null, null);
+    }
+
+    public static JPanel createPanel() {
+        return styleComp(new JPanel());
+    }
+
+    public static JLabel createLabel(@NotNull String text) {
+        return styleComp(new JLabel(text));
     }
 
     public static JButton createButton(@NotNull String btnText, Color backgroundColor, Color foregroundColor) {
@@ -110,16 +118,18 @@ public class MenuBuilder {
         return example;
     }
 
-    public static void styleComp(JComponent c) {
-        c.setBackground(PANEL_SURFACE);
-        c.setForeground(TEXT_MAIN);
+    public static <T extends JComponent> T styleComp(T dynamicComponent) {
+        dynamicComponent.setBackground(PANEL_SURFACE);
+        dynamicComponent.setForeground(TEXT_MAIN);
 
-        if (c instanceof JTextField)
-            ((JTextField) c).setCaretColor(COLOR_BLOOD);
+        if (dynamicComponent instanceof JTextField)
+            ((JTextField) dynamicComponent).setCaretColor(COLOR_BLOOD);
 
-        for (Component child : c.getComponents()) {
+        for (Component child : dynamicComponent.getComponents()) {
             if (child instanceof JComponent)
                 styleComp((JComponent) child);
         }
+        
+        return dynamicComponent;
     }
 }
