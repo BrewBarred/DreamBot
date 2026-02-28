@@ -6,6 +6,7 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 
+import java.awt.*;
 import java.util.Map;
 
 import static main.menu.MenuHandler.*;
@@ -38,14 +39,12 @@ public abstract class Action {
      * {@link main.menu.components.JActionSelector}.
      */
     public JPanel getParamPanel() {
-        JPanel paramPanel = new JPanel();
-
+        JPanel paramPanel = new JPanel(new BorderLayout());
         JPanel dynamicPanel = createParamPanel();
 
-        styleComp(dynamicPanel);
-        styleComp(paramPanel);
+        paramPanel.add(dynamicPanel, BorderLayout.CENTER);
 
-        paramPanel.add(dynamicPanel);
+        styleComp(paramPanel);
 
         return paramPanel;
     }

@@ -174,7 +174,9 @@ public class TaskBuilder extends JPanel {
         gbc.weightx = 1.0;
         gbc.insets  = new Insets(3, 3, 3, 3);
 
-        gbc.gridx = 0; gbc.gridy = 0;
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.anchor = GridBagConstraints.WEST;
         config.add(createLabel("Select action:"), gbc);
 
         gbc.gridy = 1;
@@ -184,12 +186,16 @@ public class TaskBuilder extends JPanel {
 
         gbc.gridy = 2;
         // TODO potentially remove this control panel
-        dynamicControlPanel = new JPanel(new BorderLayout());
+        dynamicControlPanel = createPanel();
         dynamicControlPanel.setOpaque(false);
-        dynamicControlPanel.setOpaque(false);
-        JPanel initialPanel = actionSelector.getCurrentPanel();
+
+        // force it to stretch wide
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        // give it the horizontal priority
+        gbc.weightx = 1.0;
+        JPanel initialPanel = actionSelector.getParamsPanel();
         if (initialPanel != null)
-            dynamicControlPanel.add(initialPanel, BorderLayout.CENTER);
+            dynamicControlPanel.add(initialPanel, BorderLayout.WEST);
         config.add(dynamicControlPanel, gbc);
 
         gbc.gridy  = 3;
@@ -404,8 +410,11 @@ public class TaskBuilder extends JPanel {
     }
 
     private void refreshDynamicControls() {
-        JPanel newPanel = actionSelector.getCurrentPanel();
-        if (newPanel == currentParamPanel) return; // same panel, do nothing
+        JPanel newPanel = actionSelector.getParamsPanel();
+
+        // dont refresh if its already the same panel
+        if (newPanel.equals(currentParamPanel))
+            return;
 
         dynamicControlPanel.removeAll();
         dynamicControlPanel.setOpaque(false);

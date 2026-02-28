@@ -26,7 +26,7 @@ public class MenuHandler {
     }
 
     public static JPanel createPanel() {
-        return styleComp(new JPanel());
+        return styleComp(new JPanel(new BorderLayout()));
     }
 
     public static JLabel createLabel(@NotNull String text) {
@@ -61,12 +61,12 @@ public class MenuHandler {
         JPanel parameterPanel = new JPanel();
             parameterPanel.setLayout(new BoxLayout(parameterPanel, BoxLayout.Y_AXIS));
             parameterPanel.setOpaque(false);
-            parameterPanel.add(targetTitle);
-            parameterPanel.add(targetDescription);
+            parameterPanel.add(targetTitle, BorderLayout.WEST);
+            parameterPanel.add(targetDescription, BorderLayout.WEST);
             parameterPanel.add(Box.createVerticalStrut(10));
-            parameterPanel.add(input);
+            parameterPanel.add(input, BorderLayout.WEST);
             parameterPanel.add(Box.createVerticalStrut(4));
-            parameterPanel.add(targetExample);
+            parameterPanel.add(targetExample, BorderLayout.WEST);
             parameterPanel.add(Box.createVerticalStrut(10));
 
         styleComp(parameterPanel);
@@ -83,7 +83,7 @@ public class MenuHandler {
         ///  Place parameter input labels into grid layouts for full left-alignment.
         JPanel titlePanel = new JPanel(new GridLayout(1, 1, 0, 0));
             titlePanel.setOpaque(false);
-            titlePanel.add(titleLabel);
+            titlePanel.add(titleLabel, BorderLayout.WEST);
             titlePanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 0, 0));
 
         return titlePanel;

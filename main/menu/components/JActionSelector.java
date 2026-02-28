@@ -74,8 +74,8 @@ public class JActionSelector extends JComboBox<Action> {
      * Returns the live parameter-controls panel for the currently selected action.
      * Embed this into your DreamBotMenu layout; it updates automatically on selection change.
      */
-    public JPanel getCurrentPanel() {
-        return currentPanel;
+    public JPanel getParamsPanel() {
+        return currentPanel == null ? getSelectedAction().getParamPanel() : currentPanel;
     }
 
 //    @Override @Deprecated
