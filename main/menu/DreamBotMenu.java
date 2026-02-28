@@ -136,7 +136,6 @@ public class DreamBotMenu extends JFrame {
 
     private final DefaultListModel<String> nearbyEntitiesModel = new DefaultListModel<>();
 
-
     // --- Preset State ---
     private final int MAX_PRESETS = 16;
     private int currentPresetPage = 0;
@@ -322,13 +321,13 @@ public class DreamBotMenu extends JFrame {
             );
             uiTimer.start();
 
-//            ///  Start another timer to scan for nearby targets every n seconds while task builder is open.
-//            scanTimer = new Timer(4000, e -> {
-//                // scan for nearby targets every n seconds while the task builder tab is open
-//                if (mainTabs.getSelectedIndex() == 2)
-//                    scanNearbyTargets();
-//            });
-//            scanTimer.start();
+            ///  Start another timer to scan for nearby targets every n seconds while task builder is open.
+            scanTimer = new Timer(4000, e -> {
+                // scan for nearby targets every n seconds while the task builder tab is open
+                if (mainTabs.getSelectedIndex() == 2)
+                    taskBuilder.scanNearby();
+            });
+            scanTimer.start();
 
             ///  Start a third timer to auto-save everything periodically
             saveTimer = new Timer(60000, e -> {
@@ -1593,18 +1592,7 @@ public class DreamBotMenu extends JFrame {
 
     private void refreshDynamicControls() {
         if (taskBuilder != null)
-            taskBuilder.refresh();
-    }
-
-    private JPanel createHeaderPanel() {
-        JPanel header = new JPanel(new BorderLayout());
-        header.setBackground(PANEL_SURFACE);
-        header.setPreferredSize(new Dimension(0, 85));
-        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, COLOR_BORDER_DIM));
-        JPanel rightContainer = new JPanel(new BorderLayout());
-        rightContainer.setOpaque(false);
-        rightContainer.setBorder(new EmptyBorder(0, 0, 0, 20));
-        return header;
+            taskBuilder.scanNearby();
     }
 
     private void toggleScriptState() {
@@ -1652,10 +1640,36 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    private void toggleUserInput() { isUserInputAllowed = !isUserInputAllowed; Client.getInstance().setMouseInputEnabled(isUserInputAllowed); Client.getInstance().setKeyboardInputEnabled(isUserInputAllowed); btnInputToggle.setText(isUserInputAllowed ? "🖱" : "🚫"); }
-    private void styleHeaderLabel(JLabel l) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.BOLD, 15)); l.setHorizontalAlignment(SwingConstants.RIGHT); }
-    private void styleSpinner(JSpinner s) { JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField(); field.setBackground(new Color(30, 30, 30)); field.setForeground(COLOR_BLOOD); s.setBorder(new LineBorder(COLOR_BORDER_DIM)); }
-    private JButton createIconButton(String symbol, String tooltip, ActionListener action) { JButton btn = new JButton(symbol); btn.setPreferredSize(new Dimension(40, 40)); btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18)); btn.setBackground(new Color(30, 0, 0)); btn.setForeground(COLOR_BLOOD); btn.addActionListener(action); return btn; }
+    private void toggleUserInput() {
+        isUserInputAllowed = !isUserInputAllowed;
+        Client.getInstance().setMouseInputEnabled(isUserInputAllowed);
+        Client.getInstance().setKeyboardInputEnabled(isUserInputAllowed);
+        btnInputToggle.setText(isUserInputAllowed ? "🖱" : "🚫");
+    }
+
+    private void styleHeaderLabel(JLabel l) {
+        l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.BOLD, 15));
+        l.setHorizontalAlignment(SwingConstants.RIGHT);
+    }
+
+    private void styleSpinner(JSpinner s) {
+        JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField();
+        field.setBackground(new Color(30, 30, 30));
+        field.setForeground(COLOR_BLOOD);
+        s.setBorder(new LineBorder(COLOR_BORDER_DIM));
+    }
+
+    private JButton createIconButton(String symbol, String tooltip, ActionListener action) {
+        JButton btn = new JButton(symbol);
+            btn.setPreferredSize(new Dimension(40, 40));
+            btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18));
+            btn.setBackground(new Color(30, 0, 0));
+            btn.setForeground(COLOR_BLOOD);
+            btn.addActionListener(action);
+            btn.setToolTipText(tooltip);
+
+        return btn;
+    }
 
     private <T> boolean navigateQueue(int dir, JList<T> list, DefaultListModel<T> model) {
         // fetch the selected preset index to calculate which page we are on

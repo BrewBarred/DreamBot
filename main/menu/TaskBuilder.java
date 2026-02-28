@@ -30,6 +30,8 @@ import static main.menu.MenuHandler.*;
 public class TaskBuilder extends JPanel {
     private final DreamBotMenu botMenu;
 
+    JButton btnRemove;
+
     // ── Injected dependencies ─────────────────────────────────────────────────
     private final DefaultListModel<DreamBotMenu.Task> modelTaskLibrary;
     private final DefaultListModel<Action> modelTaskBuilder;
@@ -140,25 +142,22 @@ public class TaskBuilder extends JPanel {
 
     private JPanel buildLeft() {
         JPanel left = createPanelBorderLayout(0, 10);
-        left.setOpaque(false);
-
-        JPanel config = new JPanel(new GridBagLayout());
-        config.setOpaque(false);
+        JPanel config = createPanelGridBagLayout();
 
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.fill    = GridBagConstraints.HORIZONTAL;
-        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        //gbc.anchor = GridBagConstraints.WEST;
         gbc.insets  = new Insets(3, 3, 3, 3);
-
+        // fill horizontally?
+        gbc.weightx = 1.0;
         gbc.gridx = 0;
         gbc.gridy = 0;
-        gbc.anchor = GridBagConstraints.WEST;
         config.add(createLabel("Select action:"), gbc);
 
         gbc.gridy = 1;
         styleComp(actionSelector);
         config.add(actionSelector, gbc);
-        actionSelector.addSelectionListener(e -> onActionChanged());
+        actionSelector.addSelectionListener(e -> onSelectionChanged());
 
         gbc.gridy = 2;
         // TODO potentially remove this control panel
@@ -177,16 +176,7 @@ public class TaskBuilder extends JPanel {
         gbc.gridy  = 3;
         gbc.insets = new Insets(8, 3, 3, 3);
         JButton btnAdd = createButton("Add to builder...", COLOR_BTN_ADD, null);
-        btnAdd.addActionListener(e -> {
-            Action newAction = actionSelector.getSelectedAction().copy();
-            if (newAction != null) {
-                modelTaskBuilder.addElement(newAction);
-                toast("Added " + newAction + "!", btnAdd, true);
-                refreshList(true);
-            } else {
-                toast("Invalid or incomplete action!", btnAdd, false);
-            }
-        });
+        btnAdd.addActionListener(e -> addTemplateToBuilder());
         config.add(btnAdd, gbc);
 
         left.add(config,      BorderLayout.NORTH);
@@ -195,13 +185,20 @@ public class TaskBuilder extends JPanel {
         return left;
     }
 
-    private void onActionChanged() {
+    private void addTemplateToBuilder() {
+        Action newAction = actionSelector.getSelectedAction().copy();
+        if (newAction != null) {
+            modelTaskBuilder.addElement(newAction);
+            toast("Added " + newAction + "!", btnAddToLibrary, true);
+            refreshList(true);
+        } else {
+            toast("Invalid or incomplete action!", btnAddToLibrary, false);
+        }
+    }
+
+    private void onSelectionChanged() {
         refreshDynamicControls();
         scanNearby();
-//        actionSelector.addSelectionListener(e -> {
-//            refresh();
-//            libraryList.rescanNearby();
-//        });
     }
 
     private JPanel buildCenter() {
@@ -226,18 +223,9 @@ public class TaskBuilder extends JPanel {
 //        nav.add(btnUp);
 //        nav.add(btnDown);
 
-        JButton btnRemove = createButton("Remove", Color.RED, null);
+        btnRemove = createButton("Remove", Color.RED, null);
         btnRemove.setEnabled(false);
-        btnRemove.addActionListener(e -> {
-            int idx = listTaskBuilder.getSelectedIndex();
-            if (idx != -1) {
-                modelTaskBuilder.remove(idx);
-                toast("Action removed!", btnRemove, true);
-                refreshList();
-            } else {
-                toast("Select an action first!", btnRemove, false);
-            }
-        });
+        btnRemove.addActionListener(e -> removeSelected());
 
         JButton btnReset = createButton("Reset", new Color(50, 50, 50), null);
         btnReset.addActionListener(e -> {
@@ -275,6 +263,17 @@ public class TaskBuilder extends JPanel {
         center.add(bottomBtns,                       BorderLayout.SOUTH);
 
         return center;
+    }
+
+    private void removeSelected() {
+        int idx = listTaskBuilder.getSelectedIndex();
+        if (idx != -1) {
+            modelTaskBuilder.remove(idx);
+            toast("Action removed!", btnRemove, true);
+            refreshList();
+        } else {
+            toast("Select an action first!", btnRemove, false);
+        }
     }
 
     private JPanel buildRight() {
@@ -379,10 +378,6 @@ public class TaskBuilder extends JPanel {
         modelTaskBuilder.set(idx,    modelTaskBuilder.get(newIdx));
         modelTaskBuilder.set(newIdx, a);
         listTaskBuilder.setSelectedIndex(newIdx);
-    }
-
-    public void refresh() {
-        refreshDynamicControls();
     }
 
     private void refreshDynamicControls() {

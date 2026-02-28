@@ -3,6 +3,7 @@ package main.menu;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import java.awt.*;
 
@@ -137,6 +138,7 @@ public class MenuHandler {
     public static <T extends JComponent> T styleComp(T dynamicComponent) {
         dynamicComponent.setBackground(PANEL_SURFACE);
         dynamicComponent.setForeground(TEXT_MAIN);
+        dynamicComponent.setOpaque(false);
 
         if (dynamicComponent instanceof JTextField)
             ((JTextField) dynamicComponent).setCaretColor(COLOR_BLOOD);
@@ -147,5 +149,25 @@ public class MenuHandler {
         }
         
         return dynamicComponent;
+    }
+
+
+
+
+
+
+
+
+
+
+    private JPanel createHeaderPanel() {
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBackground(PANEL_SURFACE);
+        header.setPreferredSize(new Dimension(0, 85));
+        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, COLOR_BORDER_DIM));
+        JPanel rightContainer = new JPanel(new BorderLayout());
+        rightContainer.setOpaque(false);
+        rightContainer.setBorder(new EmptyBorder(0, 0, 0, 20));
+        return header;
     }
 }

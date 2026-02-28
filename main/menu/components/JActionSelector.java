@@ -9,6 +9,8 @@ import java.awt.event.ActionListener;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import static main.menu.MenuHandler.styleComp;
+
 public class JActionSelector extends JComboBox<Action> {
     private static final Map<String, Action> REGISTRY = new LinkedHashMap<>();
     /**
@@ -34,6 +36,8 @@ public class JActionSelector extends JComboBox<Action> {
         Logger.log(Logger.LogType.DEBUG, "Fetch params!");
         addActionListener(e -> rebuildTemplate());
         Logger.log(Logger.LogType.DEBUG, "Added listener!");
+
+        styleComp(this);
     }
 
     public void setSelectedAction(Action action) {
