@@ -106,7 +106,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
         if (!postStart())
             throw new RuntimeException("Error running post-start functions!");
         else
-            Logger.log(Logger.LogType.DEBUG, "Loading script...");
+            Logger.log(Logger.LogType.DEBUG, "Script loaded!");
     }
 
     @Override

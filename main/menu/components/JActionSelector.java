@@ -2,6 +2,7 @@ package main.menu.components;
 
 import main.actions.Action;
 import main.actions.Walk;
+import org.dreambot.api.utilities.Logger;
 
 import javax.swing.*;
 import java.awt.event.ActionListener;
@@ -23,10 +24,16 @@ public class JActionSelector extends JComboBox<Action> {
     }
 
     public JActionSelector() {
+        // instantiate action selector with the first item in the registry
         super(REGISTRY.values().toArray(new Action[0]));
-        selectedAction = REGISTRY.values().iterator().next().copy();
+        Logger.log(Logger.LogType.DEBUG, "Setting up action selector...");
+        setSelectedIndex(0);
+        rebuildTemplate();
+        Logger.log(Logger.LogType.DEBUG, "Rebuild complete!");
         currentPanel = selectedAction.getParamPanel();
+        Logger.log(Logger.LogType.DEBUG, "Fetch params!");
         addActionListener(e -> rebuildTemplate());
+        Logger.log(Logger.LogType.DEBUG, "Added listener!");
     }
 
     public void setSelectedAction(Action action) {
@@ -48,11 +55,15 @@ public class JActionSelector extends JComboBox<Action> {
      * Replaces the template instance (and therefore the live controls) for the selected action type.
      */
     private void rebuildTemplate() {
+        Logger.log(Logger.LogType.DEBUG, "Rebuilding...");
         if (selectedAction == null)
-            return;
+            selectedAction = REGISTRY.get(REGISTRY.keySet().iterator().next());
+
+        Logger.log(Logger.LogType.DEBUG, "Selected action: " + selectedAction);
 
         selectedAction = getSelectedAction().copy();
         currentPanel = selectedAction.getParamPanel();
+        Logger.log(Logger.LogType.DEBUG, "Rebuild complete!");
     }
 
     public void addSelectionListener(ActionListener l) {
@@ -67,11 +78,10 @@ public class JActionSelector extends JComboBox<Action> {
         return currentPanel;
     }
 
-    @Override
-    @Deprecated
-    public Object getSelectedItem() {
-        return selectedAction;
-    }
+//    @Override @Deprecated
+//    public Object getSelectedItem() {
+//        return super.getSelectedItem();
+//    }
 
 }
 

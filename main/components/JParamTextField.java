@@ -46,11 +46,12 @@ public class JParamTextField extends JTextField {
 
     @Override @Deprecated
     public void setText(String text) {
-        setParam(text);
+        super.setText(text);
+        return;
     }
 
     @Override @Deprecated
     public String getText() {
-        return getParam();
+        return super.getText();
     }
 }

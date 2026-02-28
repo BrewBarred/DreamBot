@@ -12,16 +12,9 @@ import static main.menu.MenuHandler.*;
 
 public abstract class Action {
     public JParamTextField paramTarget;
-    public JPanel paramPanel;
 
     public Action() {
         super();
-        paramTarget = new JParamTextField();
-    }
-
-    public Action(@NotNull String defaultTarget) {
-        this();
-        paramTarget.setParam(defaultTarget);
     }
 
     /// Every subclass must implement these:
@@ -45,17 +38,14 @@ public abstract class Action {
      * {@link main.menu.components.JActionSelector}.
      */
     public JPanel getParamPanel() {
-        if (paramPanel == null) {
-            paramPanel = new JPanel();
+        JPanel paramPanel = new JPanel();
 
-            // get the base panel from the child
-            JPanel dynamicPanel = createParamPanel();
+        JPanel dynamicPanel = createParamPanel();
 
-            styleComp(dynamicPanel);
-            styleComp(paramPanel);
+        styleComp(dynamicPanel);
+        styleComp(paramPanel);
 
-            paramPanel.add(dynamicPanel);
-        }
+        paramPanel.add(dynamicPanel);
 
         return paramPanel;
     }

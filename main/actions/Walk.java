@@ -1,5 +1,6 @@
 package main.actions;
 
+import main.components.JParamTextField;
 import main.data.Library;
 import org.dreambot.api.methods.interactive.GameObjects;
 import org.dreambot.api.methods.interactive.NPCs;
@@ -16,21 +17,23 @@ import java.util.Set;
 import static main.menu.MenuHandler.*;
 
 public class Walk extends Action {
-    private final String DEFAULT_TARGET = "3217, 3238, 0"; // Lumbridge magic tutor
+    private final String DEFAULT_TARGET = "3217, 3238, 0"; // Default target: Lumbridge magic tutor
     private Runnable variation;
 
     // Existing empty constructor for initial UI setup
     public Walk() {
         super();
+        paramTarget = new JParamTextField(DEFAULT_TARGET);
     }
 
     // New constructor for the actual functional action
     public Walk(String target) {
-        super(target);
+        this();
+        paramTarget.setParam(target);
     }
 
     public Walk(Walk w) {
-        this.paramTarget.setParam(w.getParamTarget());
+        this(w.getParamTarget());
         this.variation = w.variation;
     }
 
@@ -150,9 +153,10 @@ public class Walk extends Action {
 
     @Override
     public String getParamTarget() {
-        return paramTarget.getText();
+        return paramTarget.getParam();
     }
 
+    //TODO there was a bug with this function that caused the menu to stop loading
     @Override public Action copy() {
         return new Walk(this);
     }

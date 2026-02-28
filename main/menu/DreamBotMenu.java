@@ -212,6 +212,7 @@ public class DreamBotMenu extends JFrame {
     private static final Set<Skill> F2P_SKILLS = new HashSet<>(Arrays.asList(Skill.ATTACK, Skill.STRENGTH, Skill.DEFENCE, Skill.RANGED, Skill.PRAYER, Skill.MAGIC, Skill.HITPOINTS, Skill.CRAFTING, Skill.MINING, Skill.SMITHING, Skill.FISHING, Skill.COOKING, Skill.FIREMAKING, Skill.WOODCUTTING, Skill.RUNECRAFTING));
 
     public DreamBotMenu(AbstractScript script) {
+        Logger.log(Logger.LogType.DEBUG, "Instantiating DreamBotMenu...");
         ///  Provide a reference to the original script manager objects, this clouds the user from the original script
         ///     object as well, to avoid confusion, anything this class needs will be pulled in the constructor.
         this.scriptManager = script.getScriptManager();
@@ -226,17 +227,25 @@ public class DreamBotMenu extends JFrame {
         setLayout(new BorderLayout(0, 0));
         getContentPane().setBackground(BG_BASE);
 
+        Logger.log(Logger.LogType.DEBUG, "Setup main GUI parameters...");
+
         mainTabs.setBackground(PANEL_SURFACE);
         mainTabs.setForeground(TEXT_MAIN);
         mainTabs.addTab("Task List", loadTabIcon("task_list_tab"), createTaskListTab());
+        Logger.log(Logger.LogType.DEBUG, "Setup task list...");
         mainTabs.addTab("Task Library", loadTabIcon("task_library_tab"), createTaskLibraryTab());
+        Logger.log(Logger.LogType.DEBUG, "Setup task library...");
         actionSelector = new JActionSelector();
+        Logger.log(Logger.LogType.DEBUG, "Setup actoin selector...");
         taskBuilder = new TaskBuilder(this);
+        Logger.log(Logger.LogType.DEBUG, "Setup task builder...");
         mainTabs.addTab("Task Builder", loadTabIcon("task_builder_tab"), taskBuilder);
         mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
         mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
         mainTabs.addTab("Developers Console", new DevelopersConsole());
+
+        Logger.log(Logger.LogType.DEBUG, "Setup main tabs...");
 
         projectionSpinner = new JSpinner(new SpinnerNumberModel(24, 1, 999, 1));
         styleSpinner(projectionSpinner);
@@ -336,6 +345,7 @@ public class DreamBotMenu extends JFrame {
         });
 
         setVisible(true);
+        Logger.log(Logger.LogType.DEBUG, "DreamBotMenu instantiation complete!");
     }
 
     /**
@@ -2092,20 +2102,20 @@ public class DreamBotMenu extends JFrame {
             for (int i = 0; i < modelTaskLibrary.size(); i++)
                 taskLibrarySnapshot.add(modelTaskLibrary.getElementAt(i));
 
-            dataMan.saveEverything(
-                    taskListSnapshot,
-                    taskLibrarySnapshot,
-                    null,//captureBuilderSnapshot(), // TODO fix builder snapshot, might get server going again
-                    captureSettingsSnapshot(),
-                    capturePresets(), // Sending this directly to your presets column
-                    captureLocation(),
-                    captureInventory(),
-                    captureWorn(),
-                    captureSkills(),
-                    () -> setStatus("Save successful!")
-            );
+//            dataMan.saveEverything(
+//                    taskListSnapshot,
+//                    taskLibrarySnapshot,
+//                    captureBuilderSnapshot(), // TODO fix builder snapshot, might get server going again
+//                    captureSettingsSnapshot(),
+//                    capturePresets(), // Sending this directly to your presets column
+//                    captureLocation(),
+//                    captureInventory(),
+//                    captureWorn(),
+//                    captureSkills(),
+//                    () -> setStatus("Save successful!")
+//            );
 
-            Logger.log(Logger.LogType.INFO, "Autosaving all data columns...");
+            Logger.log(Logger.LogType.INFO, "Saving data...");
         }).start();
     }
 
