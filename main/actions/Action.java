@@ -6,11 +6,13 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 
+import java.util.Map;
+
 import static main.menu.MenuHandler.*;
 
 public abstract class Action {
-    JParamTextField paramTarget;
-    JPanel paramPanel;
+    public JParamTextField paramTarget;
+    public JPanel paramPanel;
 
     public Action() {
         super();
@@ -26,10 +28,16 @@ public abstract class Action {
     public abstract boolean execute();
     public abstract String getParamTarget();
     public abstract Action copy();
+    public abstract Map<String, String> serialize();
+    public abstract void deserialize(Map<String, String> data);
+
+    public String getName() {
+        return this.getClass().getSimpleName();
+    }
 
     ///  Getters/setters
     public Class<? extends Action> getType() {
-        return getClass();
+        return this.getClass();
     }
 
     /**

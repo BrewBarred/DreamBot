@@ -10,6 +10,7 @@ import org.dreambot.api.methods.walking.impl.Walking;
 
 import javax.swing.*;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 
 import static main.menu.MenuHandler.*;
@@ -154,5 +155,21 @@ public class Walk extends Action {
 
     @Override public Action copy() {
         return new Walk(this);
+    }
+
+    @Override
+    public Map<String, String> serialize() {
+        return Map.of(
+                "Target", paramTarget.getParam()
+        );
+    }
+
+    @Override
+    public void deserialize(Map<String, String> data) {
+        String target = data.get("Target");
+
+        if (target != null) {
+            paramTarget.setParam(target);   // restore UI field
+        }
     }
 }

@@ -222,9 +222,8 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
 
     @Override
     public final void onResume() {
-        // super.onResume();\
+        // super.onResume();
         resume("Client start triggered...");
-        Logger.log(Logger.LogType.DEBUG, "Resuming script...");
     }
 
     public final void resume(String status) {
@@ -232,6 +231,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             menu.resume(status);
 
         postResume();
+        Logger.log(Logger.LogType.DEBUG, "Script resumed: " + status);
     }
 
     @Override

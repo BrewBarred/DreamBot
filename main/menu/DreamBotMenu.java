@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import com.google.gson.reflect.TypeToken;
+import main.data.ActionData;
 import main.managers.DataMan;
 import main.menu.components.JActionSelector;
 import org.dreambot.api.Client;
@@ -45,7 +46,7 @@ import static main.menu.MenuHandler.*;
 public class DreamBotMenu extends JFrame {
     private final ScriptManager scriptManager;
     public boolean isMenuPaused;
-    private final TaskBuilder taskBuilder;
+    public final TaskBuilder taskBuilder;
     private static final int PRESET_COLUMNS = 4;
     /**
      * The amount of time (ms) before the status is automatically reverted to the {@link #DEFAULT_STATUS_STRING}
@@ -1220,16 +1221,17 @@ public class DreamBotMenu extends JFrame {
         return Players.getLocal().getName();
     }
 
-    public void loadTaskList() {
-        new Thread(() -> {
-            // Use the method from your DataMan class to get the raw JSON
-            String rawJson = dataMan.loadDataByPlayer("tasks");
-            SwingUtilities.invokeLater(() -> {
-                if (rawJson != null)
-                    unpackTaskList(rawJson);
-            });
-        }).start();
-    }
+    // todo FIX
+//    public void loadTaskList() {
+//        new Thread(() -> {
+//            // Use the method from your DataMan class to get the raw JSON
+//            String rawJson = dataMan.loadDataByPlayer("tasks");
+//            SwingUtilities.invokeLater(() -> {
+//                if (rawJson != null)
+//                    unpackTaskList(rawJson);
+//            });
+//        }).start();
+//    }
 
     public void loadTaskLibrary() {
         new Thread(() -> {
@@ -1272,41 +1274,39 @@ public class DreamBotMenu extends JFrame {
         }).start();
     }
 
-
-    private void unpackTaskList(String json) {
-        if (json == null || json.isEmpty() || json.equals("[]")) {
-            Logger.log("No task list data found to unpack.");
-            return;
-        }
-
-        try {
-            Gson gson = new Gson();
-
-            // Supabase wraps the response in an outer array: [ { "tasks": [...] } ]
-            // "tasks" is now a List, not a Map
-            java.lang.reflect.Type wrapperType = new TypeToken<List<Map<String, List<Task>>>>(){}.getType();
-            List<Map<String, List<Task>>> responseList = gson.fromJson(json, wrapperType);
-
-            if (responseList != null && !responseList.isEmpty()) {
-                List<Task> fetchedTasks = responseList.get(0).get("tasks");
-
-                if (fetchedTasks != null) {
-                    SwingUtilities.invokeLater(() -> {
-                        modelTaskList.clear();
-                        for (Task task : fetchedTasks) {
-                            modelTaskList.addElement(task);
-                        }
-                        refreshTaskListTab();
-                        Logger.log("Successfully unpacked " + modelTaskList.size() + " tasks into the Task List");
-                    });
-                }
-            }
-            listTaskList.repaint();
-        } catch (Exception e) {
-            Logger.log(Logger.LogType.ERROR, "Failed to unpack Task List data: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
+//    private void unpackTaskList(String json) {
+//        if (json == null || json.isEmpty() || json.equals("[]")) {
+//            Logger.log("No task list data found to unpack.");
+//            return;
+//        }
+//
+//        try {
+//            Gson gson = new Gson();
+//
+//            // Supabase wraps the response in an outer array: [ { "tasks": [...] } ]
+//            // "tasks" is now a List, not a Map
+//            List<Map<String, List<Task>>> responseList = gson.fromJson(json, Action.Class);
+//
+//            if (responseList != null && !responseList.isEmpty()) {
+//                List<Task> fetchedTasks = responseList.get(0).get("tasks");
+//
+//                if (fetchedTasks != null) {
+//                    SwingUtilities.invokeLater(() -> {
+//                        modelTaskList.clear();
+//                        for (Task task : fetchedTasks) {
+//                            modelTaskList.addElement(task);
+//                        }
+//                        refreshTaskListTab();
+//                        Logger.log("Successfully unpacked " + modelTaskList.size() + " tasks into the Task List");
+//                    });
+//                }
+//            }
+//            listTaskList.repaint();
+//        } catch (Exception e) {
+//            Logger.log(Logger.LogType.ERROR, "Failed to unpack Task List data: " + e.getMessage());
+//            e.printStackTrace();
+//        }
+//    }
 
 
     private void unpackTaskLibrary(String json) {
@@ -1363,16 +1363,20 @@ public class DreamBotMenu extends JFrame {
             if (snap != null) {
                 SwingUtilities.invokeLater(() -> {
                     modelTaskBuilder.clear();
-                    if (snap.actions != null) {
-                        snap.actions.forEach(modelTaskBuilder::addElement);
+                    for (ActionData data : snap.actions) {
+                        Action action = actionSelector.create(data.getType());
+                        action.deserialize(data.getParams());
+                        modelTaskBuilder.addElement(action);
                     }
+
                     taskNameInput.setText(snap.taskName != null ? snap.taskName : "");
                     taskDescriptionInput.setText(snap.taskDescription != null ? snap.taskDescription : "");
                     taskStatusInput.setText(snap.taskStatus != null ? snap.taskStatus : "");
-                    //paramTarget.setText(snap.targetName != null ? snap.targetName : "");
+                    Action action = actionSelector.create(snap.target);
+                    actionSelector.setSelectedAction(action);
 
-                    if (snap.selectedAction != null && !snap.selectedAction.isEmpty())
-                        actionSelector.setSelectedItem(snap.selectedAction);
+                    if (snap.selected != null)
+                        actionSelector.setSelectedItem(snap.selected);
 
                     refreshTaskBuilderTab();
                     Logger.log(Logger.LogType.SCRIPT, "Successfully unpacked Task Builder data");
@@ -2044,12 +2048,16 @@ public class DreamBotMenu extends JFrame {
                 updateUI();
             });
 
-            // 3. Fetch data sequentially
+            // fetch data from 'settings' column
             loadSettings();
-            loadTaskList();
+            // fetch data from 'tasks' column
+            //loadTaskList();
+            // fetch data from 'library' column
             loadTaskLibrary();
+            // fetch data from 'builder' column
             loadTaskBuilder();
-            loadPresets(); // Fetching from the presets column
+            // fetch data from 'presets' column
+            loadPresets();
 
             isDataLoading = false;
         }).start();
@@ -2075,10 +2083,19 @@ public class DreamBotMenu extends JFrame {
 
             setStatus("Autosaving...");
 
+            // Extract plain data from the list models first
+            List<Task> taskListSnapshot = new ArrayList<>();
+            for (int i = 0; i < modelTaskList.size(); i++)
+                taskListSnapshot.add(modelTaskList.getElementAt(i));
+
+            List<Task> taskLibrarySnapshot = new ArrayList<>();
+            for (int i = 0; i < modelTaskLibrary.size(); i++)
+                taskLibrarySnapshot.add(modelTaskLibrary.getElementAt(i));
+
             dataMan.saveEverything(
-                    listTaskList,
-                    listTaskLibrary,
-                    captureBuilderSnapshot(),
+                    taskListSnapshot,
+                    taskLibrarySnapshot,
+                    null,//captureBuilderSnapshot(), // TODO fix builder snapshot, might get server going again
                     captureSettingsSnapshot(),
                     capturePresets(), // Sending this directly to your presets column
                     captureLocation(),
@@ -2112,25 +2129,38 @@ public class DreamBotMenu extends JFrame {
 
     // --- Snapshot Classes & Capture Methods ---
     public static class BuilderSnapshot {
-        public String selectedAction;
-        public String targetName;
+        public Map<String, String> selected;
+        public String target;
+
         public String taskName;
         public String taskDescription;
         public String taskStatus;
-        public List<Action> actions;
+
+        public List<ActionData> actions;
     }
 
     private BuilderSnapshot captureBuilderSnapshot() {
         BuilderSnapshot snapshot = new BuilderSnapshot();
+
+        snapshot.target =
+
         snapshot.taskName = taskNameInput != null ? taskNameInput.getText() : "";
+        snapshot.target = actionSelector != null ? actionSelector.getSelectedAction().getParamTarget() : null;
         snapshot.taskDescription = taskDescriptionInput != null ? taskDescriptionInput.getText() : "";
         snapshot.taskStatus = taskStatusInput != null ? taskStatusInput.getText() : "";
-        snapshot.selectedAction = actionSelector != null && actionSelector.getSelectedItem() != null
-                ? actionSelector.getSelectedItem().toString() : "";
-        //snapshot.targetName = paramTarget != null ? paramTarget.getText() : "";
+        snapshot.selected = actionSelector != null && actionSelector.getSelectedAction() != null
+                ? actionSelector.getSelectedAction().serialize() : null;
         snapshot.actions = new ArrayList<>();
-        for (int i = 0; i < modelTaskBuilder.getSize(); i++)
-            snapshot.actions.add(modelTaskBuilder.getElementAt(i));
+
+        for (int i = 0; i < modelTaskBuilder.getSize(); i++) {
+            Action action = modelTaskBuilder.getElementAt(i);
+
+            ActionData data = new ActionData();
+                data.setType(action.getType().getSimpleName());
+                data.setParams(action.serialize());
+
+            snapshot.actions.add(data);
+        }
 
         return snapshot;
     }

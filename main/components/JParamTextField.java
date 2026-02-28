@@ -36,8 +36,8 @@ public class JParamTextField extends JTextField {
     }
 
     public void setParam(String value) {
-        param = value;
         super.setText(value);
+        param = value;
     }
 
     public String getParam() {

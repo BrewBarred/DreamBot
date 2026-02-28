@@ -18,14 +18,14 @@ public class JActionSelector extends JComboBox<Action> {
     private JPanel currentPanel;
 
     static {
-        REGISTRY.put("Walk",        new Walk());
+        REGISTRY.put("Walk", new Walk());
         //REGISTRY.put("Walk to NPC", new ActionLoader(WalkToNpc::new,  WalkToNpc::scanTargets));
     }
 
     public JActionSelector() {
         super(REGISTRY.values().toArray(new Action[0]));
         selectedAction = REGISTRY.values().iterator().next().copy();
-        currentPanel  = selectedAction.getParamPanel();
+        currentPanel = selectedAction.getParamPanel();
         addActionListener(e -> rebuildTemplate());
     }
 
@@ -37,6 +37,11 @@ public class JActionSelector extends JComboBox<Action> {
 
     public Action getSelectedAction() {
         return selectedAction;
+    }
+
+    public Action create(String type) {
+        Action prototype = REGISTRY.get(type);
+        return prototype != null ? prototype.copy() : null;
     }
 
     /**
@@ -61,6 +66,23 @@ public class JActionSelector extends JComboBox<Action> {
     public JPanel getCurrentPanel() {
         return currentPanel;
     }
+
+    @Override
+    @Deprecated
+    public Object getSelectedItem() {
+        return selectedAction;
+    }
+
+}
+
+
+
+
+
+
+
+
+
 
 //    /**
 //     * Builds a fully-configured Action from the current control values.
@@ -103,7 +125,6 @@ public class JActionSelector extends JComboBox<Action> {
 //        entry.updater.get();
 //        return true;
 //    }
-}
 
 //package main.menu;
 //

@@ -328,8 +328,8 @@ public class DataMan {
      * identified by the player's username.
      */
     public void saveEverything(
-            JList<DreamBotMenu.Task> taskList,
-            JList<DreamBotMenu.Task> libraryList,
+            List<DreamBotMenu.Task> taskList,
+            List<DreamBotMenu.Task> libraryList,
             DreamBotMenu.BuilderSnapshot builder,
             DreamBotMenu.SettingsSnapshot settings,
             List<DreamBotMenu.Preset> presets, int[] loc,
@@ -343,25 +343,17 @@ public class DataMan {
                 String playerName = getValidPlayerName();
                 if (playerName == null) return;
 
-                // 1. Pack the Task List
-                List<DreamBotMenu.Task> taskListData = new ArrayList<>();
-                for (int i = 0; i < taskList.getModel().getSize(); i++) {
-                    taskListData.add(taskList.getModel().getElementAt(i));
-                }
-
-                // 2. Pack the Library Map
+                // 2. Pack the Library Map (taskList is already a plain List, use it directly)
                 Map<String, DreamBotMenu.Task> libraryMap = new LinkedHashMap<>();
-                for (int i = 0; i < libraryList.getModel().getSize(); i++) {
-                    DreamBotMenu.Task task = libraryList.getModel().getElementAt(i);
+                for (DreamBotMenu.Task task : libraryList)
                     libraryMap.put(task.getName(), task);
-                }
 
                 // 3. Construct the massive unified payload
                 Map<String, Object> payload = new HashMap<>();
                 payload.put("username", playerName);// Generate an exact timestamp with your local timezone offset attached
                 java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
                 payload.put("last_accessed", sdf.format(new java.util.Date()));
-                payload.put("tasks", taskListData);
+                payload.put("tasks", taskList);
                 payload.put("library", libraryMap);
                 payload.put("presets", presets);
                 payload.put("builder", builder);
