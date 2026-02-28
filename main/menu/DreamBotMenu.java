@@ -231,12 +231,13 @@ public class DreamBotMenu extends JFrame {
 
         Logger.log(Logger.LogType.DEBUG, "Setup main GUI parameters...");
 
+        actionSelector = new JActionSelector();
+        taskBuilder = new TaskBuilder(this);
+
         mainTabs.setBackground(PANEL_SURFACE);
         mainTabs.setForeground(TEXT_MAIN);
         mainTabs.addTab("Task List", loadTabIcon("task_list_tab"), createTaskListTab());
         mainTabs.addTab("Task Library", loadTabIcon("task_library_tab"), createTaskLibraryTab());
-        actionSelector = new JActionSelector();
-        taskBuilder = new TaskBuilder(this);
         mainTabs.addTab("Task Builder", loadTabIcon("task_builder_tab"), taskBuilder);
         mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
         mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
@@ -1912,9 +1913,43 @@ public class DreamBotMenu extends JFrame {
         });
     }
 
-    private JPanel createInfoCard(String title) { JPanel p = new JPanel(new GridLayout(0, 1, 5, 10)); p.setBackground(PANEL_SURFACE); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(COLOR_BORDER_DIM), " " + title + " "); b.setTitleColor(COLOR_BLOOD); b.setTitleFont(new Font("Segoe UI", Font.BOLD, 16)); p.setBorder(BorderFactory.createCompoundBorder(b, new EmptyBorder(15, 15, 15, 15))); return p; }
-    private void addInfoRow(JPanel p, String key, JLabel valLabel) { JPanel row = new JPanel(new BorderLayout()); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); valLabel.setForeground(TEXT_MAIN); valLabel.setFont(new Font("Consolas", Font.BOLD, 14)); row.add(k, BorderLayout.WEST); row.add(valLabel, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
-    private void addInfoRowWithIcon(JPanel p, String key, JLabel valLabel, JLabel iconLabel) { JPanel row = new JPanel(new BorderLayout(5, 0)); row.setOpaque(false); JLabel k = new JLabel(key); k.setForeground(TEXT_DIM); JPanel rightSide = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0)); rightSide.setOpaque(false); valLabel.setForeground(TEXT_MAIN); rightSide.add(valLabel); rightSide.add(iconLabel); row.add(k, BorderLayout.WEST); row.add(rightSide, BorderLayout.EAST); row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40))); p.add(row); }
+    private JPanel createInfoCard(String title) {
+        JPanel p = new JPanel(new GridLayout(0, 1, 5, 10));
+        p.setBackground(PANEL_SURFACE);
+        TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(COLOR_BORDER_DIM), " " + title + " ");
+        b.setTitleColor(COLOR_BLOOD);
+        b.setTitleFont(new Font("Segoe UI", Font.BOLD, 16));
+        p.setBorder(BorderFactory.createCompoundBorder(b, new EmptyBorder(15, 15, 15, 15)));
+        return p;
+    }
+
+    private void addInfoRow(JPanel p, String key, JLabel valLabel) {
+        JPanel row = new JPanel(new BorderLayout());
+        row.setOpaque(false);
+        JLabel k = new JLabel(key);
+        k.setForeground(TEXT_DIM);
+        valLabel.setForeground(TEXT_MAIN);
+        valLabel.setFont(new Font("Consolas", Font.BOLD, 14));
+        row.add(k, BorderLayout.WEST); row.add(valLabel, BorderLayout.EAST);
+        row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40)));
+        p.add(row);
+    }
+
+    private void addInfoRowWithIcon(JPanel p, String key, JLabel valLabel, JLabel iconLabel) {
+        JPanel row = new JPanel(new BorderLayout(5, 0));
+        row.setOpaque(false);
+        JLabel k = new JLabel(key);
+        k.setForeground(TEXT_DIM);
+        JPanel rightSide = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        rightSide.setOpaque(false);
+        valLabel.setForeground(TEXT_MAIN);
+        rightSide.add(valLabel);
+        rightSide.add(iconLabel);
+        row.add(k, BorderLayout.WEST);
+        row.add(rightSide, BorderLayout.EAST);
+        row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40)));
+        p.add(row);
+    }
 
     ///  Define Client Settings sub-tab
     private JPanel createClientPanel() {
