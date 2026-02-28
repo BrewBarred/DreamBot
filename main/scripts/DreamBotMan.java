@@ -10,6 +10,7 @@ import org.dreambot.api.utilities.Logger;
 import org.dreambot.api.wrappers.interactive.Player;
 
 import javax.swing.*;
+import javax.swing.event.MouseInputListener;
 import java.awt.*;
 
 import main.actions.Action;
@@ -88,6 +89,8 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
 
     private DefaultListModel<DreamBotMenu.Task> queue;
 
+
+
     @Override
     public final void onStart() {
         super.onStart();
@@ -117,7 +120,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
                 return 1000;
 
             ///  Pause if the menu has
-            if (menu.isMenuPaused)
+            if (menu.isMenuPaused())
                 pause("Script paused via DreamBotMenu!");
 
             ///  Ensure inheritors pre-loop checks are performed before every loop

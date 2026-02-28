@@ -102,8 +102,9 @@ public class TaskBuilder extends JPanel {
     // =========================================================================
 
     /** Call from scanTimer when this tab is active. */
-    public void scanNearby() {
+    public void refresh() {
         listLibrary.rescanNearby();
+        refreshDynamicControls();
     }
 
     public void onTabShown() {
@@ -196,9 +197,11 @@ public class TaskBuilder extends JPanel {
         }
     }
 
+    /**
+     * This function is called when the action selector selection changed event is triggered.
+     */
     private void onSelectionChanged() {
-        refreshDynamicControls();
-        scanNearby();
+        refresh();
     }
 
     private JPanel buildCenter() {
@@ -416,7 +419,7 @@ public class TaskBuilder extends JPanel {
             listTaskBuilder.setSelectedIndex(modelTaskBuilder.getSize() - 1);
         listTaskBuilder.repaint();
 
-        scanNearby();
+        refresh();
     }
 
     private void refreshList() {

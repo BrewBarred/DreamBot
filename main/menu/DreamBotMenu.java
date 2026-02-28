@@ -22,6 +22,7 @@ import org.dreambot.api.utilities.Logger;
 import org.dreambot.api.methods.container.impl.equipment.Equipment;
 import org.dreambot.api.wrappers.items.Item;
 import org.dreambot.api.methods.map.Tile;
+import org.dreambot.core.Instance;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -45,7 +46,7 @@ import static main.menu.MenuHandler.*;
  */
 public class DreamBotMenu extends JFrame {
     private final ScriptManager scriptManager;
-    public boolean isMenuPaused;
+    private boolean isMenuPaused;
     public final TaskBuilder taskBuilder;
     private static final int PRESET_COLUMNS = 4;
     /**
@@ -77,8 +78,10 @@ public class DreamBotMenu extends JFrame {
     // --- Task ---
     boolean isTaskDescriptionRequired = false;
     boolean isTaskStatusRequired = false;
+
     // --- State ---
-    private boolean isUserInputAllowed = true;
+    private static boolean isMouseInput;
+    private static boolean isKeyboardInput;
     private boolean isDataLoading = false;
     private int currentExecutionIndex = -1;
 
@@ -162,7 +165,7 @@ public class DreamBotMenu extends JFrame {
     private JTextArea libraryEditorArea, consoleArea;
     private JTextField taskNameInput, taskDescriptionInput, taskStatusInput;
     JActionSelector actionSelector;
-    private JButton btnPlayPause, btnInputToggle, btnCaptureToggle;
+    private static JButton btnPlayPause, btnMouseToggle, btnKeyboardToggle;
 
     // --- Client Checkboxes ---
     private JCheckBox chkAutoSave;
@@ -215,7 +218,7 @@ public class DreamBotMenu extends JFrame {
         ///  Provide a reference to the original script manager objects, this clouds the user from the original script
         ///     object as well, to avoid confusion, anything this class needs will be pulled in the constructor.
         this.scriptManager = script.getScriptManager();
-        this.isMenuPaused = scriptManager.isPaused();
+        this.isMenuPaused(scriptManager.isPaused());
         this.startTime = System.currentTimeMillis();
         this.setIconImage(Objects.requireNonNull(loadStatusIcon("Hardcore_ironman")).getImage());
         setTitle("DreamBotMan | OSRS DreamBot Manager v1");
@@ -325,7 +328,7 @@ public class DreamBotMenu extends JFrame {
             scanTimer = new Timer(4000, e -> {
                 // scan for nearby targets every n seconds while the task builder tab is open
                 if (mainTabs.getSelectedIndex() == 2)
-                    taskBuilder.scanNearby();
+                    taskBuilder.refresh();
             });
             scanTimer.start();
 
@@ -414,15 +417,17 @@ public class DreamBotMenu extends JFrame {
         gbc.insets = new Insets(0, 2, 0, 0);
         persistentStatus.add(lblStatus, gbc);
 
-        // --- Row 1, Right: The Buttons ---
+        ///  Create play/pause, stop and enable/disable mouse buttons
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         controls.setOpaque(false);
-        btnPlayPause = createIconButton("▶", "Play", e -> toggleScriptState());
-        JButton btnStop = createIconButton("■", "Stop", e -> stop());
-        btnInputToggle = createIconButton("🖱", "Input", e -> toggleUserInput());
+        btnPlayPause = createIconButton("▶", "Play the script", e -> toggleScriptState());
+        JButton btnStop = createIconButton("■", "Stop the script", e -> stop());
+        btnMouseToggle = createIconButton("🖱", "Toggle mouse input", e -> toggleMouseInput());
+        btnKeyboardToggle = createIconButton("⌨", "Toggle keyboard input", e -> toggleKeyboardInput());
         controls.add(btnPlayPause);
         controls.add(btnStop);
-        controls.add(btnInputToggle);
+        controls.add(btnMouseToggle);
+        controls.add(btnKeyboardToggle);
 
         gbc.gridx = 1;
         gbc.gridy = 1;
@@ -1217,7 +1222,18 @@ public class DreamBotMenu extends JFrame {
         return Players.getLocal().getName();
     }
 
-    // todo FIX
+    public void loadSettings() {
+        Logger.log(Logger.LogType.DEBUG, "Unpacking settings...");
+        new Thread(() -> {
+            String rawJson = dataMan.loadDataByPlayer("settings");
+            SwingUtilities.invokeLater(() -> {
+                if (rawJson != null)
+                    unpackSettings(rawJson);
+            });
+        }).start();
+    }
+
+//    // todo FIX
 //    public void loadTaskList() {
 //        new Thread(() -> {
 //            // Use the method from your DataMan class to get the raw JSON
@@ -1241,6 +1257,7 @@ public class DreamBotMenu extends JFrame {
     }
 
     public void loadTaskBuilder() {
+        Logger.log(Logger.LogType.DEBUG, "Unpacking task builder...");
         new Thread(() -> {
             String rawJson = dataMan.loadDataByPlayer("builder");
             SwingUtilities.invokeLater(() -> {
@@ -1249,18 +1266,8 @@ public class DreamBotMenu extends JFrame {
             });
         }).start();
     }
-
-    public void loadSettings() {
-        new Thread(() -> {
-            String rawJson = dataMan.loadDataByPlayer("settings");
-            SwingUtilities.invokeLater(() -> {
-                if (rawJson != null)
-                    unpackSettings(rawJson);
-            });
-        }).start();
-    }
-
     public void loadPresets() {
+        Logger.log(Logger.LogType.DEBUG, "Unpacking presets...");
         new Thread(() -> {
             String rawJson = dataMan.loadDataByPlayer("presets");
             SwingUtilities.invokeLater(() -> {
@@ -1446,12 +1453,11 @@ public class DreamBotMenu extends JFrame {
                     // Now that the UI matches the server data, force the game to match the UI
                     syncSettings();
 
-                    if (snap.startScriptOnLoadDisabled) { // or your renamed field
+                    if (!snap.startScriptOnLoadDisabled) {
                         Logger.log("Auto-start detected! Starting script...");
                         startScriptOnLoad = true;
                         resume("Auto-start detected! Resuming script...");
                     }
-
                 });
             }
         } catch (Exception e) {
@@ -1592,35 +1598,43 @@ public class DreamBotMenu extends JFrame {
 
     private void refreshDynamicControls() {
         if (taskBuilder != null)
-            taskBuilder.scanNearby();
+            taskBuilder.refresh();
+    }
+
+    public void isMenuPaused(boolean paused) {
+        isMenuPaused = paused;
+    }
+
+    public boolean isMenuPaused() {
+        return isMenuPaused;
     }
 
     private void toggleScriptState() {
         if (scriptManager == null)
             return;
 
-        if (isMenuPaused)
+        if (isMenuPaused())
             resume("Script resumed!");
         else
             pause("Script paused!");
     }
 
     public void resume(String status) {
-        if (isMenuPaused) {
+        if (isMenuPaused()) {
             btnPlayPause.setText("▮▮");
             setStatus(status);
             ///  MUST SET MENU STATE BEFORE SCRIPT STATE TO PREVENT INFINITE LOOPS
-            isMenuPaused = false;
+            isMenuPaused(false);
             scriptManager.resume();
         }
     }
 
     public boolean pause(String status) {
-        if (!isMenuPaused) {
+        if (!isMenuPaused()) {
             btnPlayPause.setText("▶");
             setStatus(status);
             ///  MUST SET MENU STATE BEFORE SCRIPT STATE TO PREVENT INFINITE LOOPS
-            isMenuPaused = true;
+            isMenuPaused(true);
             scriptManager.pause();
         }
 
@@ -1640,11 +1654,79 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    private void toggleUserInput() {
-        isUserInputAllowed = !isUserInputAllowed;
-        Client.getInstance().setMouseInputEnabled(isUserInputAllowed);
-        Client.getInstance().setKeyboardInputEnabled(isUserInputAllowed);
-        btnInputToggle.setText(isUserInputAllowed ? "🖱" : "🚫");
+    /**
+     * Set whether mouse input is enabled or not.
+     *
+     * @param enabled True if mouse input is enabled, else false to disable user mouse input.
+     */
+    private static boolean setMouseInput(boolean enabled) {
+        if (isMouseInput != enabled) {
+            // update user mouse toggle
+            Client.getInstance().setMouseInputEnabled(enabled);
+            // update mouse input button icon
+            btnMouseToggle.setText(enabled ? "🖱" : "🚫");
+            // update input enabled field to prevent circular loops
+            isMouseInput = enabled;
+        }
+
+        return isMouseInput;
+    }
+
+    public static boolean getMouseInput() {
+        // fetch client mouse input state
+        boolean isClientEnabled = Instance.isMouseInputEnabled();
+
+        // check if menu/client input states match and return true
+        if (isMouseInput && isClientEnabled)
+            return true;
+
+        // if mismatch detected, sync menu with client and return result
+        return setMouseInput(isClientEnabled);
+    }
+
+    /**
+     * Toggles the mouse input on/off based to swap its current execution state.
+     */
+    private void toggleMouseInput() {
+        setMouseInput(!isMouseInput);
+    }
+
+    /**
+     * Set whether keyboard input is enabled or not.
+     *
+     * @param enabled True if keyboard input is enabled, else false to disable user keyboard input.
+     */
+    private boolean setKeyboardInput(boolean enabled) {
+        // if menu isn't already synced
+        if (isKeyboardInput != enabled) {
+            // update user keyboard toggle
+            Client.getInstance().setKeyboardInputEnabled(enabled);
+            // update keyboard input button icon
+            btnKeyboardToggle.setText(enabled ? "⌨" : "🚫");
+            // update input enabled field to prevent circular loops
+            isKeyboardInput = enabled;
+        }
+
+        return isKeyboardInput;
+    }
+
+    public final boolean getKeyboardInput() {
+        // fetch client keyboard input state
+        boolean isClientEnabled = Instance.getInstance().isKeyboardInputEnabled();
+
+        // check if menu/client input states match and return true
+        if (isKeyboardInput && isClientEnabled)
+            return true;
+
+        // if mismatch detected, sync menu with client and return result
+        return setKeyboardInput(isClientEnabled);
+    }
+
+    /**
+     * Toggles the keyboard input on/off based to swap its current execution state.
+     */
+    private void toggleKeyboardInput() {
+        setKeyboardInput(!isKeyboardInput);
     }
 
     private void styleHeaderLabel(JLabel l) {
@@ -1657,18 +1739,6 @@ public class DreamBotMenu extends JFrame {
         field.setBackground(new Color(30, 30, 30));
         field.setForeground(COLOR_BLOOD);
         s.setBorder(new LineBorder(COLOR_BORDER_DIM));
-    }
-
-    private JButton createIconButton(String symbol, String tooltip, ActionListener action) {
-        JButton btn = new JButton(symbol);
-            btn.setPreferredSize(new Dimension(40, 40));
-            btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18));
-            btn.setBackground(new Color(30, 0, 0));
-            btn.setForeground(COLOR_BLOOD);
-            btn.addActionListener(action);
-            btn.setToolTipText(tooltip);
-
-        return btn;
     }
 
     private <T> boolean navigateQueue(int dir, JList<T> list, DefaultListModel<T> model) {
@@ -1836,6 +1906,9 @@ public class DreamBotMenu extends JFrame {
                 lblGameState.setText(Client.getGameState().name());
             }
 
+            // update keyboard/mouse inputs as mock listeners. This will keep UI in sync at least every 1 second
+            setMouseInput(getMouseInput());
+            setKeyboardInput(getKeyboardInput());
         });
     }
 
@@ -2072,6 +2145,7 @@ public class DreamBotMenu extends JFrame {
 
             isDataLoading = false;
         }).start();
+        Logger.log(Logger.LogType.SCRIPT, "Unpacked settings successfully! Syncing game settings..sdsd.");
     }
 
     /**

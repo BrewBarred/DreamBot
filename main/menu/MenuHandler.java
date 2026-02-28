@@ -6,12 +6,13 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import java.awt.*;
+import java.awt.event.ActionListener;
 
 public class MenuHandler {
     static final Color COLOR_BTN_BACKGROUND = new Color(40,40,40);
     static final Color COLOR_BTN_FOREGROUND = Color.WHITE;
 
-    public static final Color COLOR_SUBTITLE = new Color(193, 93, 13);
+    static final Color COLOR_SUBTITLE = new Color(193, 93, 13);
 
     static final Color COLOR_BORDER_DIM = new Color(45, 45, 45);
 
@@ -26,23 +27,35 @@ public class MenuHandler {
         return createButton(btnText, null, null);
     }
 
-    public static JPanel createPanel() {
+    static JButton createIconButton(String symbol, String tooltip, ActionListener action) {
+        JButton btn = new JButton(symbol);
+            btn.setPreferredSize(new Dimension(40, 40));
+            btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18));
+            btn.setBackground(new Color(30, 0, 0));
+            btn.setForeground(COLOR_BLOOD);
+            btn.addActionListener(action);
+            btn.setToolTipText(tooltip); // TODO force tooltip onto normal buttons and go through and apply one
+
+        return btn;
+    }
+
+    static JPanel createPanel() {
         return styleComp(new JPanel(new BorderLayout()));
     }
 
-    public static JPanel createPanelBorderLayout(int hgap, int vgap) {
+    static JPanel createPanelBorderLayout(int hgap, int vgap) {
         return styleComp(new JPanel(new BorderLayout(hgap, vgap)));
     }
 
-    public static JPanel createPanelGridBagLayout() {
+    static JPanel createPanelGridBagLayout() {
         return styleComp(new JPanel(new GridBagLayout()));
     }
 
-    public static JLabel createLabel(@NotNull String text) {
+    static JLabel createLabel(@NotNull String text) {
         return styleComp(new JLabel(text));
     }
 
-    public static JButton createButton(@NotNull String btnText, Color backgroundColor, Color foregroundColor) {
+    static JButton createButton(@NotNull String btnText, Color backgroundColor, Color foregroundColor) {
         // validate button text
         if (btnText.isEmpty())
             throw new IllegalArgumentException("Error creating button! Button text cannot be empty");
@@ -83,7 +96,7 @@ public class MenuHandler {
         return parameterPanel;
     }
 
-    public static JPanel createParamTitle(String rawTitle) {
+    static JPanel createParamTitle(String rawTitle) {
         ///  Create the subtitle label (text)
         JLabel paramLabel = new JLabel(rawTitle);
             paramLabel.setFont(new Font("Segoe UI", Font.BOLD, 13));
@@ -97,7 +110,7 @@ public class MenuHandler {
         return paramPanel;
     }
 
-    public static JLabel createSubtitle(String subtitle) {
+    static JLabel createSubtitle(String subtitle) {
         JLabel title = new JLabel(subtitle, SwingConstants.CENTER);
         title.setForeground(COLOR_BLOOD);
         title.setFont(new Font("Consolas", Font.BOLD, 22));
@@ -106,7 +119,7 @@ public class MenuHandler {
         return title;
     }
 
-    public static JTextArea createParamDescription(@NotNull String rawDescription) {
+    static JTextArea createParamDescription(@NotNull String rawDescription) {
         JTextArea description = new JTextArea(rawDescription);
             description.setWrapStyleWord(true);
             description.setLineWrap(true);
@@ -120,7 +133,7 @@ public class MenuHandler {
         return description;
     }
 
-    public static JTextArea createParamExample(@NotNull String rawExample) {
+    static JTextArea createParamExample(@NotNull String rawExample) {
         JTextArea example = new JTextArea(rawExample);
             example.setWrapStyleWord(true);
             example.setLineWrap(true);
