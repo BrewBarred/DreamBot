@@ -1,6 +1,7 @@
 package main.managers;
 
 import com.google.gson.Gson;
+import main.data.BuilderSnapshot;
 import main.menu.DreamBotMenu;
 import org.dreambot.api.Client;
 import org.dreambot.api.methods.interactive.Players;
@@ -330,7 +331,7 @@ public class DataMan {
     public void saveEverything(
             //List<DreamBotMenu.Task> taskList,
             //List<DreamBotMenu.Task> libraryList,
-            DreamBotMenu.BuilderSnapshot builder,
+            BuilderSnapshot builder,
             DreamBotMenu.SettingsSnapshot settings,
             List<DreamBotMenu.Preset> presets, int[] loc,
             int[] inv,

@@ -1,7 +1,6 @@
 package main.menu.components;
 
 import main.data.Library;
-import main.data.Library.TargetType;
 import org.dreambot.api.methods.interactive.GameObjects;
 import org.dreambot.api.methods.interactive.NPCs;
 import org.dreambot.api.methods.interactive.Players;
@@ -84,7 +83,7 @@ public class JLibraryList extends JPanel {
      */
     public static class EntityEntry {
         public final String     name;
-        public final TargetType type;
+        public final Library.TargetType type;
         public final String     source;   // "NEARBY" or "LIBRARY"
 
         // Live DreamBot refs — non-null only for NEARBY entries
@@ -92,7 +91,7 @@ public class JLibraryList extends JPanel {
         public GameObject objectRef;
         public GroundItem groundRef;
 
-        public EntityEntry(String name, TargetType type, String source) {
+        public EntityEntry(String name, Library.TargetType type, String source) {
             this.name   = name;
             this.type   = type;
             this.source = source;
@@ -339,7 +338,7 @@ public class JLibraryList extends JPanel {
             if (liveNpcs != null) {
                 for (NPC npc : liveNpcs) {
                     if (withinRadius(npc.getTile())) {
-                        EntityEntry e = new EntityEntry(npc.getName(), TargetType.NPC, "NEARBY");
+                        EntityEntry e = new EntityEntry(npc.getName(), Library.TargetType.NPC, "NEARBY");
                         e.npcRef = npc;
                         addUnique(nearbyFull, e);
                     }
@@ -354,7 +353,7 @@ public class JLibraryList extends JPanel {
             if (liveObjs != null) {
                 for (GameObject obj : liveObjs) {
                     if (withinRadius(obj.getTile())) {
-                        EntityEntry e = new EntityEntry(obj.getName(), TargetType.GAME_OBJECT, "NEARBY");
+                        EntityEntry e = new EntityEntry(obj.getName(), Library.TargetType.GAME_OBJECT, "NEARBY");
                         e.objectRef = obj;
                         addUnique(nearbyFull, e);
                     }
@@ -369,7 +368,7 @@ public class JLibraryList extends JPanel {
             if (liveItems != null) {
                 for (GroundItem item : liveItems) {
                     if (withinRadius(item.getTile())) {
-                        EntityEntry e = new EntityEntry(item.getName(), TargetType.GROUND_ITEM, "NEARBY");
+                        EntityEntry e = new EntityEntry(item.getName(), Library.TargetType.GROUND_ITEM, "NEARBY");
                         e.groundRef = item;
                         addUnique(nearbyFull, e);
                     }
@@ -385,7 +384,7 @@ public class JLibraryList extends JPanel {
                 if (livePlayers != null) {
                     for (var p : livePlayers) {
                         if (withinRadius(p.getTile())) {
-                            addUnique(nearbyFull, new EntityEntry(p.getName(), TargetType.PLAYER, "NEARBY"));
+                            addUnique(nearbyFull, new EntityEntry(p.getName(), Library.TargetType.PLAYER, "NEARBY"));
                         }
                     }
                 }
@@ -403,13 +402,13 @@ public class JLibraryList extends JPanel {
         libraryFull.clear();
 
         for (Library.Npcs n : Library.Npcs.values()) {
-            libraryFull.add(new EntityEntry(n.npcName, TargetType.NPC, "LIBRARY"));
+            libraryFull.add(new EntityEntry(n.npcName, Library.TargetType.NPC, "LIBRARY"));
         }
         for (Library.GameObjects o : Library.GameObjects.values()) {
-            libraryFull.add(new EntityEntry(o.objectName, TargetType.GAME_OBJECT, "LIBRARY"));
+            libraryFull.add(new EntityEntry(o.objectName, Library.TargetType.GAME_OBJECT, "LIBRARY"));
         }
         for (Library.GroundItems i : Library.GroundItems.values()) {
-            libraryFull.add(new EntityEntry(i.itemName, TargetType.GROUND_ITEM, "LIBRARY"));
+            libraryFull.add(new EntityEntry(i.itemName, Library.TargetType.GROUND_ITEM, "LIBRARY"));
         }
 
         setStatus("Library: " + libraryFull.size() + " entries");
@@ -438,12 +437,12 @@ public class JLibraryList extends JPanel {
                 ? "" : raw.toLowerCase();
 
         // Build allowed-type set from checkboxes
-        Set<TargetType> allowed = EnumSet.noneOf(TargetType.class);
-        if (cbNPC.isSelected())       allowed.add(TargetType.NPC);
-        if (cbObject.isSelected())    allowed.add(TargetType.GAME_OBJECT);
-        if (cbGround.isSelected())    allowed.add(TargetType.GROUND_ITEM);
-        if (cbPlayer.isSelected())    allowed.add(TargetType.PLAYER);
-        if (cbInventory.isSelected()) allowed.add(TargetType.INVENTORY_ITEM);
+        Set<Library.TargetType> allowed = EnumSet.noneOf(Library.TargetType.class);
+        if (cbNPC.isSelected())       allowed.add(Library.TargetType.NPC);
+        if (cbObject.isSelected())    allowed.add(Library.TargetType.GAME_OBJECT);
+        if (cbGround.isSelected())    allowed.add(Library.TargetType.GROUND_ITEM);
+        if (cbPlayer.isSelected())    allowed.add(Library.TargetType.PLAYER);
+        if (cbInventory.isSelected()) allowed.add(Library.TargetType.INVENTORY_ITEM);
 
         List<EntityEntry> source = currentMode == ViewMode.NEARBY ? nearbyFull : libraryFull;
 
@@ -674,7 +673,7 @@ public class JLibraryList extends JPanel {
             return row;
         }
 
-        private static JLabel buildBadge(TargetType type) {
+        private static JLabel buildBadge(Library.TargetType type) {
             final String text;
             final Color  color;
 

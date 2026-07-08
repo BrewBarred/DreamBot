@@ -1,5 +1,7 @@
 package main.scripts;
 
+import main.data.library.FileManager;
+import main.data.library.JLibrary;
 import main.menu.DreamBotMenu;
 import main.tools.Rand;
 import org.dreambot.api.data.GameState;
@@ -95,6 +97,9 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     public final void onStart() {
         super.onStart();
 
+        FileManager.setCollection("default");
+        JLibrary.getInstance().load();
+
         // initialize the GUI on the Event Dispatch Thread
         SwingUtilities.invokeLater(() -> {
             menu = new DreamBotMenu(this);
@@ -116,24 +121,26 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     public int onLoop() {
         try {
             ///  Don't start looping until the menu has been fully instantiated
-            if (menu == null)
+            if (menu == null || menu.libraryPanel == null)
                 return 1000;
 
             ///  Pause if the menu has
             if (menu.isMenuPaused())
                 pause("Script paused via DreamBotMenu!");
 
+            if (menu.libraryPanel != null)
+                menu.libraryPanel.tick();
+
             ///  Ensure inheritors pre-loop checks are performed before every loop
             if (!preLoop())
                 throw new Exception("Error executing pre loop logic!");
 
-//            ///  Check if the menu has been paused, if so, run the pause function. //TODO check possibility of this, i think its impossible?
-//            if (getScriptManager().isPaused())
-//                pause("Script paused.");
-
             if (queue == null || queue.isEmpty()) {
-                pause("Task list is empty!");
-                return 1000;
+                // don't pause while learning otherwise you won't be able to learn without running a script.
+                if (!JLibrary.getInstance().getLearner().isLearning())
+                    pause("Task list is empty!");
+
+                return Rand.nextInt(263, 1925);
             }
 
             // fetch the current execution index, automatically correcting setting invalid indices to the first item
@@ -262,6 +269,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     public final void onExit() {
         super.onExit();
 
+        JLibrary.getInstance().saveAll();
         // call post exit before menu disposal incase script needs to dispose of menu stuff
         postExit();
 

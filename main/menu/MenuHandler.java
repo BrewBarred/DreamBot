@@ -14,14 +14,18 @@ public class MenuHandler {
 
     static final Color COLOR_SUBTITLE = new Color(193, 93, 13);
 
-    static final Color COLOR_BORDER_DIM = new Color(45, 45, 45);
+    public static final Color COLOR_BORDER_DIM = new Color(45, 45, 45);
 
     static final Color PANEL_SURFACE = new Color(24, 24, 24);
-    static final Color TEXT_MAIN = new Color(210, 210, 210);
+    public static final Color TEXT_MAIN = new Color(210, 210, 210);
 
-    static final Color COLOR_BLOOD = new Color(150, 0, 0);
+    public static final Color COLOR_BLOOD = new Color(150, 0, 0);
 
     static final Color COLOR_BTN_ADD = new Color(220, 80, 0);
+
+    static final Color COLOR_NPC  = new Color(60,  120, 200);
+    static final Color COLOR_OBJ  = new Color(40,  160,  70);
+    static final Color COLOR_ITEM = new Color(200, 130,  40);
 
     static JButton createButton(@NotNull String btnText) {
         return createButton(btnText, null, null);

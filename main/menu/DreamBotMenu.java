@@ -6,8 +6,12 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import com.google.gson.reflect.TypeToken;
 import main.data.ActionData;
+import main.data.BuilderSnapshot;
+import main.data.library.LibraryPanel;
 import main.managers.DataMan;
 import main.menu.components.JActionSelector;
+import main.menu.skills.SkillData;
+import main.tools.Rand;
 import org.dreambot.api.Client;
 import org.dreambot.api.ClientSettings;
 import org.dreambot.api.methods.container.impl.Inventory;
@@ -47,7 +51,8 @@ import static main.menu.MenuHandler.*;
 public class DreamBotMenu extends JFrame {
     private final ScriptManager scriptManager;
     private boolean isMenuPaused;
-    public final TaskBuilder taskBuilder;
+    private final TaskBuilder taskBuilder;
+    public final LibraryPanel libraryPanel;
     private static final int PRESET_COLUMNS = 4;
     /**
      * The amount of time (ms) before the status is automatically reverted to the {@link #DEFAULT_STATUS_STRING}
@@ -118,6 +123,9 @@ public class DreamBotMenu extends JFrame {
     private final Color COLOR_FAILURE = new Color(100, 0, 0);
     private final Color COLOR_SUCCESS = new Color(0, 100, 0);
     private final Color COLOR_LIGHT_GREEN = new Color(150, 200, 50);
+    private final Color COLOR_EXECUTING = Color.YELLOW;
+    private final String ICON_EXECUTING = "→ ";
+    private final Font FONT_EXECUTING = new Font("Consolas", Font.BOLD, 12);
 
     // --- Data & Presets ---
     private final int MAX_TOAST_QUEUE = 1;
@@ -147,7 +155,9 @@ public class DreamBotMenu extends JFrame {
     private final JButton[] presetButtons = new JButton[4];
     private JButton btnPageUp, btnPageDown;
 
-    // --- UI Components ---
+    ///
+    /// --- UI Components ---
+    ///
     private final JTabbedPane mainTabs = new JTabbedPane();
     private final JPanel trackerList;
     private final JLabel totalXpGainedLabel = new JLabel();
@@ -167,7 +177,9 @@ public class DreamBotMenu extends JFrame {
     JActionSelector actionSelector;
     private static JButton btnPlayPause, btnMouseToggle, btnKeyboardToggle;
 
-    // --- Client Checkboxes ---
+    ///
+    /// --- Client Checkboxes ---
+    ///
     private JCheckBox chkAutoSave;
     private JCheckBox settingClientChkStartScriptOnLoad;
     private JCheckBox settingClientChkExitOnStopWarning;
@@ -204,11 +216,7 @@ public class DreamBotMenu extends JFrame {
     private final JLabel lblMemberIcon = new JLabel();
     private final JLabel lblMemberText = new JLabel("-");
 
-    private Toast activeToast;
-    private final int TIME_FLASH = 200;
-
-
-    //public enum ActionType { ATTACK, BANK, BURY, CHOP, COOK, DROP, EXAMINE, FISH, MINE, OPEN, TALK_TO, USE_ON }
+    private int TIME_FLASH = 200;
 
     private static final Skill[] OSRS_ORDER = { Skill.ATTACK, Skill.HITPOINTS, Skill.MINING, Skill.STRENGTH, Skill.AGILITY, Skill.SMITHING, Skill.DEFENCE, Skill.HERBLORE, Skill.FISHING, Skill.RANGED, Skill.THIEVING, Skill.COOKING, Skill.PRAYER, Skill.CRAFTING, Skill.FIREMAKING, Skill.MAGIC, Skill.FLETCHING, Skill.WOODCUTTING, Skill.RUNECRAFTING, Skill.SLAYER, Skill.FARMING, Skill.CONSTRUCTION, Skill.HUNTER, Skill.SAILING };
     private static final Set<Skill> F2P_SKILLS = new HashSet<>(Arrays.asList(Skill.ATTACK, Skill.STRENGTH, Skill.DEFENCE, Skill.RANGED, Skill.PRAYER, Skill.MAGIC, Skill.HITPOINTS, Skill.CRAFTING, Skill.MINING, Skill.SMITHING, Skill.FISHING, Skill.COOKING, Skill.FIREMAKING, Skill.WOODCUTTING, Skill.RUNECRAFTING));
@@ -233,6 +241,7 @@ public class DreamBotMenu extends JFrame {
 
         actionSelector = new JActionSelector();
         taskBuilder = new TaskBuilder(this);
+        libraryPanel = new LibraryPanel();
 
         mainTabs.setBackground(PANEL_SURFACE);
         mainTabs.setForeground(TEXT_MAIN);
@@ -242,7 +251,7 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
         mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
-        mainTabs.addTab("Developers Console", new DevelopersConsole());
+        mainTabs.addTab("Developers Console", new DevelopersConsole(libraryPanel));
 
         Logger.log(Logger.LogType.DEBUG, "Setup main tabs...");
 
@@ -1853,16 +1862,16 @@ public class DreamBotMenu extends JFrame {
 
             ///  Calculate total xp/levels
             for (SkillData data : skillRegistry.values()) {
-                int xp = Skills.getExperience(data.skill);
-                int lvl = Skills.getRealLevel(data.skill);
+                int xp = Skills.getExperience(data.getSkill());
+                int lvl = Skills.getRealLevel(data.getSkill());
                 data.update(xp, lvl, startTime, projH);
                 p2pTotal += lvl;
-                if (F2P_SKILLS.contains(data.skill))
+                if (F2P_SKILLS.contains(data.getSkill()))
                     f2pTotal += lvl;
 
-                if (data.isTracking) {
-                    totalXPGained += Math.max(0, (xp - data.startXP));
-                    totalLevelsGained += Math.max(0, (lvl - data.startLevel));
+                if (data.isTracking()) {
+                    totalXPGained += Math.max(0, (xp - data.getStartXP()));
+                    totalLevelsGained += Math.max(0, (lvl - data.getStartLevel()));
                 }
             }
 
@@ -2127,12 +2136,35 @@ public class DreamBotMenu extends JFrame {
 
     private JToggleButton createMenuButton(String text) { JToggleButton btn = new JToggleButton(text) { protected void paintComponent(Graphics g) { g.setColor(isSelected() ? TAB_SELECTED : PANEL_SURFACE); g.fillRect(0, 0, getWidth(), getHeight()); super.paintComponent(g); } }; btn.setFocusPainted(false); btn.setContentAreaFilled(false); btn.setForeground(TEXT_MAIN); btn.setFont(new Font("Segoe UI", Font.BOLD, 14)); btn.setHorizontalAlignment(SwingConstants.LEFT); btn.setBorder(new EmptyBorder(0, 20, 0, 0)); return btn; }
 
-    private JPanel createSkillTile(SkillData data) { JPanel tile = new JPanel(new GridBagLayout()); tile.setBackground(PANEL_SURFACE); tile.setBorder(new LineBorder(COLOR_BORDER_DIM)); GridBagConstraints gbc = new GridBagConstraints(); gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.gridx = 0; JPanel top = new JPanel(new BorderLayout()); top.setOpaque(false); JLabel icon = new JLabel(loadSkillIcon(data.skill)); data.lblLevel.setForeground(COLOR_BLOOD); data.lblLevel.setFont(new Font("Arial", Font.BOLD, 18)); top.add(icon, BorderLayout.WEST); top.add(data.lblLevel, BorderLayout.EAST); data.lblXpString.setForeground(TEXT_DIM); data.lblXpString.setFont(new Font("Monospaced", Font.PLAIN, 10)); data.mainBar.setForeground(COLOR_BLOOD); data.mainBar.setBackground(Color.BLACK); gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1; tile.add(data.lblXpString, gbc); gbc.gridy = 2; tile.add(data.mainBar, gbc);
+    private JPanel createSkillTile(SkillData data) {
+        JPanel tile = new JPanel(new GridBagLayout());
+        tile.setBackground(PANEL_SURFACE);
+        tile.setBorder(new LineBorder(COLOR_BORDER_DIM));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0; gbc.gridx = 0;
+        JPanel top = new JPanel(new BorderLayout());
+        top.setOpaque(false);
+        JLabel icon = new JLabel(loadSkillIcon(data.getSkill()));
+        data.getLabelLevel().setForeground(COLOR_BLOOD);
+        data.getLabelLevel().setFont(new Font("Arial", Font.BOLD, 18));
+        top.add(icon, BorderLayout.WEST);
+        top.add(data.getLabelLevel(), BorderLayout.EAST);
+        data.getLabelXP().setForeground(TEXT_DIM);
+        data.getLabelXP().setFont(new Font("Monospaced", Font.PLAIN, 10));
+        data.getTrackerPanel().setForeground(COLOR_BLOOD);
+        data.getTrackerPanel().setBackground(Color.BLACK);
+        gbc.gridy = 0; tile.add(top, gbc); gbc.gridy = 1;
+        tile.add(data.getLabelXP(), gbc);
+        gbc.gridy = 2;
+        tile.add(data.getTrackerPanel(), gbc);
+
         tile.addMouseListener(new MouseAdapter() {
             @Override public void mousePressed(MouseEvent e) {
                 if (e.getButton() == MouseEvent.BUTTON1) {
-                    data.isTracking = !data.isTracking;
-                    tile.setBorder(new LineBorder(data.isTracking ? COLOR_BLOOD : COLOR_BORDER_DIM, 1));
+                    // toggles skill tracking on/off on single mouse click
+                    data.toggleTracking();
+                    tile.setBorder(new LineBorder(data.isTracking() ? COLOR_BLOOD : COLOR_BORDER_DIM, 1));
                     refreshTrackerList();
                 }
             }
@@ -2141,25 +2173,35 @@ public class DreamBotMenu extends JFrame {
         return tile;
     }
 
-    private void refreshTrackerList() { trackerList.removeAll(); skillRegistry.values().stream().filter(d -> d.isTracking).forEach(d -> { trackerList.add(d.trackerPanel); trackerList.add(Box.createRigidArea(new Dimension(0, 10))); }); trackerList.add(Box.createVerticalGlue()); trackerList.revalidate(); trackerList.repaint(); }
+    private void refreshTrackerList() {
+        trackerList.removeAll();
+        skillRegistry.values().stream().filter(SkillData::isTracking).forEach(d -> {
+            trackerList.add(d.getTrackerPanel());
+            trackerList.add(Box.createRigidArea(new Dimension(0, 10)));
+        }); trackerList.add(Box.createVerticalGlue()); trackerList.revalidate(); trackerList.repaint(); }
 
     public void updateAll() {
-        if (isDataLoading) return; // Block if already loading
+        // block other updates while updating
+        if (isDataLoading)
+            return;
 
         new Thread(() -> {
             isDataLoading = true;
-            setStatus("Waiting for login...");
-
-            // 1. Wait for stable login
-            while (!Client.isLoggedIn()) {
-                try {
-                    Thread.sleep(2000);
-                } catch (InterruptedException ignored) {}
+            // if the player is not yet logged in
+            if (!Client.isLoggedIn()) {
+                // start a timer to call this function again later
+                Timer t = new Timer(Rand.nextInt(523, 2303), e -> updateAll());
+                // ensure only one of these timers exist at a 'time', hehe, get it?
+                t.setRepeats(false);
+                // start the timer
+                t.start();
+                Logger.log(Logger.LogType.DEBUG, "Waiting for player to login...");
+                setStatus("Awaiting login...");
+                return;
             }
 
             Logger.log("Player logged in. Fetching data...");
-
-            // 2. Clear old data on the EDT before fetching new data
+            // perform swing updates on EDT, clearing and updating lists
             SwingUtilities.invokeLater(() -> {
                 modelTaskList.clear();
                 modelTaskLibrary.clear();
@@ -2230,59 +2272,19 @@ public class DreamBotMenu extends JFrame {
     }
 
     /**
-     * Helper function to track and highlight the tasks as they are executed.
+     * Helper function to track and highlight the tasks as they are executed in the task list.
      */
     private class TaskCellRenderer extends DefaultListCellRenderer {
         @Override
         public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
             JLabel selectedTask = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
             if (currentExecutionIndex != -1 && index == currentExecutionIndex) {
-                selectedTask.setForeground(Color.YELLOW);
-                selectedTask.setText("→ " + selectedTask.getText());
-                selectedTask.setFont(new Font("Consolas", Font.BOLD, 12));
+                selectedTask.setForeground(COLOR_EXECUTING);
+                selectedTask.setText(ICON_EXECUTING + selectedTask.getText());
+                selectedTask.setFont(FONT_EXECUTING);
             }
             return selectedTask;
         }
-    }
-
-    private class SkillData { final Skill skill; final JProgressBar mainBar = new JProgressBar(0, 100); final JLabel lblLevel = new JLabel("1"), lblXpString = new JLabel("0/0"); final JPanel trackerPanel = new JPanel(new GridLayout(0, 1, 2, 2)); final JLabel lblGained = new JLabel(), lblPerHour = new JLabel(), lblRemaining = new JLabel(), lblTTL = new JLabel(), lblProj = new JLabel(), lblActs = new JLabel(); final int startXP, startLevel; boolean isTracking = false; SkillData(Skill s) { this.skill = s; this.startXP = Skills.getExperience(s); this.startLevel = Skills.getRealLevel(s); trackerPanel.setBackground(new Color(30, 30, 30)); TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(COLOR_BORDER_DIM), " " + s.name() + " "); b.setTitleColor(COLOR_BLOOD); trackerPanel.setBorder(b); JLabel[] ls = {lblGained, lblPerHour, lblRemaining, lblActs, lblTTL, lblProj}; for (JLabel l : ls) { l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.PLAIN, 12)); trackerPanel.add(l); } } void update(int curXp, int curLvl, long start, int ph) { int curMin = Skills.getExperienceForLevel(curLvl), curMax = Skills.getExperienceForLevel(curLvl + 1); lblLevel.setText(String.valueOf(curLvl)); lblXpString.setText(String.format("%,d / %,d XP", curXp, curMax)); mainBar.setValue((int) (((double)(curXp - curMin) / Math.max(1, curMax - curMin)) * 100)); long elapsed = System.currentTimeMillis() - start; int xph = (int) (Math.max(0, curXp - startXP) / Math.max(0.0001, elapsed / 3600000.0)); int rem = Math.max(0, curMax - curXp); lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP)); lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph)); lblRemaining.setText(" TO LEVEL: " + String.format("%,d", rem)); if (xph > 0) { lblTTL.setText(String.format(" TIME TO L: %.2f hrs", (double) rem / xph)); lblProj.setText(String.format(" PROJ (%dH): Lvl %d", ph, curLvl + (xph * ph / 100000))); } } }
-
-    // --- Snapshot Classes & Capture Methods ---
-    public static class BuilderSnapshot {
-        public Map<String, String> selected;
-        public String target;
-
-        public String taskName;
-        public String taskDescription;
-        public String taskStatus;
-
-        public List<ActionData> actions;
-    }
-
-    private BuilderSnapshot captureBuilderSnapshot() {
-        BuilderSnapshot snapshot = new BuilderSnapshot();
-
-        snapshot.target =
-
-        snapshot.taskName = taskNameInput != null ? taskNameInput.getText() : "";
-        snapshot.target = actionSelector != null ? actionSelector.getSelectedAction().getParamTarget() : null;
-        snapshot.taskDescription = taskDescriptionInput != null ? taskDescriptionInput.getText() : "";
-        snapshot.taskStatus = taskStatusInput != null ? taskStatusInput.getText() : "";
-        snapshot.selected = actionSelector != null && actionSelector.getSelectedAction() != null
-                ? actionSelector.getSelectedAction().serialize() : null;
-        snapshot.actions = new ArrayList<>();
-
-        for (int i = 0; i < modelTaskBuilder.getSize(); i++) {
-            Action action = modelTaskBuilder.getElementAt(i);
-
-            ActionData data = new ActionData();
-                data.setType(action.getType().getSimpleName());
-                data.setParams(action.serialize());
-
-            snapshot.actions.add(data);
-        }
-
-        return snapshot;
     }
 
     public static class SettingsSnapshot {
