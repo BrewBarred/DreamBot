@@ -4,7 +4,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 
 public class Rand {
-    private static SecureRandom secureRandom = null;
+    private static SecureRandom secureRandom;
 
     public Rand() {
         SecureRandom temp;
@@ -51,7 +51,8 @@ public class Rand {
         if (min > max) {
             throw new IllegalArgumentException("min must be <= max");
         }
-        return min + secureRandom.nextInt((max - min) + 1);
+        int i = min + secureRandom.nextInt((max - min) + 1);
+        return i;
     }
 
     public static int actionDelay() {

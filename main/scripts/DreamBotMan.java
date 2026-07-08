@@ -12,7 +12,6 @@ import org.dreambot.api.utilities.Logger;
 import org.dreambot.api.wrappers.interactive.Player;
 
 import javax.swing.*;
-import javax.swing.event.MouseInputListener;
 import java.awt.*;
 
 import main.actions.Action;

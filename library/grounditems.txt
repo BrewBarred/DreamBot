@@ -1,0 +1,3 @@
+# Ground Item Library — auto-managed, manual edits are safe
+# Format: name, x, y, z, respawnSeconds
+

@@ -1,0 +1,3 @@
+# Object JLibrary — auto-managed, manual edits are safe
+# Format: name, x, y, z, area, interaction
+

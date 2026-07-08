@@ -1,0 +1,3 @@
+# Ground Item JLibrary — auto-managed, manual edits are safe
+# Format: name, x, y, z, respawnSeconds
+

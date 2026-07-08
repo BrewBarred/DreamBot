@@ -1,0 +1,11 @@
+# NPC JLibrary — auto-managed, manual edits are safe
+# Format: name, x, y, z, area, interaction
+
+Duck, 3238, 3236, 0, Lumbridge Objects, Talk-to
+Donie, 3235, 3234, 0, Lumbridge Objects, Talk-to
+Veos, 3228, 3242, 0, Lumbridge Objects, Talk-to
+Arthur the Clue Hunter, 3229, 3236, 0, Lumbridge Objects, Talk-to
+Rat, 3235, 3233, 0, Lumbridge Objects, Talk-to
+Woodsman tutor, 3228, 3244, 0, Lumbridge Objects, Talk-to
+Bartender, 3232, 3241, 0, Lumbridge Objects, Talk-to
+Man, 3223, 3235, 0, Lumbridge Objects, Talk-to
