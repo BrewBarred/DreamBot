@@ -1,0 +1,28 @@
+# Build output
+out/
+build/
+target/
+*.class
+
+# IntelliJ
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+*.ipr
+*.iws
+
+# Python virtualenv (leftover from earlier tooling)
+.venv/
+__pycache__/
+
+# OS noise
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Large binaries do not belong in the repo
+*.pkg
+
+# Local DreamMan data (per-user runtime data written by the app)
+/DreamMan-data/
