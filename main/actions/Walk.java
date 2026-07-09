@@ -142,11 +142,18 @@ public class Walk extends Action {
 
     @Override
     public boolean execute() {
-        // Call load every time to refresh the 'variation' lambda logic
-        load(paramTarget.getParam());
+        // already there? don't click again
+        if (isComplete())
+            return true;
 
-        if (variation != null)
-            variation.run();
+        // Only (re)issue a walk when the player is idle - previously this fired a fresh
+        // Walking.walk() every single loop, spamming clicks while mid-path.
+        if (!Players.getLocal().isMoving()) {
+            load(paramTarget.getParam());
+
+            if (variation != null)
+                variation.run();
+        }
 
         return isComplete();
     }

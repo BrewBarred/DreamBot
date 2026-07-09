@@ -6,6 +6,12 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import com.google.gson.reflect.TypeToken;
 import main.data.ActionData;
+import main.data.store.LocalStore;
+import main.data.store.ProfileData;
+import main.data.store.ProfileCodec;
+import main.data.store.TaskData;
+import main.data.store.PresetData;
+import main.data.store.BuilderData;
 import main.data.BuilderSnapshot;
 import main.data.library.LibraryPanel;
 import main.managers.DataMan;
@@ -27,7 +33,6 @@ import org.dreambot.api.methods.container.impl.equipment.Equipment;
 import org.dreambot.api.wrappers.items.Item;
 import org.dreambot.api.methods.map.Tile;
 import org.dreambot.core.Instance;
-import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.Timer;
@@ -50,7 +55,7 @@ import static main.menu.MenuHandler.*;
  */
 public class DreamBotMenu extends JFrame {
     private final ScriptManager scriptManager;
-    private boolean isMenuPaused;
+    private volatile boolean isMenuPaused;
     private final TaskBuilder taskBuilder;
     public final LibraryPanel libraryPanel;
     private static final int PRESET_COLUMNS = 4;
@@ -87,7 +92,7 @@ public class DreamBotMenu extends JFrame {
     // --- State ---
     private static boolean isMouseInput;
     private static boolean isKeyboardInput;
-    private boolean isDataLoading = false;
+    private volatile boolean isDataLoading = false;
     private int currentExecutionIndex = -1;
 
     // --- Script ---
@@ -133,6 +138,8 @@ public class DreamBotMenu extends JFrame {
     private boolean isToastProcessing = false;
 
     private final DataMan dataMan = new DataMan();
+    // Local persistence (Patch 2): the offline-first source of truth. The Supabase-backed
+    // DataMan above is left untouched and becomes an optional sync layer in a later patch.
 
     private final Map<Skill, SkillData> skillRegistry = new EnumMap<>(Skill.class);
 
@@ -151,6 +158,19 @@ public class DreamBotMenu extends JFrame {
     private final int MAX_PRESETS = 16;
     private int currentPresetPage = 0;
     private int selectedPresetIndex = -1; // Tracks the currently active/selected preset index
+
+    // ── Queue looping (Patch 3) ──────────────────────────────────────────────
+    /** How many times the whole queue should run. 0 = infinite. */
+    private volatile int queueLoopTarget = 1;
+    /** Which pass we're on (1-based), shown live as "Loop x/y". */
+    private volatile int queueLoopCurrent = 1;
+    // Live loop-control widgets (created in the Task List tab).
+    private JSpinner loopQueueSpinner;
+    private JCheckBox loopInfiniteCheck;
+    private JSpinner taskRepeatSpinner;
+    private JLabel lblLoopIndicator;
+    /** Prevents spinner/checkbox listeners from firing while we programmatically sync them. */
+    private boolean suppressLoopEvents = false;
     private final DefaultListModel<Preset> modelPresets = new DefaultListModel<>();
     private final JButton[] presetButtons = new JButton[4];
     private JButton btnPageUp, btnPageDown;
@@ -346,13 +366,14 @@ public class DreamBotMenu extends JFrame {
             saveTimer = new Timer(60000, e -> {
                 // auto-save every n seconds (if auto-save feature is enabled in settings)
                 if (chkAutoSave != null && chkAutoSave.isSelected())
-                    saveAll();
+                    saveAll(false);
             });
             saveTimer.start();
 
         });
 
-        setVisible(true);
+        // NOTE: setVisible() is intentionally NOT called here - DreamBotMan.onStart() shows the
+        // frame once construction completes (previously the frame was shown twice).
         Logger.log(Logger.LogType.DEBUG, "DreamBotMenu instantiation complete!");
     }
 
@@ -372,6 +393,23 @@ public class DreamBotMenu extends JFrame {
         if (saveTimer != null)
             saveTimer.stop();
 
+        // Persist the profile one last time so nothing built this session is lost on close.
+        // Capture on the EDT (models are Swing state) then write synchronously so the save
+        // finishes before the client tears the script down.
+        try {
+            final String character = safePlayerName();
+            if (character != null) {
+                final ProfileData[] box = new ProfileData[1];
+                if (SwingUtilities.isEventDispatchThread())
+                    box[0] = captureProfile();
+                else
+                    SwingUtilities.invokeAndWait(() -> box[0] = captureProfile());
+                LocalStore.save(character, box[0]);
+            }
+        } catch (Exception e) {
+            Logger.log(Logger.LogType.ERROR, "Exit save failed: " + e.getMessage());
+        }
+
         // safely dispose of this JFrame object
         this.dispose();
     }
@@ -385,6 +423,127 @@ public class DreamBotMenu extends JFrame {
             this.message = message;
             this.anchor = anchor;
             this.success = success;
+        }
+    }
+
+    /**
+     * The loop / repeat control strip shown under the queue: set a per-task repeat count, set the
+     * whole-queue loop count (or infinite), skip the current task, or run from the selected task.
+     */
+    private JPanel createLoopBar() {
+        JPanel bar = new JPanel(new BorderLayout(10, 0));
+        bar.setOpaque(false);
+        bar.setBorder(new EmptyBorder(6, 2, 6, 2));
+
+        // ---- left: repeat + loop spinners ----
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        left.setOpaque(false);
+
+        JLabel lblRepeat = new JLabel("Repeat task ×");
+        lblRepeat.setForeground(TEXT_DIM);
+        taskRepeatSpinner = new JSpinner(new SpinnerNumberModel(1, 1, 999, 1));
+        taskRepeatSpinner.setPreferredSize(new Dimension(64, 26));
+        taskRepeatSpinner.setToolTipText("How many times the selected task runs before the queue moves on");
+        taskRepeatSpinner.setEnabled(false);
+        taskRepeatSpinner.addChangeListener(e -> {
+            if (suppressLoopEvents) return;
+            Task sel = listTaskList.getSelectedValue();
+            if (sel != null) {
+                sel.setRepeat((int) taskRepeatSpinner.getValue());
+                listTaskList.repaint();
+                updateQueueProgress();
+            }
+        });
+
+        JLabel lblLoop = new JLabel("     Loop queue ×");
+        lblLoop.setForeground(TEXT_DIM);
+        loopQueueSpinner = new JSpinner(new SpinnerNumberModel(1, 1, 9999, 1));
+        loopQueueSpinner.setPreferredSize(new Dimension(72, 26));
+        loopQueueSpinner.setToolTipText("How many times to run the whole queue");
+        loopQueueSpinner.addChangeListener(e -> {
+            if (suppressLoopEvents) return;
+            if (loopInfiniteCheck == null || !loopInfiniteCheck.isSelected()) {
+                queueLoopTarget = (int) loopQueueSpinner.getValue();
+                updateQueueProgress();
+            }
+        });
+
+        loopInfiniteCheck = new JCheckBox("∞");
+        loopInfiniteCheck.setOpaque(false);
+        loopInfiniteCheck.setForeground(TEXT_MAIN);
+        loopInfiniteCheck.setToolTipText("Loop the queue forever");
+        loopInfiniteCheck.addActionListener(e -> {
+            if (suppressLoopEvents) return;
+            boolean inf = loopInfiniteCheck.isSelected();
+            loopQueueSpinner.setEnabled(!inf);
+            queueLoopTarget = inf ? 0 : (int) loopQueueSpinner.getValue();
+            updateQueueProgress();
+        });
+
+        left.add(lblRepeat);
+        left.add(taskRepeatSpinner);
+        left.add(lblLoop);
+        left.add(loopQueueSpinner);
+        left.add(loopInfiniteCheck);
+
+        // ---- right: skip / run-from-here + live indicator ----
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        right.setOpaque(false);
+
+        JButton btnRunHere = createButton("Run from here");
+        btnRunHere.setToolTipText("Start the queue at the selected task");
+        btnRunHere.addActionListener(e -> {
+            int idx = listTaskList.getSelectedIndex();
+            if (idx < 0) {
+                showToast("Select a task first", btnRunHere, false);
+                return;
+            }
+            setCurrentExecutionIndex(idx);
+            resetLoopProgress();
+            listTaskList.repaint();
+            showToast("Running from task " + (idx + 1), btnRunHere, true);
+        });
+
+        JButton btnSkip = createButton("Skip");
+        btnSkip.setToolTipText("Skip the current task and move to the next");
+        btnSkip.addActionListener(e -> {
+            if (modelTaskList.isEmpty()) return;
+            advanceQueue();
+            showToast("Skipped", btnSkip, true);
+        });
+
+        lblLoopIndicator = new JLabel("—");
+        lblLoopIndicator.setForeground(COLOR_EXECUTING);
+        lblLoopIndicator.setFont(new Font("Consolas", Font.BOLD, 13));
+        lblLoopIndicator.setBorder(new EmptyBorder(0, 10, 0, 4));
+
+        right.add(btnRunHere);
+        right.add(btnSkip);
+        right.add(lblLoopIndicator);
+
+        bar.add(left, BorderLayout.WEST);
+        bar.add(right, BorderLayout.EAST);
+
+        // initialise widget state from current fields
+        SwingUtilities.invokeLater(() -> { syncLoopControls(); syncTaskRepeatSpinner(); updateQueueProgress(); });
+        return bar;
+    }
+
+    /** Reflects the selected task's repeat count in the spinner (and disables it if no selection). */
+    private void syncTaskRepeatSpinner() {
+        if (taskRepeatSpinner == null) return;
+        Task sel = listTaskList.getSelectedValue();
+        suppressLoopEvents = true;
+        try {
+            if (sel != null) {
+                taskRepeatSpinner.setEnabled(true);
+                taskRepeatSpinner.setValue(sel.getRepeat());
+            } else {
+                taskRepeatSpinner.setEnabled(false);
+                taskRepeatSpinner.setValue(1);
+            }
+        } finally {
+            suppressLoopEvents = false;
         }
     }
 
@@ -458,19 +617,25 @@ public class DreamBotMenu extends JFrame {
     }
 
     public void setCurrentExecutionIndex(int i) {
+        if (this.currentExecutionIndex == i)
+            return;
+
         this.currentExecutionIndex = i;
-        if(listTaskList != null)
-            listTaskList.repaint();
+        // repaint must happen on the EDT (this is called from the script thread)
+        if (listTaskList != null)
+            SwingUtilities.invokeLater(listTaskList::repaint);
     }
 
     public void setStatus(String text) {
         SwingUtilities.invokeLater(() -> {
-            lblStatus.setText("Status: " + text);
+            final String display = "Status: " + text;
+            lblStatus.setText(display);
 
             // start a timer after the default status reset delay
             Timer timer = new Timer(DEFAULT_STATUS_RESET_DELAY, e -> {
                 // if by the time this timer is triggered, the text has not changed
-                if (lblStatus.getText().equals(text))
+                // (must compare against the FULL displayed string, prefix included)
+                if (lblStatus.getText().equals(display))
                     // revert the text back to the default status string
                     lblStatus.setText("Status: " + DEFAULT_STATUS_STRING);
             });
@@ -481,19 +646,118 @@ public class DreamBotMenu extends JFrame {
         });
     }
 
+    /** Back-compat shim: the engine now calls {@link #advanceQueue()}. */
     public void incrementExecutionIndex() {
-        // if there are tasks left to complete in the task list
-        if (currentExecutionIndex < modelTaskList.size() - 1) {
+        advanceQueue();
+    }
+
+    /**
+     * Advances the queue after a task has finished all its repeats. If more tasks remain in the
+     * current pass we move to the next one; if we've reached the end, we either start another
+     * whole-queue loop (finite target not yet reached, or infinite) or stop and reset.
+     * <p>
+     * Called from the script thread, so all Swing touches are marshalled to the EDT.
+     */
+    public void advanceQueue() {
+        int size = modelTaskList.size();
+
+        if (currentExecutionIndex < size - 1) {
+            // more tasks left in this pass
             currentExecutionIndex++;
-        // else, we can't increment anymore
         } else {
-            // reset selection index
-            currentExecutionIndex = -1;
-            // pause the script. // TODO check if this pause is triggering a pause before loops expire
-            pause("End of task list!");
+            // finished a full pass of the queue
+            boolean infinite = (queueLoopTarget <= 0);
+            if (infinite || queueLoopCurrent < queueLoopTarget) {
+                queueLoopCurrent++;
+                currentExecutionIndex = 0;
+                Logger.log(Logger.LogType.DEBUG, "Queue loop -> pass " + queueLoopCurrent
+                        + (infinite ? " (infinite)" : "/" + queueLoopTarget));
+            } else {
+                currentExecutionIndex = -1;
+                queueLoopCurrent = 1;
+                pause("Queue complete!");
+            }
         }
 
-        listTaskList.repaint();
+        SwingUtilities.invokeLater(() -> {
+            listTaskList.repaint();
+            updateQueueProgress();
+        });
+    }
+
+    /** Resets the whole-queue loop counter to the first pass (called when a fresh run begins). */
+    public void resetLoopProgress() {
+        queueLoopCurrent = 1;
+        SwingUtilities.invokeLater(this::updateQueueProgress);
+    }
+
+    public int getQueueLoopTarget() { return queueLoopTarget; }
+
+    /** Sets the whole-queue loop target (0 = infinite) and refreshes the loop widgets. */
+    public void setQueueLoopTarget(int target) {
+        queueLoopTarget = Math.max(0, target);
+        SwingUtilities.invokeLater(() -> { syncLoopControls(); updateQueueProgress(); });
+    }
+
+    /** Pushes the current loop target into the spinner / infinite checkbox without re-firing them. */
+    private void syncLoopControls() {
+        if (loopInfiniteCheck == null) return;
+        suppressLoopEvents = true;
+        try {
+            boolean inf = (queueLoopTarget <= 0);
+            loopInfiniteCheck.setSelected(inf);
+            if (loopQueueSpinner != null) {
+                loopQueueSpinner.setEnabled(!inf);
+                if (!inf)
+                    loopQueueSpinner.setValue(Math.max(1, queueLoopTarget));
+            }
+        } finally {
+            suppressLoopEvents = false;
+        }
+    }
+
+    /**
+     * Updates the bottom progress bar + the "Loop x/y" indicator to reflect how far through the
+     * queue (and its loops) we are. Safe to call any time; no-ops sensibly on an empty queue.
+     */
+    private void updateQueueProgress() {
+        int size = modelTaskList.size();
+        boolean infinite = (queueLoopTarget <= 0);
+
+        // 0-based tasks completed in the current pass (index -1 means "not started / idle")
+        int done = currentExecutionIndex < 0 ? 0 : currentExecutionIndex;
+        int taskDisplay = size == 0 ? 0 : Math.min(done + 1, size);
+
+        int pct;
+        if (size == 0) {
+            pct = 0;
+        } else if (infinite) {
+            pct = (int) Math.round(100.0 * done / size);
+        } else {
+            int total = Math.max(1, queueLoopTarget) * size;
+            int completed = (queueLoopCurrent - 1) * size + done;
+            pct = (int) Math.round(100.0 * completed / total);
+        }
+        pct = Math.max(0, Math.min(100, pct));
+
+        String loopText = infinite
+                ? ("Loop " + queueLoopCurrent + "/∞")
+                : ("Loop " + queueLoopCurrent + "/" + Math.max(1, queueLoopTarget));
+
+        final int fpct = pct;
+        final String barText = size == 0
+                ? "No tasks queued"
+                : (loopText + "  ·  task " + taskDisplay + "/" + size);
+        final String indicator = size == 0 ? "—" : loopText;
+
+        Runnable r = () -> {
+            statusProgress.setValue(fpct);
+            statusProgress.setString(barText);
+            if (lblLoopIndicator != null)
+                lblLoopIndicator.setText(indicator);
+        };
+        if (SwingUtilities.isEventDispatchThread()) r.run();
+        else SwingUtilities.invokeLater(r);
     }
 
     /**
@@ -540,10 +804,7 @@ public class DreamBotMenu extends JFrame {
 
         ///  Create Task List save button
         JButton btnTaskListSave = createButton("Save");
-        btnTaskListSave.addActionListener(e -> {
-            this.showToast("Saving...", btnTaskListSave, true);
-            saveAll();
-        });
+        btnTaskListSave.addActionListener(e -> saveAll());
 
         ///  Create Task List duplicate button
         JButton btnTaskListDuplicate = createButton("Duplicate");
@@ -598,6 +859,7 @@ public class DreamBotMenu extends JFrame {
 
         listTaskList.addListSelectionListener(e -> {
             btnTaskListRemove.setEnabled(!listTaskList.isSelectionEmpty());
+            syncTaskRepeatSpinner();
         });
 
         listTaskList.addMouseListener(new MouseAdapter() {
@@ -613,9 +875,13 @@ public class DreamBotMenu extends JFrame {
                         // TODO add logic to view task information? Perhaps, loop count, description, end condition, and maybe a live-action-chain? action1 -> action2 -> action3
                     }
 
-                    // only trigger if it's a double-click AND Shift is NOT being held
-                    if (e.getClickCount() == 2 && !e.isShiftDown())
-                        removeTask(listTaskList, modelTaskList, btnTaskListRemove);
+                    // Double-click now EDITS the task in the builder. (It previously DELETED
+                    // the task silently - far too destructive for such a common gesture.
+                    // Removal remains on the Remove button below.)
+                    if (e.getClickCount() == 2 && !e.isShiftDown()) {
+                        loadIntoBuilder(listTaskList.getSelectedValue());
+                        mainTabs.setSelectedIndex(2);
+                    }
                 }
             }
         });
@@ -629,6 +895,7 @@ public class DreamBotMenu extends JFrame {
         southButtons.add(btnResetAllPresets);
 
         south.add(createPresetControlPanel(), BorderLayout.NORTH);
+        south.add(createLoopBar(), BorderLayout.CENTER);
         south.add(southButtons, BorderLayout.SOUTH);
 
         // add all panels to the main panel (task list panel)
@@ -678,27 +945,20 @@ public class DreamBotMenu extends JFrame {
 
         /// CENTER EAST: Edit panel + buttons
         JPanel panelCenterEastLibraryTab = new JPanel(new BorderLayout(0, 10));
-        JPanel btnSection = new JPanel(new GridLayout(1, 3, 0, 5));
+        JPanel btnSection = new JPanel(new GridLayout(0, 3, 5, 5)); // rows grow as needed
         panelCenterEastLibraryTab.setOpaque(false);
         btnSection.setOpaque(false);
 
         ///  Create Task Library save button
         JButton btnTaskLibrarySave = createButton("Save");
-        btnTaskLibrarySave.addActionListener(e -> {
-            this.showToast("Saving...", btnTaskLibrarySave, true);
-            btnTaskLibrarySave.setEnabled(false);
-
-            saveAll();
-
-            this.showToast("Save success!", btnTaskLibrarySave, true);
-            btnTaskLibrarySave.setEnabled(true);
-        });
+        btnTaskLibrarySave.addActionListener(e -> saveAll());
 
         ///  Create Task Library add button
         JButton btnTaskLibraryAdd = createButton("Add", COLOR_LIGHT_GREEN, null);
         btnTaskLibraryAdd.addActionListener(e -> {
             if(listTaskLibrary.getSelectedValue() != null) {
-                modelTaskList.addElement(listTaskLibrary.getSelectedValue());
+                // deep-copy so editing/executing the queued task never mutates the library original
+                modelTaskList.addElement(new Task(listTaskLibrary.getSelectedValue()));
                 this.showToast("Added to position " + modelTaskList.size() + " of the queue", btnTaskLibraryAdd, true);
             }
         });
@@ -744,8 +1004,9 @@ public class DreamBotMenu extends JFrame {
                     return;
 
                 if (e.getClickCount() == 2) {
-                    // take a shallow copy of the selected task to pass it to the task list
-                    Task task = modelTaskLibrary.getElementAt(selectedIndex);
+                    // deep-copy the selected task into the queue (the old shallow reference meant
+                    // edits in the builder/queue silently corrupted the library original)
+                    Task task = new Task(modelTaskLibrary.getElementAt(selectedIndex));
                     modelTaskList.addElement(task);
                     DreamBotMenu.this.showToast("Added to queue position " + modelTaskList.size(), btnTaskLibraryAdd, true);
                     refreshTaskListTab();
@@ -754,10 +1015,20 @@ public class DreamBotMenu extends JFrame {
         });
 
         ///  Add all buttons
+        ///  Export the selected library task to a shareable .json file
+        JButton btnTaskLibraryExport = createButton("Export...");
+        btnTaskLibraryExport.addActionListener(e -> exportSelectedTask(btnTaskLibraryExport));
+
+        ///  Import a task from a .json file into the library
+        JButton btnTaskLibraryImport = createButton("Import...");
+        btnTaskLibraryImport.addActionListener(e -> importTaskFromFile(btnTaskLibraryImport));
+
         btnSection.add(btnTaskLibrarySave);
         btnSection.add(btnTaskLibraryAdd);
         btnSection.add(btnTaskLibraryDelete);
         btnSection.add(btnTaskLibraryEdit);
+        btnSection.add(btnTaskLibraryExport);
+        btnSection.add(btnTaskLibraryImport);
 
         panelCenterEastLibraryTab.add(new JScrollPane(libraryEditorArea), BorderLayout.CENTER);
 
@@ -784,16 +1055,19 @@ public class DreamBotMenu extends JFrame {
     private void refreshTaskListTab(int index) {
         // ignore empty lists (but still refresh them in case of update after removal)
         if (!modelTaskList.isEmpty()) {
-            index = index == -1 ? listTaskList.getSelectedIndex(): -1;
-            // get the selected index (prefer passed index, default to selected, resort to first item worst case
-            index = index == -1 ? 0 : index;
-            // ensure index is still within bounds of list model
-            if (index >= 0 && index < modelTaskList.size())
-                listTaskList.setSelectedIndex(index);
-
+            // prefer the passed index, fall back to the current selection, resort to the first item
+            // (the old ternary was inverted, discarding any explicitly-passed index, and the
+            //  ensureIndexIsVisible call below targeted the BUILDER list instead of this one)
+            if (index < 0)
+                index = listTaskList.getSelectedIndex();
+            if (index < 0)
+                index = 0;
+            // clamp to the bounds of the list model
+            index = Math.min(index, modelTaskList.size() - 1);
+            listTaskList.setSelectedIndex(index);
+            listTaskList.ensureIndexIsVisible(index);
         }
 
-        listTaskBuilder.ensureIndexIsVisible(index);
         // refresh preset button labels
         refreshPresetButtonLabels();
     }
@@ -842,8 +1116,9 @@ public class DreamBotMenu extends JFrame {
                 showToast("Select a Task to remove!", btn, false);
             }
 
-            // set last index if possible
-            list.setSelectedIndex(model.getSize() - 1);
+            // keep the selection near where the user was working (not jumping to the end)
+            if (!model.isEmpty())
+                list.setSelectedIndex(Math.min(selectedIndex, model.getSize() - 1));
 
         } catch (Exception e) {
             // refresh all lists to be safe
@@ -854,31 +1129,54 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    private Task createTask(List<Action> actions) {
-        try {
-            ///  fetch user input (throws null exception if invalid)
-            String name = taskNameInput.getText();
-            String description = taskDescriptionInput.getText();
-            String status = taskStatusInput.getText();
+    // (Removed dead createTask(List<Action>) helper: it read taskNameInput/taskDescriptionInput/
+    //  taskStatusInput, which are declared but never initialised in this class -> guaranteed NPE.
+    //  Task creation lives in TaskBuilder, which owns the real input fields.)
 
-            if (actions == null || actions.isEmpty())
-                throw new Exception("Add some actions!");
-
-            if (name.isEmpty())
-                throw new Exception("Enter a valid name!");
-
-            if (isTaskDescriptionRequired && description.isEmpty())
-                throw new Exception("Enter a valid description!");
-
-            if (isTaskStatusRequired && status.isEmpty())
-                throw new Exception("Enter a valid status!");
-
-            return new Task(name, description, actions, status);
-
-        } catch (Exception e) {
-            this.showToast(e.getMessage(), btnTaskBuilderAddToLibrary, false);
-            return null;
+    /** Exports the currently-selected library task to a user-chosen .json file. */
+    private void exportSelectedTask(JComponent anchor) {
+        Task selected = listTaskLibrary.getSelectedValue();
+        if (selected == null) {
+            showToast("Select a task to export", anchor, false);
+            return;
         }
+
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Export task");
+        String suggested = LocalStore.sanitize(selected.getName()) + ".json";
+        chooser.setSelectedFile(new java.io.File(suggested));
+
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION)
+            return;
+
+        java.io.File file = chooser.getSelectedFile();
+        if (!file.getName().toLowerCase().endsWith(".json"))
+            file = new java.io.File(file.getParentFile(), file.getName() + ".json");
+
+        TaskData dto = ProfileCodec.toData(selected);
+        boolean ok = LocalStore.exportToFile(dto, file);
+        showToast(ok ? "Exported " + selected.getName() : "Export failed", anchor, ok);
+    }
+
+    /** Imports a task from a user-chosen .json file into the library. */
+    private void importTaskFromFile(JComponent anchor) {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Import task (.json)");
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("JSON task files", "json"));
+
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION)
+            return;
+
+        TaskData dto = LocalStore.importFromFile(chooser.getSelectedFile(), TaskData.class);
+        Task task = ProfileCodec.fromData(dto);
+        if (task == null) {
+            showToast("Could not read that task file", anchor, false);
+            return;
+        }
+
+        modelTaskLibrary.addElement(task);
+        refreshTaskLibrary();
+        showToast("Imported " + task.getName(), anchor, true);
     }
 
     private JPanel createSkillTrackerTab() {
@@ -958,14 +1256,13 @@ public class DreamBotMenu extends JFrame {
         settingGroup.add(createControlsPanel(), "Controls");
         settingGroup.add(createDisplayPanel(), "Display");
         settingGroup.add(createGameplayPanel(), "Gameplay");
-        settingGroup.add(createInterfacesPanel(), "Interfaces");
         settingGroup.add(createWarningsPanel(), "Warnings");
 
-        JPanel menuPanel = new JPanel(new GridLayout(10, 1, 0, 2));
+        JPanel menuPanel = new JPanel(new GridLayout(0, 1, 0, 2));
         menuPanel.setPreferredSize(new Dimension(180, 0));
         menuPanel.setBackground(PANEL_SURFACE); menuPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, COLOR_BORDER_DIM));
 
-        String[] groups = {"Client", "Script", "Display", "Audio", "Chat", "Controls", "Activities", "Warnings"};
+        String[] groups = {"Client", "Script", "Display", "Gameplay", "Audio", "Chat", "Controls", "Activities", "Warnings"};
         ButtonGroup btnGroup = new ButtonGroup();
 
         for (String cat : groups) {
@@ -984,20 +1281,7 @@ public class DreamBotMenu extends JFrame {
         return panelSettings;
     }
 
-    private void resetTaskBuilder() {
-        //paramTarget.setText("");
-
-        // clear task attribute inputs
-        taskNameInput.setText("");
-        taskDescriptionInput.setText("");
-        taskStatusInput.setText("");
-
-        // clear the action list display
-        modelTaskBuilder.clear();
-
-        // clear/refresh target inputs
-        //scanNearbyTargets();
-    }
+    // (Removed dead resetTaskBuilder() helper for the same reason as createTask above.)
 
 //    private void scanNearbyTargets() {
 //        // Each action subclass decides what to scan — no switch needed here
@@ -1017,6 +1301,8 @@ public class DreamBotMenu extends JFrame {
         private String description;
         private String status;
         private List<Action> actions;
+        /** How many times this task runs before the queue advances (>= 1). */
+        private int repeat = 1;
 
         public Task(String name, String description, List<Action> actions, String status) {
             this.name = name;
@@ -1029,6 +1315,7 @@ public class DreamBotMenu extends JFrame {
             this.name = o.name;
             this.description = o.description;
             this.status = o.status;
+            this.repeat = o.repeat;
 
             // DEEP COPY logic:
             this.actions = new ArrayList<>();
@@ -1076,6 +1363,16 @@ public class DreamBotMenu extends JFrame {
 
         public String getStatus() {
             return status;
+        }
+
+        /** @return this task's repeat count (always >= 1). */
+        public int getRepeat() {
+            return Math.max(1, repeat);
+        }
+
+        /** Sets how many times this task runs before the queue advances (clamped to >= 1). */
+        public void setRepeat(int repeat) {
+            this.repeat = Math.max(1, repeat);
         }
 
         @Override public String toString() {
@@ -1149,11 +1446,24 @@ public class DreamBotMenu extends JFrame {
     public static class Preset {
         String name;
         List<Task> tasks;
+        /** Whole-queue loop count to apply when this preset is loaded (0 = infinite). */
+        int loops = 1;
 
         public Preset(String name, List<Task> tasks) {
             this.name = name;
             this.tasks = tasks;
         }
+
+        public Preset(String name, List<Task> tasks, int loops) {
+            this(name, tasks);
+            this.loops = loops;
+        }
+
+        // Public accessors so the persistence codec (in main.data.store) can read presets.
+        public String getName() { return name; }
+        public List<Task> getTasks() { return tasks; }
+        public int getLoops() { return loops; }
+        public void setLoops(int loops) { this.loops = loops; }
     }
 
     public boolean showToast(String toastText, JComponent component, boolean success) {
@@ -1232,16 +1542,10 @@ public class DreamBotMenu extends JFrame {
         return Players.getLocal().getName();
     }
 
-    public void loadSettings() {
-        Logger.log(Logger.LogType.DEBUG, "Unpacking settings...");
-        new Thread(() -> {
-            String rawJson = dataMan.loadDataByPlayer("settings");
-            SwingUtilities.invokeLater(() -> {
-                if (rawJson != null)
-                    unpackSettings(rawJson);
-            });
-        }).start();
-    }
+    // The four load*() methods below used to fetch individual Supabase columns. They now all
+    // route through the single local-profile loader (Patch 2) and are kept only so any external
+    // caller keeps working. A full reload is cheap - the profile is one small local JSON file.
+    public void loadSettings()     { loadProfileFromDisk(); }
 
 //    // todo FIX
 //    public void loadTaskList() {
@@ -1255,36 +1559,126 @@ public class DreamBotMenu extends JFrame {
 //        }).start();
 //    }
 
-    public void loadTaskLibrary() {
+    public void loadTaskLibrary()  { loadProfileFromDisk(); }
+
+    public void loadTaskBuilder()  { loadProfileFromDisk(); }
+    public void loadPresets()      { loadProfileFromDisk(); }
+
+    /**
+     * Reads this character's profile from disk (off the EDT) and applies it to the UI (on the
+     * EDT). If the character has no saved profile yet, the UI is reset to an empty/default state.
+     */
+    private void loadProfileFromDisk() {
+        final String character = safePlayerName();
+        if (character == null) {
+            Logger.log(Logger.LogType.DEBUG, "loadProfileFromDisk(): not logged in, skipping.");
+            return;
+        }
+
         new Thread(() -> {
-            // Use the method from your DataMan class to get the raw JSON
-            String rawJson = dataMan.loadDataByPlayer("library");
-            SwingUtilities.invokeLater(() -> {
-                if (rawJson != null)
-                    unpackTaskLibrary(rawJson);
-            });
-        }).start();
+            final ProfileData data = LocalStore.load(character);
+            SwingUtilities.invokeLater(() -> applyProfile(data));
+        }, "DreamMan-Load").start();
     }
 
-    public void loadTaskBuilder() {
-        Logger.log(Logger.LogType.DEBUG, "Unpacking task builder...");
-        new Thread(() -> {
-            String rawJson = dataMan.loadDataByPlayer("builder");
-            SwingUtilities.invokeLater(() -> {
-                if (rawJson != null)
-                    unpackTaskBuilder(rawJson);
-            });
-        }).start();
+    /** Applies a loaded profile to every model + the builder + settings (call on the EDT). */
+    private void applyProfile(ProfileData data) {
+        // Always start from a clean slate so a fresh character doesn't inherit stale rows.
+        modelTaskList.clear();
+        modelTaskLibrary.clear();
+        modelPresets.clear();
+
+        if (data != null) {
+            if (data.taskList != null)
+                for (TaskData td : data.taskList) {
+                    Task task = ProfileCodec.fromData(td);
+                    if (task != null) modelTaskList.addElement(task);
+                }
+
+            if (data.library != null)
+                for (TaskData td : data.library) {
+                    Task task = ProfileCodec.fromData(td);
+                    if (task != null) modelTaskLibrary.addElement(task);
+                }
+
+            if (data.presets != null)
+                for (PresetData pd : data.presets) {
+                    Preset preset = ProfileCodec.fromData(pd);
+                    if (preset != null) modelPresets.addElement(preset);
+                }
+
+            // builder draft
+            if (data.builder != null) {
+                modelTaskBuilder.clear();
+                if (data.builder.actions != null)
+                    for (ActionData ad : data.builder.actions) {
+                        Action a = actionSelector.create(ad != null ? ad.getType() : null);
+                        if (a != null) {
+                            if (ad.getParams() != null) a.deserialize(ad.getParams());
+                            modelTaskBuilder.addElement(a);
+                        }
+                    }
+                if (taskBuilder != null)
+                    taskBuilder.applyDraft(data.builder.taskName,
+                            data.builder.taskDescription, data.builder.taskStatus);
+            }
+
+            applySettings(data.settings);
+            Logger.log(Logger.LogType.INFO, "Profile applied: "
+                    + modelTaskList.size() + " queued, "
+                    + modelTaskLibrary.size() + " in library, "
+                    + modelPresets.size() + " presets.");
+        } else {
+            Logger.log(Logger.LogType.INFO, "No saved profile - starting with an empty workspace.");
+        }
+
+        queueLoopTarget = (data != null) ? Math.max(0, data.queueLoops) : 1;
+        selectedPresetIndex = -1;
+        currentExecutionIndex = -1;
+        queueLoopCurrent = 1;
+        refreshTaskListTab();
+        refreshTaskLibrary();
+        refreshTaskBuilderTab();
+        refreshPresetButtonLabels();
+        syncLoopControls();
+        syncTaskRepeatSpinner();
+        updateQueueProgress();
+        updateUI();
     }
-    public void loadPresets() {
-        Logger.log(Logger.LogType.DEBUG, "Unpacking presets...");
-        new Thread(() -> {
-            String rawJson = dataMan.loadDataByPlayer("presets");
-            SwingUtilities.invokeLater(() -> {
-                if (rawJson != null)
-                    unpackPresets(rawJson);
-            });
-        }).start();
+
+    /** Pushes a saved {@link SettingsSnapshot} into the settings checkboxes, then syncs the game. */
+    private void applySettings(SettingsSnapshot snap) {
+        if (snap == null)
+            return;
+
+        if (chkAutoSave != null)                 chkAutoSave.setSelected(snap.autoSave);
+        if (settingClientChkStartScriptOnLoad != null) {
+            settingClientChkStartScriptOnLoad.setSelected(snap.startScriptOnLoad);
+            this.startScriptOnLoad = snap.startScriptOnLoad;
+        }
+        if (settingClientChkExitOnStopWarning != null) {
+            settingClientChkExitOnStopWarning.setSelected(snap.exitOnStopWarning);
+            this.exitOnStopWarning = snap.exitOnStopWarning;
+        }
+        if (chkDisableRendering != null)         chkDisableRendering.setSelected(snap.renderingDisabled);
+        if (chkHideRoofs != null)                chkHideRoofs.setSelected(snap.hideRoofsEnabled);
+        if (chkDataOrbs != null)                 chkDataOrbs.setSelected(snap.dataOrbsEnabled);
+        if (chkTransparentSidePanel != null)     chkTransparentSidePanel.setSelected(snap.transparentSidePanel);
+        if (chkGameAudio != null)                chkGameAudio.setSelected(snap.gameAudioOn);
+        if (chkTransparentChatbox != null)       chkTransparentChatbox.setSelected(snap.transparentChatbox);
+        if (chkClickThroughChatbox != null)      chkClickThroughChatbox.setSelected(snap.clickThroughChatbox);
+        if (chkShiftClickDrop != null)           chkShiftClickDrop.setSelected(snap.shiftClickDrop);
+        if (chkEscClosesInterface != null)       chkEscClosesInterface.setSelected(snap.escClosesInterface);
+        if (chkLevelUpInterface != null)         chkLevelUpInterface.setSelected(snap.levelUpInterface);
+        if (chkLootNotifications != null)        chkLootNotifications.setSelected(snap.lootNotifications);
+
+        // Make the running client match the restored settings (guards login internally).
+        syncSettings();
+
+        if (snap.startScriptOnLoad) {
+            Logger.log("Auto-start enabled - resuming script...");
+            resume("Auto-start enabled - resuming script...");
+        }
     }
 
 //    private void unpackTaskList(String json) {
@@ -1376,20 +1770,27 @@ public class DreamBotMenu extends JFrame {
             if (snap != null) {
                 SwingUtilities.invokeLater(() -> {
                     modelTaskBuilder.clear();
-                    for (ActionData data : snap.actions) {
-                        Action action = actionSelector.create(data.getType());
-                        action.deserialize(data.getParams());
-                        modelTaskBuilder.addElement(action);
+                    if (snap.actions != null) {
+                        for (ActionData data : snap.actions) {
+                            if (data == null || data.getType() == null)
+                                continue;
+
+                            Action action = actionSelector.create(data.getType());
+                            if (action == null) {
+                                Logger.log(Logger.LogType.ERROR, "Unknown action type in saved builder: " + data.getType());
+                                continue;
+                            }
+
+                            action.deserialize(data.getParams());
+                            modelTaskBuilder.addElement(action);
+                        }
                     }
 
-                    taskNameInput.setText(snap.taskName != null ? snap.taskName : "");
-                    taskDescriptionInput.setText(snap.taskDescription != null ? snap.taskDescription : "");
-                    taskStatusInput.setText(snap.taskStatus != null ? snap.taskStatus : "");
-                    Action action = actionSelector.create(snap.target);
-                    actionSelector.setSelectedAction(action);
-
-                    if (snap.selected != null)
-                        actionSelector.setSelectedItem(snap.selected);
+                    // (The old restore here passed a TARGET string where an action TYPE was
+                    //  expected -> null -> NPE, and pushed a raw Map into a JComboBox<Action>.
+                    //  The task name/description/status fields it wrote to were never even
+                    //  initialised in this class. A proper builder-draft restore ships with the
+                    //  local persistence rework in Patch 2.)
 
                     refreshTaskBuilderTab();
                     Logger.log(Logger.LogType.SCRIPT, "Successfully unpacked Task Builder data");
@@ -1419,15 +1820,13 @@ public class DreamBotMenu extends JFrame {
                         chkAutoSave.setSelected(snap.autoSave);
 
                     if (settingClientChkStartScriptOnLoad != null) {
-                        settingClientChkStartScriptOnLoad.setSelected(snap.startScriptOnLoadDisabled);
-                        // update the class field // TODO see if this field is necessary or if the checkbox can be used directly instead, perhaps reference the checkbox from a function if too inconvenient?
-                        this.startScriptOnLoad = snap.startScriptOnLoadDisabled;
+                        settingClientChkStartScriptOnLoad.setSelected(snap.startScriptOnLoad);
+                        this.startScriptOnLoad = snap.startScriptOnLoad;
                     }
 
                     if (settingClientChkExitOnStopWarning != null) {
-                        settingClientChkExitOnStopWarning.setSelected(snap.exitScriptOnStopWarningEnabled);
-                        // update the class field
-                        this.exitOnStopWarning = snap.exitScriptOnStopWarningEnabled;
+                        settingClientChkExitOnStopWarning.setSelected(snap.exitOnStopWarning);
+                        this.exitOnStopWarning = snap.exitOnStopWarning;
                     }
 
                     if (chkDisableRendering != null)
@@ -1463,9 +1862,8 @@ public class DreamBotMenu extends JFrame {
                     // Now that the UI matches the server data, force the game to match the UI
                     syncSettings();
 
-                    if (!snap.startScriptOnLoadDisabled) {
+                    if (snap.startScriptOnLoad) {
                         Logger.log("Auto-start detected! Starting script...");
-                        startScriptOnLoad = true;
                         resume("Auto-start detected! Resuming script...");
                     }
                 });
@@ -1631,7 +2029,8 @@ public class DreamBotMenu extends JFrame {
 
     public void resume(String status) {
         if (isMenuPaused()) {
-            btnPlayPause.setText("▮▮");
+            // Swing components may only be touched on the EDT (this is called from the script thread too)
+            SwingUtilities.invokeLater(() -> btnPlayPause.setText("▮▮"));
             setStatus(status);
             ///  MUST SET MENU STATE BEFORE SCRIPT STATE TO PREVENT INFINITE LOOPS
             isMenuPaused(false);
@@ -1641,7 +2040,8 @@ public class DreamBotMenu extends JFrame {
 
     public boolean pause(String status) {
         if (!isMenuPaused()) {
-            btnPlayPause.setText("▶");
+            // Swing components may only be touched on the EDT (this is called from the script thread too)
+            SwingUtilities.invokeLater(() -> btnPlayPause.setText("▶"));
             setStatus(status);
             ///  MUST SET MENU STATE BEFORE SCRIPT STATE TO PREVENT INFINITE LOOPS
             isMenuPaused(true);
@@ -1777,7 +2177,7 @@ public class DreamBotMenu extends JFrame {
      * @param btnText The text displayed on the button.
      * @return A {@link JButton} component styled to match the default theme.
      */
-    private <T> JButton createNavButton(@NotNull String btnText, @NotNull DefaultListModel<T> model, JList<T> list) {
+    private <T> JButton createNavButton(String btnText, DefaultListModel<T> model, JList<T> list) {
         JButton btn = createButton(btnText);
         // determine if this button is a navigation button or not to add extra features
         int dir = btn.getText().equals("▲") ? -1 : btn.getText().equals("▼") ? 1 : 0;
@@ -1796,7 +2196,7 @@ public class DreamBotMenu extends JFrame {
         return btn;
     }
 
-    private <T> JButton createNavButton(@NotNull String btnText, @NotNull DefaultListModel<Preset> model) {
+    private <T> JButton createNavButton(String btnText, DefaultListModel<Preset> model) {
         return createNavButton(btnText, model, null);
     }
 
@@ -1916,6 +2316,9 @@ public class DreamBotMenu extends JFrame {
                 lblGameState.setText(Client.getGameState().name());
             }
 
+            // keep the queue progress bar + loop indicator live
+            updateQueueProgress();
+
             // update keyboard/mouse inputs as mock listeners. This will keep UI in sync at least every 1 second
             setMouseInput(getMouseInput());
             setKeyboardInput(getKeyboardInput());
@@ -1973,12 +2376,14 @@ public class DreamBotMenu extends JFrame {
         return createSettingsGroup("Script",
                 settingClientChkStartScriptOnLoad = createSettingCheck("Start Script on Load",
                         startScriptOnLoad, e ->
-                                startScriptOnLoad = !settingClientChkStartScriptOnLoad.isSelected()
+                                // fixed: was inverted ("= !isSelected()"), so ticking DISABLED the feature
+                                startScriptOnLoad = settingClientChkStartScriptOnLoad.isSelected()
                 ),
 
-                settingClientChkExitOnStopWarning = createSettingCheck("Exit on Stop Warning",
+                settingClientChkExitOnStopWarning = createSettingCheck("Warn Before Exit",
                         exitOnStopWarning, e ->
-                                exitOnStopWarning = !settingClientChkExitOnStopWarning.isSelected()
+                                // fixed: was inverted; label renamed to match what it actually does
+                                exitOnStopWarning = settingClientChkExitOnStopWarning.isSelected()
                 ),
 
                 chkAutoSave = createSettingCheck("Auto Save", true, e -> {
@@ -2026,14 +2431,9 @@ public class DreamBotMenu extends JFrame {
         );
     }
 
-    ///  Define Interfaces Settings sub-tab
-    private JPanel createInterfacesPanel() {
-        return createSettingsGroup("Interfaces",
-                chkDataOrbs = createSettingCheck("Show data orbs",
-                        ClientSettings.areDataOrbsEnabled(), e ->
-                                ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected()))
-        );
-    }
+    // (The old "Interfaces" sub-tab was removed - it only contained a duplicate of the
+    //  "Show data orbs" checkbox, and its second assignment to chkDataOrbs corrupted the
+    //  Gameplay tab's save/load behaviour.)
 
     ///  Define Audio Settings sub-tab
     private JPanel createAudioPanel() {
@@ -2185,44 +2585,31 @@ public class DreamBotMenu extends JFrame {
         if (isDataLoading)
             return;
 
+        isDataLoading = true;
         new Thread(() -> {
-            isDataLoading = true;
-            // if the player is not yet logged in
-            if (!Client.isLoggedIn()) {
-                // start a timer to call this function again later
-                Timer t = new Timer(Rand.nextInt(523, 2303), e -> updateAll());
-                // ensure only one of these timers exist at a 'time', hehe, get it?
-                t.setRepeats(false);
-                // start the timer
-                t.start();
-                Logger.log(Logger.LogType.DEBUG, "Waiting for player to login...");
-                setStatus("Awaiting login...");
-                return;
+            try {
+                // if the player is not yet logged in
+                if (!Client.isLoggedIn()) {
+                    // Retry again shortly. The flag is released in 'finally' so the retry actually
+                    // runs - previously it stayed true forever after this early return, and data
+                    // never loaded if the menu opened before login.
+                    Timer t = new Timer(Rand.nextInt(523, 2303), e -> updateAll());
+                    // ensure only one of these timers exist at a 'time', hehe, get it?
+                    t.setRepeats(false);
+                    t.start();
+                    Logger.log(Logger.LogType.DEBUG, "Waiting for player to login...");
+                    setStatus("Awaiting login...");
+                    return;
+                }
+
+                Logger.log("Player logged in. Loading local profile...");
+                // Read the whole per-character profile from disk in ONE go (small JSON file),
+                // then apply it on the EDT. Replaces the old four-column Supabase fetch.
+                loadProfileFromDisk();
+            } finally {
+                isDataLoading = false;
             }
-
-            Logger.log("Player logged in. Fetching data...");
-            // perform swing updates on EDT, clearing and updating lists
-            SwingUtilities.invokeLater(() -> {
-                modelTaskList.clear();
-                modelTaskLibrary.clear();
-                modelPresets.clear(); // Clear presets before loading fresh from the presets column
-                updateUI();
-            });
-
-            // fetch data from 'settings' column
-            loadSettings();
-            // fetch data from 'tasks' column
-            //loadTaskList();
-            // fetch data from 'library' column
-            loadTaskLibrary();
-            // fetch data from 'builder' column
-            loadTaskBuilder();
-            // fetch data from 'presets' column
-            loadPresets();
-
-            isDataLoading = false;
         }).start();
-        Logger.log(Logger.LogType.SCRIPT, "Unpacked settings successfully! Syncing game settings..sdsd.");
     }
 
     /**
@@ -2239,36 +2626,71 @@ public class DreamBotMenu extends JFrame {
     }
 
     public void saveAll() {
+        saveAll(true);
+    }
+
+    /**
+     * HONESTY FIX: this method used to spin up a thread, report success and save nothing
+     * (the real save call was commented out and the Supabase backend is gone). Local JSON
+     * persistence lands in Patch 2 and plugs in right here; until then the UI tells the truth.
+     *
+     * @param verbose True to surface the result to the user (manual saves); false for the
+     *                background auto-save timer, which would otherwise spam the status bar.
+     */
+    public void saveAll(boolean verbose) {
+        // Snapshot everything on the EDT (models/inputs must be read on the EDT), then write
+        // to disk off the EDT so a slow disk never freezes the UI.
+        final ProfileData data = captureProfile();
+        final String character = safePlayerName();
+
+        if (character == null) {
+            if (verbose)
+                setStatus("Log in first to save your profile");
+            return;
+        }
+
+        if (verbose)
+            setStatus("Saving...");
+
         new Thread(() -> {
-            if (!Client.isLoggedIn())
-                return;
+            boolean ok = LocalStore.save(character, data);
+            if (verbose)
+                setStatus(ok ? "Saved!" : "Save failed - see client logs");
+        }, "DreamMan-Save").start();
+    }
 
-            setStatus("Autosaving...");
+    /** Player name, or null if not logged in (never throws, unlike getPlayerName()). */
+    private String safePlayerName() {
+        if (!Client.isLoggedIn())
+            return null;
+        var local = Players.getLocal();
+        String name = local != null ? local.getName() : null;
+        return (name == null || name.isEmpty()) ? null : name;
+    }
 
-            // Extract plain data from the list models first
-            List<Task> taskListSnapshot = new ArrayList<>();
-            for (int i = 0; i < modelTaskList.size(); i++)
-                taskListSnapshot.add(modelTaskList.getElementAt(i));
+    /** Builds a full {@link ProfileData} snapshot from the current UI state (call on the EDT). */
+    private ProfileData captureProfile() {
+        ProfileData data = new ProfileData();
+        data.settings = captureSettingsSnapshot();
+        data.queueLoops = queueLoopTarget;
+        data.taskList = ProfileCodec.tasksToData(modelTaskList);
+        data.library = ProfileCodec.tasksToData(modelTaskLibrary);
+        data.presets = ProfileCodec.presetsToData(modelPresets);
 
-            List<Task> taskLibrarySnapshot = new ArrayList<>();
-            for (int i = 0; i < modelTaskLibrary.size(); i++)
-                taskLibrarySnapshot.add(modelTaskLibrary.getElementAt(i));
-
-//            dataMan.saveEverything(
-//                    taskListSnapshot,
-//                    taskLibrarySnapshot,
-//                    captureBuilderSnapshot(), // TODO fix builder snapshot, might get server going again
-//                    captureSettingsSnapshot(),
-//                    capturePresets(), // Sending this directly to your presets column
-//                    captureLocation(),
-//                    captureInventory(),
-//                    captureWorn(),
-//                    captureSkills(),
-//                    () -> setStatus("Save successful!")
-//            );
-
-            Logger.log(Logger.LogType.INFO, "Saving data...");
-        }).start();
+        BuilderData bd = new BuilderData();
+        if (taskBuilder != null) {
+            bd.taskName = taskBuilder.getDraftName();
+            bd.taskDescription = taskBuilder.getDraftDescription();
+            bd.taskStatus = taskBuilder.getDraftStatus();
+        }
+        bd.actions = new java.util.ArrayList<>();
+        for (int i = 0; i < modelTaskBuilder.size(); i++) {
+            Action a = modelTaskBuilder.get(i);
+            if (a != null)
+                bd.actions.add(ProfileCodec.toData(a));
+        }
+        data.builder = bd;
+        return data;
     }
 
     /**
@@ -2278,6 +2700,14 @@ public class DreamBotMenu extends JFrame {
         @Override
         public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
             JLabel selectedTask = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+
+            // Show the per-task repeat count as a "×N" suffix (only when > 1).
+            if (value instanceof Task) {
+                int rep = ((Task) value).getRepeat();
+                if (rep > 1)
+                    selectedTask.setText(selectedTask.getText() + "   ×" + rep);
+            }
+
             if (currentExecutionIndex != -1 && index == currentExecutionIndex) {
                 selectedTask.setForeground(COLOR_EXECUTING);
                 selectedTask.setText(ICON_EXECUTING + selectedTask.getText());
@@ -2288,8 +2718,8 @@ public class DreamBotMenu extends JFrame {
     }
 
     public static class SettingsSnapshot {
-        public boolean startScriptOnLoadDisabled;
-        public boolean exitScriptOnStopWarningEnabled;
+        public boolean startScriptOnLoad;
+        public boolean exitOnStopWarning;
         public boolean renderingDisabled;
         public boolean hideRoofsEnabled;
         public boolean dataOrbsEnabled;
@@ -2306,11 +2736,11 @@ public class DreamBotMenu extends JFrame {
 
     private SettingsSnapshot captureSettingsSnapshot() {
         SettingsSnapshot s = new SettingsSnapshot();
-        s.startScriptOnLoadDisabled
+        s.startScriptOnLoad
                 = settingClientChkStartScriptOnLoad != null
                 && settingClientChkStartScriptOnLoad.isSelected();
 
-        s.exitScriptOnStopWarningEnabled
+        s.exitOnStopWarning
                 = settingClientChkExitOnStopWarning != null
                 && settingClientChkExitOnStopWarning.isSelected();
 
@@ -2438,20 +2868,10 @@ public class DreamBotMenu extends JFrame {
         });
 
         // Navigation Down (Next Page)
+        // FIXED: this button previously had TWO ActionListeners attached (one here, one below),
+        // so a single click advanced two pages. The single listener below is the survivor.
         btnPageDown = createButton("▼");
         btnPageDown.setEnabled(true);
-        btnPageDown.addActionListener(e -> {
-            if (canExpandPresets()) {
-                currentPresetPage++;
-                refreshPresetButtonLabels();
-                this.showToast("Page " + (currentPresetPage + 1), btnPageDown, true);
-            } else {
-                // Literal requirement: feedback when no more pages exist downwards
-                this.showToast("No more presets!", btnPageDown, false);
-            }
-        });
-
-        btnPageUp.setPreferredSize(new Dimension(30, 0));
 
         /*
          * Listener for navigating to the previous page of presets.
@@ -2543,7 +2963,7 @@ public class DreamBotMenu extends JFrame {
                 currentTasks.add(new Task(modelTaskList.getElementAt(i)));
 
             String currentName = modelPresets.get(actualIndex).name;
-            modelPresets.set(actualIndex, new Preset(currentName, currentTasks));
+            modelPresets.set(actualIndex, new Preset(currentName, currentTasks, queueLoopTarget));
             // TODO decide whether or not to select the preset on save
             selectedPresetIndex = actualIndex; // Select it upon saving
             refreshPresetButtonLabels();
@@ -2567,6 +2987,12 @@ public class DreamBotMenu extends JFrame {
                     modelTaskList.addElement(new Task(t));
                     taskCount++;
                 }
+
+                // apply the preset's saved whole-queue loop count
+                queueLoopTarget = Math.max(0, preset.getLoops());
+                queueLoopCurrent = 1;
+                syncLoopControls();
+                updateQueueProgress();
 
                 // inform the user that the preset has been loaded and how many tasks this set has.
                 loadPreset(actualIndex);

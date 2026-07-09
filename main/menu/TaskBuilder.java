@@ -112,13 +112,30 @@ public class TaskBuilder extends JPanel {
     }
 
     /** Pre-fills all inputs from an existing Task (for "View in builder"). */
+    // ── Builder-draft persistence hooks (used by DreamBotMenu <-> LocalStore) ──
+    /** @return the current text in the builder's name field. */
+    public String getDraftName() { return taskNameInput.getText(); }
+    /** @return the current text in the builder's description field. */
+    public String getDraftDescription() { return taskDescriptionInput.getText(); }
+    /** @return the current text in the builder's status field. */
+    public String getDraftStatus() { return taskStatusInput.getText(); }
+
+    /** Restores the name/description/status fields of a saved builder draft. */
+    public void applyDraft(String name, String description, String status) {
+        taskNameInput.setText(name == null ? "" : name);
+        taskDescriptionInput.setText(description == null ? "" : description);
+        taskStatusInput.setText(status == null ? "" : status);
+    }
+
     public void loadTask(DreamBotMenu.Task task) {
         if (task == null) return;
         taskNameInput.setText(task.getName());
         taskDescriptionInput.setText(task.getDescription());
         taskStatusInput.setText(task.getStatus());
         modelTaskBuilder.clear();
-        task.getActions().forEach(modelTaskBuilder::addElement);
+        if (task.getActions() != null)
+            // copy each action so builder edits never mutate the original task in the list/library
+            task.getActions().forEach(a -> { if (a != null) modelTaskBuilder.addElement(a.copy()); });
         refreshList();
     }
 
@@ -128,6 +145,8 @@ public class TaskBuilder extends JPanel {
             return;
 
         actionSelector.setSelectedAction(action);
+        // pull the freshly-loaded action's parameter panel into view
+        refreshDynamicControls();
     }
 
     /** Clears all inputs and the action list. */
@@ -187,14 +206,17 @@ public class TaskBuilder extends JPanel {
     }
 
     private void addTemplateToBuilder() {
-        Action newAction = actionSelector.getSelectedAction().copy();
-        if (newAction != null) {
-            modelTaskBuilder.addElement(newAction);
-            toast("Added " + newAction + "!", btnAddToLibrary, true);
-            refreshList(true);
-        } else {
+        Action selected = actionSelector.getSelectedAction();
+        // null-check BEFORE dereferencing (the old order guaranteed an NPE instead of a toast)
+        if (selected == null) {
             toast("Invalid or incomplete action!", btnAddToLibrary, false);
+            return;
         }
+
+        Action newAction = selected.copy();
+        modelTaskBuilder.addElement(newAction);
+        toast("Added " + newAction + "!", btnAddToLibrary, true);
+        refreshList(true);
     }
 
     /**

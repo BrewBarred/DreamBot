@@ -14,7 +14,6 @@ public class DevelopersConsole extends JPanel {
         setLayout( new BorderLayout());
         devTabs.addTab("Main", new JPanel());
         devTabs.addTab("Library List", new JLibraryList());
-        devTabs.addTab("Library List 2", new JLibraryList2());
         devTabs.addTab("Library Panel (Beta)", library);
 
         this.add(devTabs, BorderLayout.CENTER);

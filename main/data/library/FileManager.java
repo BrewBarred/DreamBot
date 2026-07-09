@@ -44,19 +44,41 @@ public final class FileManager {
 
     private FileManager() {}
 
-    /** Root library directory — all collections live as subdirectories here. */
-    public static final String DIR = "main/data/library/";
+    /**
+     * Root library directory. Now an ABSOLUTE path under the user's home directory:
+     * {@code <user.home>/DreamMan/library/}.
+     * <p>
+     * Previously this was the relative path {@code "main/data/library/"}, which resolves against
+     * whatever working directory the DreamBot client launches from - so once the script ran as a
+     * packaged .jar, learned NPCs/objects were written somewhere unexpected (or lost). An absolute
+     * path fixes that regardless of how the script is launched, and keeps all DreamMan data
+     * (profiles + library) together in one place.
+     */
+    public static final String DIR = resolveRootDir();
+
+    /** Legacy relative location, kept only so first-run migration can pull old data forward. */
+    private static final String LEGACY_DIR = "main/data/library/";
 
     /** The currently active collection name. Defaults to "default". */
-    private static String activeCollection = "Library";
+    private static String activeCollection = "default";
+
+    private static String resolveRootDir() {
+        String home = System.getProperty("user.home");
+        if (home == null || home.isEmpty())
+            home = ".";
+        String path = new java.io.File(home, "DreamMan/library").getPath();
+        return path.endsWith(java.io.File.separator) ? path : path + java.io.File.separator;
+    }
 
     /**
      * Sets the active collection. All subsequent reads/writes will use this
-     * collection's subdirectory. Creates the directory if it doesn't exist.
+     * collection's subdirectory. Creates the directory if needed and, on first run,
+     * seeds it from the old relative location if that still has data.
      */
     public static void setCollection(String name) {
         activeCollection = (name != null && !name.isEmpty()) ? name : "default";
         new java.io.File(getCollectionDir()).mkdirs();
+        migrateLegacyIfNeeded();
     }
 
     /** Returns the name of the currently active collection. */
@@ -64,6 +86,45 @@ public final class FileManager {
 
     /** Returns the full path to the active collection directory. */
     public static String getCollectionDir() { return DIR + activeCollection + "/"; }
+
+    /**
+     * One-time best-effort migration: if the new collection directory has no data files yet but
+     * the old relative {@code main/data/library/<collection>/} does, copy them across. This means
+     * anyone upgrading keeps the library they already built, without losing anything (the old
+     * files are copied, not moved).
+     */
+    private static void migrateLegacyIfNeeded() {
+        try {
+            java.io.File newNpc = new java.io.File(getNpcFile());
+            java.io.File newObj = new java.io.File(getObjectFile());
+            java.io.File newItm = new java.io.File(getItemFile());
+            boolean newHasData = newNpc.exists() || newObj.exists() || newItm.exists();
+            if (newHasData)
+                return;
+
+            java.io.File legacyDir = new java.io.File(LEGACY_DIR + activeCollection + "/");
+            if (!legacyDir.isDirectory())
+                return;
+
+            copyIfPresent(new java.io.File(legacyDir, "npcs.txt"), newNpc);
+            copyIfPresent(new java.io.File(legacyDir, "objects.txt"), newObj);
+            copyIfPresent(new java.io.File(legacyDir, "ground_items.txt"), newItm);
+            Logger.log("[JLibrary] Migrated existing '" + activeCollection + "' library to " + getCollectionDir());
+        } catch (Exception e) {
+            Logger.log("[JLibrary] Legacy library migration skipped: " + e.getMessage());
+        }
+    }
+
+    private static void copyIfPresent(java.io.File from, java.io.File to) {
+        if (!from.exists())
+            return;
+        try {
+            ensureDirectoryExists(to);
+            Files.copy(from.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception e) {
+            Logger.log("[JLibrary] Could not migrate " + from + ": " + e.getMessage());
+        }
+    }
 
     // ── File paths — always relative to the active collection ─────────────────
     public static String getNpcFile()    { return getCollectionDir() + "npcs.txt"; }

@@ -1,6 +1,5 @@
 package main.menu;
 
-import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -27,7 +26,7 @@ public class MenuHandler {
     static final Color COLOR_OBJ  = new Color(40,  160,  70);
     static final Color COLOR_ITEM = new Color(200, 130,  40);
 
-    static JButton createButton(@NotNull String btnText) {
+    static JButton createButton(String btnText) {
         return createButton(btnText, null, null);
     }
 
@@ -55,11 +54,11 @@ public class MenuHandler {
         return styleComp(new JPanel(new GridBagLayout()));
     }
 
-    static JLabel createLabel(@NotNull String text) {
+    static JLabel createLabel(String text) {
         return styleComp(new JLabel(text));
     }
 
-    static JButton createButton(@NotNull String btnText, Color backgroundColor, Color foregroundColor) {
+    static JButton createButton(String btnText, Color backgroundColor, Color foregroundColor) {
         // validate button text
         if (btnText.isEmpty())
             throw new IllegalArgumentException("Error creating button! Button text cannot be empty");
@@ -123,7 +122,7 @@ public class MenuHandler {
         return title;
     }
 
-    static JTextArea createParamDescription(@NotNull String rawDescription) {
+    static JTextArea createParamDescription(String rawDescription) {
         JTextArea description = new JTextArea(rawDescription);
             description.setWrapStyleWord(true);
             description.setLineWrap(true);
@@ -137,7 +136,7 @@ public class MenuHandler {
         return description;
     }
 
-    static JTextArea createParamExample(@NotNull String rawExample) {
+    static JTextArea createParamExample(String rawExample) {
         JTextArea example = new JTextArea(rawExample);
             example.setWrapStyleWord(true);
             example.setLineWrap(true);

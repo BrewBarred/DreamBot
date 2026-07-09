@@ -1,8 +1,0 @@
-Ranged combat tutor, 3217, 3238, 0, Lumbridge NPCs, Talk-to
-Man, 3218, 3239, 0, Lumbridge NPCs, Talk-to
-Magic combat tutor, 3218, 3237, 0, Lumbridge NPCs, Talk-to
-Melee combat tutor, 3219, 3238, 0, Lumbridge NPCs, Talk-to
-Shop keeper, 3209, 3246, 0, Lumbridge NPCs, Talk-to
-Shop assistant, 3208, 3247, 0, Lumbridge NPCs, Talk-to
-Goblin, 3216, 3246, 0, Lumbridge NPCs, Talk-to
-Donie, 3208, 3252, 0, Lumbridge NPCs, Talk-to

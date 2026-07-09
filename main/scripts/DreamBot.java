@@ -8,11 +8,10 @@ import org.dreambot.api.utilities.Logger;
 import java.awt.*;
 
 @ScriptManifest(
-        author = "ETA",
         name = "DreamBot",
-        version = 3.0,
-        category = Category.MISC
-)
+        version = 1.0,
+        author = "ETA",
+        category = Category.MISC)
 public class DreamBot extends DreamBotMan {
     @Override
     public void postResume() {

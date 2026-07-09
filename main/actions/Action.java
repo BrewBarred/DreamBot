@@ -2,7 +2,6 @@ package main.actions;
 
 import main.components.JParamTextField;
 import org.dreambot.api.methods.map.Tile;
-import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 

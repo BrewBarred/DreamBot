@@ -1,4 +1,0 @@
-# NPC Library — auto-managed, manual edits are safe
-# Format: name, x, y, z, area, interaction
-
-sd, 0, 0, 0, , Talk-to

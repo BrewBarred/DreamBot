@@ -2,6 +2,11 @@ package main.menu.components;
 
 import main.actions.Action;
 import main.actions.Walk;
+import main.actions.Interact;
+import main.actions.Loot;
+import main.actions.Drop;
+import main.actions.Bank;
+import main.actions.Wait;
 import org.dreambot.api.utilities.Logger;
 
 import javax.swing.*;
@@ -21,8 +26,14 @@ public class JActionSelector extends JComboBox<Action> {
     private JPanel currentPanel;
 
     static {
+        // NOTE: each registry KEY must equal the action class's simple name, because Action.getName()
+        // (used as the saved type) returns getClass().getSimpleName() and createByType() looks it up here.
         REGISTRY.put("Walk", new Walk());
-        //REGISTRY.put("Walk to NPC", new ActionLoader(WalkToNpc::new,  WalkToNpc::scanTargets));
+        REGISTRY.put("Interact", new Interact());
+        REGISTRY.put("Loot", new Loot());
+        REGISTRY.put("Drop", new Drop());
+        REGISTRY.put("Bank", new Bank());
+        REGISTRY.put("Wait", new Wait());
     }
 
     public JActionSelector() {
@@ -41,9 +52,21 @@ public class JActionSelector extends JComboBox<Action> {
     }
 
     public void setSelectedAction(Action action) {
+        if (action == null)
+            return;
+
+        // Select the matching registry prototype by CLASS - the old code passed a copy that
+        // isn't in the combo model, which Swing silently ignores. Note: changing the index
+        // fires rebuildTemplate(), so the loaded copy must be applied AFTER selecting.
+        for (int i = 0; i < getItemCount(); i++) {
+            if (getItemAt(i) != null && getItemAt(i).getClass() == action.getClass()) {
+                setSelectedIndex(i);
+                break;
+            }
+        }
+
         selectedAction = action.copy();
         currentPanel = selectedAction.getParamPanel();
-        setSelectedItem(selectedAction);
     }
 
     public Action getSelectedAction() {
@@ -51,6 +74,15 @@ public class JActionSelector extends JComboBox<Action> {
     }
 
     public Action create(String type) {
+        return createByType(type);
+    }
+
+    /**
+     * Instance-free action factory used by the persistence layer to rebuild a saved action
+     * from its type name. Returns a fresh copy of the registry prototype, or null if the type
+     * is unknown (e.g. an action that was renamed or removed since the profile was saved).
+     */
+    public static Action createByType(String type) {
         Action prototype = REGISTRY.get(type);
         return prototype != null ? prototype.copy() : null;
     }
@@ -59,15 +91,16 @@ public class JActionSelector extends JComboBox<Action> {
      * Replaces the template instance (and therefore the live controls) for the selected action type.
      */
     private void rebuildTemplate() {
-        Logger.log(Logger.LogType.DEBUG, "Rebuilding...");
-        if (selectedAction == null)
-            selectedAction = REGISTRY.get(REGISTRY.keySet().iterator().next());
+        // Read the COMBO BOX selection - previously this copied the old 'selectedAction'
+        // field, so changing the dropdown never actually switched the action type.
+        Object selection = getSelectedItem();
+        Action prototype = selection instanceof Action
+                ? (Action) selection
+                : REGISTRY.get(REGISTRY.keySet().iterator().next());
 
-        Logger.log(Logger.LogType.DEBUG, "Selected action: " + selectedAction);
-
-        selectedAction = getSelectedAction().copy();
+        selectedAction = prototype.copy();
         currentPanel = selectedAction.getParamPanel();
-        Logger.log(Logger.LogType.DEBUG, "Rebuild complete!");
+        Logger.log(Logger.LogType.DEBUG, "Action template rebuilt: " + selectedAction);
     }
 
     public void addSelectionListener(ActionListener l) {

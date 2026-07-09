@@ -13,6 +13,7 @@ import org.dreambot.api.wrappers.interactive.Player;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.List;
 
 import main.actions.Action;
 
@@ -22,7 +23,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     /**
      * The {@link DreamBotMenu} which allows users to interface with their botting scripts and player(s).
      */
-    private DreamBotMenu menu;
+    private volatile DreamBotMenu menu;
     /**
      * A {@link String} denoting the name of the last logged in player.
      * <p>
@@ -88,7 +89,25 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     public abstract void postStop();
     public abstract void postExit();
 
-    private DefaultListModel<DreamBotMenu.Task> queue;
+    private volatile DefaultListModel<DreamBotMenu.Task> queue;
+    /**
+     * Points at the next {@link Action} to execute inside the current task. Persisted across
+     * loops so multi-action tasks progress one action at a time instead of re-running earlier
+     * actions every loop (which caused walk "ping-pong" between two targets forever).
+     */
+    private int actionCursor = 0;
+    /**
+     * How many times the CURRENT task (at the current queue index) has finished running during
+     * this pass of the queue. Compared against the task's configured repeat count so a task can
+     * run N times before the queue advances. Reset whenever the queue index changes.
+     */
+    private int taskRunsDone = 0;
+    /**
+     * The queue index the engine last executed. If the menu changes the index behind the
+     * engine's back (Skip / Run-from-here buttons), this lets us notice and reset the action
+     * cursor so the newly-selected task starts cleanly from its first action.
+     */
+    private int lastServedIndex = -999;
 
 
 
@@ -119,22 +138,24 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     @Override
     public int onLoop() {
         try {
-            ///  Don't start looping until the menu has been fully instantiated
-            if (menu == null || menu.libraryPanel == null)
-                return 1000;
+            ///  Don't start looping until the menu has been fully instantiated on the EDT
+            DreamBotMenu menu = this.menu;
+            DefaultListModel<DreamBotMenu.Task> queue = this.queue;
+            if (menu == null || queue == null || menu.libraryPanel == null)
+                return 500;
 
-            ///  Pause if the menu has
+            ///  Pause if the menu has requested it
             if (menu.isMenuPaused())
                 pause("Script paused via DreamBotMenu!");
 
-            if (menu.libraryPanel != null)
-                menu.libraryPanel.tick();
+            menu.libraryPanel.tick();
 
             ///  Ensure inheritors pre-loop checks are performed before every loop
             if (!preLoop())
                 throw new Exception("Error executing pre loop logic!");
 
-            if (queue == null || queue.isEmpty()) {
+            if (queue.isEmpty()) {
+                actionCursor = 0;
                 // don't pause while learning otherwise you won't be able to learn without running a script.
                 if (!JLibrary.getInstance().getLearner().isLearning())
                     pause("Task list is empty!");
@@ -142,63 +163,101 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
                 return Rand.nextInt(263, 1925);
             }
 
-            // fetch the current execution index, automatically correcting setting invalid indices to the first item
-            int index = Math.max(0, menu.getCurrentExecutionIndex());
-
-            // reset the list pointer
-            menu.setCurrentExecutionIndex(index);
-
-            // TODO add loop check here to continue from the top
-            if (index >= queue.size()) {
-                //if (menu.getTaskList().getLoopsLeft() > 0) {
-                    // set it to the first item in the list if its invalid
-                    menu.setCurrentExecutionIndex(0);
-                    // pause the script
-                    pause("Tasks complete!");
-                    return Rand.nextInt(983);
-                //}
+            // fetch the current execution index, correcting invalid indices back to the first task
+            int index = menu.getCurrentExecutionIndex();
+            if (index < 0 || index >= queue.size()) {
+                // Starting a fresh run (index was -1 after a finished/empty queue, or the queue
+                // was edited). Reset the per-task and whole-queue loop counters.
+                index = 0;
+                actionCursor = 0;
+                taskRunsDone = 0;
+                menu.setCurrentExecutionIndex(0);
+                menu.resetLoopProgress();
             }
 
-            // fetch the current task from the head of the queue
-            DreamBotMenu.Task currentTask = queue.get(index);
-            if (currentTask != null) {
-                // update status using task status field which is always the initial message to display
-                // (develops further as actions are executed)
-                menu.setStatus(currentTask.getStatus());
+            // If the index changed since we last ran (e.g. the user pressed Skip or
+            // Run-from-here), restart cleanly at the first action of the new task.
+            if (index != lastServedIndex) {
+                actionCursor = 0;
+                taskRunsDone = 0;
+                lastServedIndex = index;
+            }
 
-                // if this task still has actions to complete
-                boolean taskComplete = true;
-                if (currentTask.getActions() != null) {
-                    // for each action in this task
-                    for (Action action : currentTask.getActions()) {
-                        if (action == null){
-                            Logger.log("Skipping null/invalid action in task: " + currentTask.getName());
-                            continue;
-                        }
+            // fetch the current task (the queue can shrink on the EDT between the check and the get)
+            DreamBotMenu.Task currentTask;
+            try {
+                currentTask = queue.get(index);
+            } catch (ArrayIndexOutOfBoundsException shrunk) {
+                actionCursor = 0;
+                taskRunsDone = 0;
+                menu.setCurrentExecutionIndex(0);
+                return Rand.nextInt(263, 983);
+            }
 
-                        if (!action.execute()) {
-                            taskComplete = false;
-                            break;
-                        }
+            List<Action> actions = currentTask != null ? currentTask.getActions() : null;
+            if (currentTask == null || actions == null || actions.isEmpty()) {
+                // nothing executable in this entry - move along (no repeats for an empty task)
+                actionCursor = 0;
+                taskRunsDone = 0;
+                menu.advanceQueue();
+                return Rand.nextInt(263, 983);
+            }
 
-                        if (postAction())
-                            Logger.log(Logger.LogType.DEBUG, "Action complete!");
-                        else throw new Exception("Error executing after action logic!");
-                    }
-                }
+            // update status using the task status field (always the initial message to display)
+            menu.setStatus(currentTask.getStatus());
 
-                // increment the execution index to complete this tasks next action on the next cycle instead of repeating
-                if (taskComplete)
-                    menu.incrementExecutionIndex();
+            // clamp the cursor in case the task was edited to be shorter while running
+            if (actionCursor >= actions.size()) {
+                actionCursor = 0;
+                onTaskRunComplete(menu, currentTask);
+                return Rand.nextInt(263, 983);
+            }
+
+            // Execute ONLY the current action this loop; the cursor advances when it completes.
+            // (Previously every action re-ran from the start of the list each loop, so a task
+            // like [Walk A, Walk B] ping-ponged between targets and never finished.)
+            Action action = actions.get(actionCursor);
+            if (action == null) {
+                Logger.log("Skipping null/invalid action in task: " + currentTask.getName());
+                actionCursor++;
+            } else if (action.execute()) {
+                if (!postAction())
+                    throw new Exception("Error executing after action logic!");
+
+                Logger.log(Logger.LogType.DEBUG, "Action complete: " + action.toBuildString());
+                actionCursor++;
+            }
+
+            // all actions completed -> this counts as one full run of the task
+            if (actionCursor >= actions.size()) {
+                actionCursor = 0;
+                onTaskRunComplete(menu, currentTask);
             }
 
         } catch (Exception e) {
             String error = e.getMessage();
-            Logger.log(error != null && error.isEmpty() ? "Error executing main loop!" : error);
+            Logger.log(error == null || error.isEmpty() ? "Error executing main loop!" : error);
             e.printStackTrace();
         }
 
         return 600;
+    }
+
+    /**
+     * Called when the current task has finished one full run of its action chain. Repeats the
+     * task if it hasn't yet hit its configured repeat count; otherwise resets the counter and
+     * asks the menu to advance the queue (which handles whole-queue looping / finishing).
+     */
+    private void onTaskRunComplete(DreamBotMenu menu, DreamBotMenu.Task task) {
+        taskRunsDone++;
+        int repeat = task != null ? Math.max(1, task.getRepeat()) : 1;
+
+        if (taskRunsDone >= repeat) {
+            // task done for this pass - move on (index reset of counters handled here)
+            taskRunsDone = 0;
+            menu.advanceQueue();
+        }
+        // else: leave the index where it is; the next loop re-runs this task from action 0.
     }
 
     /**
@@ -208,21 +267,18 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     @Override
     public final void onGameStateChange(GameState gameState) {
         if (gameState == GameState.LOGGED_IN) {
-            ///  Trigger onLogin() logic
+            ///  Trigger onLogin() logic (fires on EVERY successful login, including world-hops)
             postLogin();
             Logger.log(Logger.LogType.DEBUG, "Login success!");
 
             Player player = Players.getLocal();
-            if (player.getName() != null) {
-                ///  Trigger onNewLogin() logic
+            String currentPlayer = player != null ? player.getName() : null;
+            // Only fire "new login" logic when the character actually changed (not on world-hops)
+            if (currentPlayer != null && !currentPlayer.equals(lastPlayerName)) {
+                lastPlayerName = currentPlayer;
                 postLoginNew();
-                Logger.log(Logger.LogType.DEBUG, "New login detected!");
-                String currentPlayer = player.getName();
-                if (!currentPlayer.equals(lastPlayerName)) {
-                    lastPlayerName = currentPlayer;
-                    log("New login detected for: " + currentPlayer);
-                    updateAccountData(currentPlayer);
-                }
+                Logger.log(Logger.LogType.DEBUG, "New login detected for: " + currentPlayer);
+                updateAccountData(currentPlayer);
             }
         }
         postGameStateChange(gameState);
