@@ -55,6 +55,23 @@ import static main.menu.MenuHandler.*;
  */
 public class DreamBotMenu extends JFrame {
     private final ScriptManager scriptManager;
+    /** Bridge to the running script for login/logout/stop (Patch A2). */
+    private ScriptControls scriptControls;
+    public void setScriptControls(ScriptControls c) { this.scriptControls = c; }
+
+    /** Forces the menu window to the front (used by the in-game "Menu" button). */
+    public void bringToFront() {
+        SwingUtilities.invokeLater(() -> {
+            setVisible(true);
+            if ((getExtendedState() & Frame.ICONIFIED) != 0)
+                setExtendedState(getExtendedState() & ~Frame.ICONIFIED);
+            // toggling always-on-top nudges most window managers to actually raise it
+            setAlwaysOnTop(false);
+            setAlwaysOnTop(true);
+            toFront();
+            requestFocus();
+        });
+    }
     private volatile boolean isMenuPaused;
     private final TaskBuilder taskBuilder;
     public final LibraryPanel libraryPanel;
@@ -128,7 +145,7 @@ public class DreamBotMenu extends JFrame {
     private final Color COLOR_FAILURE = new Color(100, 0, 0);
     private final Color COLOR_SUCCESS = new Color(0, 100, 0);
     private final Color COLOR_LIGHT_GREEN = new Color(150, 200, 50);
-    private final Color COLOR_EXECUTING = Color.YELLOW;
+    private final Color COLOR_EXECUTING = Theme.AMBER;
     private final String ICON_EXECUTING = "→ ";
     private final Font FONT_EXECUTING = new Font("Consolas", Font.BOLD, 12);
 
@@ -169,6 +186,8 @@ public class DreamBotMenu extends JFrame {
     private JCheckBox loopInfiniteCheck;
     private JSpinner taskRepeatSpinner;
     private JLabel lblLoopIndicator;
+    private JLabel lblTaskCount;
+    private int hoveredTaskIndex = -1;
     /** Prevents spinner/checkbox listeners from firing while we programmatically sync them. */
     private boolean suppressLoopEvents = false;
     private final DefaultListModel<Preset> modelPresets = new DefaultListModel<>();
@@ -220,8 +239,8 @@ public class DreamBotMenu extends JFrame {
     private JCheckBox chkVisualEffects;
     // --- Theme ---
     private final Map<JComponent, Color> originalColors = new WeakHashMap<>(); // Kept as requested, but no longer used by flashControl to prevent color bugs
-    private final Color BG_BASE = new Color(12, 12, 12);
-    private final Color TEXT_DIM = new Color(140, 140, 140);
+    private final Color BG_BASE = Theme.BG_APP;
+    private final Color TEXT_DIM = Theme.TEXT_DIM;
     private final Color TAB_SELECTED = new Color(60, 0, 0);
 
     // --- Labels (Restored) ---
@@ -245,17 +264,22 @@ public class DreamBotMenu extends JFrame {
         Logger.log(Logger.LogType.DEBUG, "Instantiating DreamBotMenu...");
         ///  Provide a reference to the original script manager objects, this clouds the user from the original script
         ///     object as well, to avoid confusion, anything this class needs will be pulled in the constructor.
+        // Install the app-wide flat-dark design system before ANY component is created,
+        // so every tab/button/scrollbar/input picks it up automatically (Patch A).
+        Theme.install();
+
         this.scriptManager = script.getScriptManager();
         this.isMenuPaused(scriptManager.isPaused());
         this.startTime = System.currentTimeMillis();
         this.setIconImage(Objects.requireNonNull(loadStatusIcon("Hardcore_ironman")).getImage());
-        setTitle("DreamBotMan | OSRS DreamBot Manager v1");
+        setTitle("DreamMan · OSRS Task Manager");
 
         setSize(1400, 950);
+        setMinimumSize(new Dimension(940, 620)); // stops the runaway width-growth on shrink
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         setLayout(new BorderLayout(0, 0));
-        getContentPane().setBackground(BG_BASE);
+        getContentPane().setBackground(Theme.BG_APP);
 
         Logger.log(Logger.LogType.DEBUG, "Setup main GUI parameters...");
 
@@ -263,8 +287,9 @@ public class DreamBotMenu extends JFrame {
         taskBuilder = new TaskBuilder(this);
         libraryPanel = new LibraryPanel();
 
-        mainTabs.setBackground(PANEL_SURFACE);
-        mainTabs.setForeground(TEXT_MAIN);
+        mainTabs.setBackground(Theme.SURFACE_1);
+        mainTabs.setForeground(Theme.TEXT_DIM);
+        mainTabs.setFont(Theme.font(13));
         mainTabs.addTab("Task List", loadTabIcon("task_list_tab"), createTaskListTab());
         mainTabs.addTab("Task Library", loadTabIcon("task_library_tab"), createTaskLibraryTab());
         mainTabs.addTab("Task Builder", loadTabIcon("task_builder_tab"), taskBuilder);
@@ -319,9 +344,10 @@ public class DreamBotMenu extends JFrame {
         ///  Add side panel controls
         sidePanelContent.add(createSubtitle("Live Tracker"), BorderLayout.NORTH);
         sidePanelContent.add(sScroll, BorderLayout.CENTER);
-        sidePanelContent.add(btnToggleSidePanel, BorderLayout.EAST);
         sidePanelContent.add(totals, BorderLayout.SOUTH);
         sidePanelContent.setVisible(false);
+        // cap the tracker width so it can never push the window wider
+        sidePanelContent.setMaximumSize(new Dimension(360, Integer.MAX_VALUE));
 
         this.sidePanel = new JPanel(new BorderLayout());
         this.sidePanel.setOpaque(false);
@@ -549,21 +575,23 @@ public class DreamBotMenu extends JFrame {
 
     private JPanel createProgressPanel() {
         JPanel persistentStatus = new JPanel(new GridBagLayout());
-        persistentStatus.setBackground(PANEL_SURFACE);
+        persistentStatus.setBackground(Theme.SURFACE_1);
 
         persistentStatus.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, COLOR_BORDER_DIM),
-                new EmptyBorder(8, 15, 8, 15)
+                BorderFactory.createMatteBorder(1, 0, 0, 0, Theme.BORDER),
+                new EmptyBorder(10, 16, 10, 16)
         ));
 
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.fill = GridBagConstraints.HORIZONTAL;
 
         // --- Row 0: The Progress Bar (Full Width) ---
-        statusProgress.setPreferredSize(new Dimension(0, 18));
-        statusProgress.setForeground(COLOR_BLOOD);
-        statusProgress.setBackground(BG_BASE);
-        statusProgress.setBorder(new LineBorder(COLOR_BORDER_DIM));
+        statusProgress.setPreferredSize(new Dimension(0, 16));
+        statusProgress.setForeground(Theme.ACCENT);
+        statusProgress.setBackground(Theme.SURFACE_2);
+        statusProgress.setBorder(null);
+        statusProgress.setPreferredSize(new Dimension(0, 14));
+        statusProgress.setFont(Theme.font(11));
         statusProgress.setStringPainted(true);
 
         gbc.gridx = 0;
@@ -590,11 +618,22 @@ public class DreamBotMenu extends JFrame {
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         controls.setOpaque(false);
         btnPlayPause = createIconButton("▶", "Play the script", e -> toggleScriptState());
+        btnPlayPause.putClientProperty("accent", Boolean.TRUE); // crimson primary
         JButton btnStop = createIconButton("■", "Stop the script", e -> stop());
         btnMouseToggle = createIconButton("🖱", "Toggle mouse input", e -> toggleMouseInput());
         btnKeyboardToggle = createIconButton("⌨", "Toggle keyboard input", e -> toggleKeyboardInput());
+
+        JButton btnLogin = createButton("Login");
+        btnLogin.setToolTipText("Log in to the configured account");
+        btnLogin.addActionListener(e -> { if (scriptControls != null) scriptControls.requestLogin(); });
+        JButton btnLogout = createButton("Logout");
+        btnLogout.setToolTipText("Log out");
+        btnLogout.addActionListener(e -> { if (scriptControls != null) scriptControls.requestLogout(); });
+
         controls.add(btnPlayPause);
         controls.add(btnStop);
+        controls.add(btnLogin);
+        controls.add(btnLogout);
         controls.add(btnMouseToggle);
         controls.add(btnKeyboardToggle);
 
@@ -610,6 +649,40 @@ public class DreamBotMenu extends JFrame {
 
     public DefaultListModel<Task> getModelTaskList() {
         return modelTaskList;
+    }
+
+    // ── In-game overlay support (Patch A2) ──────────────────────────────────
+    /** Custom stat rows a script/task can push to the on-screen overlay (label -> value). */
+    private final java.util.Map<String, String> overlayStats =
+            java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>());
+
+    /** Add/replace a custom row shown on the in-game overlay (e.g. "Logs", "125"). */
+    public void putOverlayStat(String label, String value) { overlayStats.put(label, value); }
+    /** Remove one custom overlay row. */
+    public void removeOverlayStat(String label) { overlayStats.remove(label); }
+    /** Clear all custom overlay rows. */
+    public void clearOverlayStats() { overlayStats.clear(); }
+    /** Live view of the custom overlay rows (synchronized). */
+    public java.util.Map<String, String> getOverlayStats() { return overlayStats; }
+
+    public long getUptimeMillis() { return System.currentTimeMillis() - startTime; }
+    public int getQueueSize() { return modelTaskList.size(); }
+    public int getQueueLoopCurrentValue() { return queueLoopCurrent; }
+
+    /** Status text without the "Status: " prefix. */
+    public String getStatusText() {
+        String t = lblStatus.getText();
+        return (t != null && t.startsWith("Status: ")) ? t.substring(8) : t;
+    }
+
+    /** Name of the task currently executing, or null. */
+    public String getCurrentTaskName() {
+        int i = getCurrentExecutionIndex();
+        if (i >= 0 && i < modelTaskList.size()) {
+            Task t = modelTaskList.get(i);
+            return t != null ? t.getName() : null;
+        }
+        return null;
     }
 
     public int getCurrentExecutionIndex() {
@@ -769,11 +842,15 @@ public class DreamBotMenu extends JFrame {
         /// Set up the main task list panel
         // create main panel
         JPanel panelTaskList = new JPanel(new BorderLayout(10, 10));
-        panelTaskList.setBorder(new EmptyBorder(15, 15, 15, 15));
-        panelTaskList.setBackground(BG_BASE);
+        panelTaskList.setBorder(new EmptyBorder(14, 14, 14, 14));
+        panelTaskList.setBackground(Theme.BG_APP);
 
         /// CENTER: Add the task queue list display to the center of the task list panel
-        listTaskList.setCellRenderer(new TaskCellRenderer());
+        listTaskList.setCellRenderer(new TaskCardRenderer());
+        listTaskList.setFixedCellHeight(62);
+        listTaskList.setBackground(Theme.SURFACE_1);
+        listTaskList.setSelectionBackground(Theme.SURFACE_1);
+        listTaskList.setBorder(null);
         styleJList(listTaskList);
 
 
@@ -871,18 +948,30 @@ public class DreamBotMenu extends JFrame {
                 // ensure the index is valid and the click bounds actually contain that item
                 if (index != -1 && listTaskList.getCellBounds(index, index).contains(e.getPoint())) {
 
-                    if (e.getClickCount() == 1) {
-                        // TODO add logic to view task information? Perhaps, loop count, description, end condition, and maybe a live-action-chain? action1 -> action2 -> action3
-                    }
-
-                    // Double-click now EDITS the task in the builder. (It previously DELETED
-                    // the task silently - far too destructive for such a common gesture.
-                    // Removal remains on the Remove button below.)
+                    listTaskList.setSelectedIndex(index);
                     if (e.getClickCount() == 2 && !e.isShiftDown()) {
                         loadIntoBuilder(listTaskList.getSelectedValue());
                         mainTabs.setSelectedIndex(2);
                     }
                 }
+            }
+            @Override public void mousePressed(MouseEvent e)  { maybePopup(e); }
+            @Override public void mouseReleased(MouseEvent e) { maybePopup(e); }
+            @Override public void mouseExited(MouseEvent e)   { hoveredTaskIndex = -1; listTaskList.repaint(); }
+            private void maybePopup(MouseEvent e) {
+                if (!e.isPopupTrigger()) return;
+                int index = listTaskList.locationToIndex(e.getPoint());
+                if (index < 0 || !listTaskList.getCellBounds(index, index).contains(e.getPoint())) return;
+                listTaskList.setSelectedIndex(index);
+                showTaskContextMenu(e, index);
+            }
+        });
+        // hover highlight
+        listTaskList.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+            @Override public void mouseMoved(MouseEvent e) {
+                int i = listTaskList.locationToIndex(e.getPoint());
+                if (i >= 0 && !listTaskList.getCellBounds(i, i).contains(e.getPoint())) i = -1;
+                if (i != hoveredTaskIndex) { hoveredTaskIndex = i; listTaskList.repaint(); }
             }
         });
 
@@ -899,9 +988,16 @@ public class DreamBotMenu extends JFrame {
         south.add(southButtons, BorderLayout.SOUTH);
 
         // add all panels to the main panel (task list panel)
-        panelTaskList.add(createSubtitle("Task List"), BorderLayout.NORTH);
+        lblTaskCount = pill("0 tasks");
+        JPanel headerRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        headerRight.setOpaque(false);
+        headerRight.add(lblTaskCount);
+        panelTaskList.add(createTabHeader("Task queue", headerRight), BorderLayout.NORTH);
         panelTaskList.add(west, BorderLayout.WEST);
-        panelTaskList.add(new JScrollPane(listTaskList), BorderLayout.CENTER);
+        JScrollPane taskScroll = new JScrollPane(listTaskList);
+        taskScroll.setBorder(null);
+        taskScroll.getViewport().setBackground(Theme.SURFACE_1);
+        panelTaskList.add(taskScroll, BorderLayout.CENTER);
         panelTaskList.add(south, BorderLayout.SOUTH);
 
         // add listener to scan for nearby targets and select the first item if none selected on show
@@ -1053,6 +1149,10 @@ public class DreamBotMenu extends JFrame {
     }
 
     private void refreshTaskListTab(int index) {
+        if (lblTaskCount != null) {
+            int n = modelTaskList.size();
+            lblTaskCount.setText(n + (n == 1 ? " task" : " tasks"));
+        }
         // ignore empty lists (but still refresh them in case of update after removal)
         if (!modelTaskList.isEmpty()) {
             // prefer the passed index, fall back to the current selection, resort to the first item
@@ -1997,6 +2097,57 @@ public class DreamBotMenu extends JFrame {
         revertTimer.start();
     }
 
+    /** Right-click menu for a queued task card: edit / duplicate / set repeat / remove. */
+    private void showTaskContextMenu(MouseEvent e, int index) {
+        if (index < 0 || index >= modelTaskList.size()) return;
+        Task task = modelTaskList.getElementAt(index);
+        if (task == null) return;
+
+        JPopupMenu menu = new JPopupMenu();
+
+        JMenuItem edit = new JMenuItem("Edit in builder");
+        edit.addActionListener(a -> { loadIntoBuilder(task); mainTabs.setSelectedIndex(2); });
+
+        JMenuItem dup = new JMenuItem("Duplicate");
+        dup.addActionListener(a -> {
+            modelTaskList.add(index + 1, new Task(task));
+            refreshTaskListTab(index + 1);
+        });
+
+        JMenuItem repeat = new JMenuItem("Set repeat ×N…");
+        repeat.addActionListener(a -> promptRepeat(task));
+
+        JMenuItem runHere = new JMenuItem("Run from here");
+        runHere.addActionListener(a -> { setCurrentExecutionIndex(index); resetLoopProgress(); listTaskList.repaint(); });
+
+        JMenuItem remove = new JMenuItem("Remove");
+        remove.addActionListener(a -> {
+            modelTaskList.remove(index);
+            refreshTaskListTab();
+        });
+
+        menu.add(edit);
+        menu.add(dup);
+        menu.add(repeat);
+        menu.add(runHere);
+        menu.addSeparator();
+        menu.add(remove);
+        menu.show(listTaskList, e.getX(), e.getY());
+    }
+
+    /** Popup spinner to set a task's per-task repeat count. */
+    private void promptRepeat(Task task) {
+        JSpinner sp = new JSpinner(new SpinnerNumberModel(task.getRepeat(), 1, 999, 1));
+        sp.setPreferredSize(new Dimension(90, 28));
+        int r = JOptionPane.showConfirmDialog(this, sp,
+                "Repeat ×N for \"" + task.getName() + "\"", JOptionPane.OK_CANCEL_OPTION);
+        if (r == JOptionPane.OK_OPTION) {
+            task.setRepeat((int) sp.getValue());
+            listTaskList.repaint();
+            syncTaskRepeatSpinner();
+        }
+    }
+
     private void loadIntoBuilder(Task task) {
         if(task == null)
             return;
@@ -2318,6 +2469,11 @@ public class DreamBotMenu extends JFrame {
 
             // keep the queue progress bar + loop indicator live
             updateQueueProgress();
+
+            // keep the play/pause button icon in sync with the actual paused state
+            // (so pausing from the in-game overlay flips the Swing button too)
+            if (btnPlayPause != null)
+                btnPlayPause.setText(isMenuPaused() ? "▶" : "▮▮");
 
             // update keyboard/mouse inputs as mock listeners. This will keep UI in sync at least every 1 second
             setMouseInput(getMouseInput());
@@ -2696,24 +2852,176 @@ public class DreamBotMenu extends JFrame {
     /**
      * Helper function to track and highlight the tasks as they are executed in the task list.
      */
-    private class TaskCellRenderer extends DefaultListCellRenderer {
+    /** A themed section header row: bold title on the left, optional components on the right. */
+    private JPanel createTabHeader(String title, JComponent right) {
+        JPanel header = new JPanel(new BorderLayout());
+        header.setOpaque(false);
+        header.setBorder(new EmptyBorder(2, 4, 12, 4));
+
+        JLabel lbl = new JLabel(title);
+        lbl.setFont(Theme.fontBold(16));
+        lbl.setForeground(Theme.TEXT);
+        // subtle crimson tick to the left of the title
+        lbl.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 3, 0, 0, Theme.ACCENT),
+                new EmptyBorder(0, 10, 0, 0)));
+        header.add(lbl, BorderLayout.WEST);
+        if (right != null) header.add(right, BorderLayout.EAST);
+        return header;
+    }
+
+    /** A small rounded pill label (e.g. "3 tasks"). */
+    private JLabel pill(String text) {
+        JLabel l = new JLabel(text) {
+            @Override protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(Theme.SURFACE_2);
+                g2.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 18, 18);
+                g2.setColor(Theme.BORDER);
+                g2.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 18, 18);
+                g2.dispose();
+                super.paintComponent(g);
+            }
+        };
+        l.setForeground(Theme.TEXT_DIM);
+        l.setFont(Theme.font(11));
+        l.setBorder(new EmptyBorder(3, 11, 3, 11));
+        return l;
+    }
+
+    /** A small rounded colour chip with a single letter, used as each task card's icon. */
+    private static class RoundChip extends JComponent {
+        Color color = Theme.BLUE; String letter = "?";
+        RoundChip() { setPreferredSize(new Dimension(32, 32)); }
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(color);
+            g2.fillRoundRect(0, (getHeight()-30)/2, 30, 30, 9, 9);
+            g2.setColor(Color.WHITE);
+            g2.setFont(Theme.fontBold(14));
+            FontMetrics fm = g2.getFontMetrics();
+            int tx = (30 - fm.stringWidth(letter)) / 2;
+            int ty = (getHeight()/2) + (fm.getAscent() - fm.getDescent())/2;
+            g2.drawString(letter, tx, ty);
+            g2.dispose();
+        }
+    }
+
+    /** Colour + letter for a task's first action, so the chip reflects what the task does. */
+    private static Color chipColorFor(String actionName) {
+        if (actionName == null) return Theme.TEXT_DIM;
+        switch (actionName) {
+            case "Walk":     return Theme.BLUE;
+            case "Interact": return Theme.ACCENT;
+            case "Loot":     return Theme.AMBER;
+            case "Drop":     return Theme.GREEN;
+            case "Bank":     return new Color(0x5DA0E8);
+            case "Wait":     return Theme.TEXT_MUTED;
+            default:          return Theme.TEXT_DIM;
+        }
+    }
+
+    /** Card-style renderer for the task queue (Patch A). */
+    private class TaskCardRenderer extends JPanel implements ListCellRenderer<Task> {
+        private final RoundChip chip = new RoundChip();
+        private final JLabel name = new JLabel();
+        private final JLabel preview = new JLabel();
+        private final JLabel badge = new JLabel("", SwingConstants.CENTER);
+        private boolean running, selected, hovered;
+
+        TaskCardRenderer() {
+            setLayout(new BorderLayout(12, 0));
+            setBorder(BorderFactory.createEmptyBorder(11, 15, 13, 15));
+            setOpaque(false);
+
+            JPanel chipWrap = new JPanel(new GridBagLayout());
+            chipWrap.setOpaque(false);
+            chipWrap.add(chip);
+
+            JPanel text = new JPanel();
+            text.setOpaque(false);
+            text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
+            name.setFont(Theme.fontBold(13));
+            name.setAlignmentX(LEFT_ALIGNMENT);
+            preview.setFont(Theme.font(11));
+            preview.setForeground(Theme.TEXT_MUTED);
+            preview.setAlignmentX(LEFT_ALIGNMENT);
+            text.add(name);
+            text.add(Box.createVerticalStrut(3));
+            text.add(preview);
+
+            JPanel textWrap = new JPanel(new GridBagLayout());
+            textWrap.setOpaque(false);
+            GridBagConstraints gc = new GridBagConstraints();
+            gc.anchor = GridBagConstraints.WEST; gc.weightx = 1; gc.fill = GridBagConstraints.HORIZONTAL;
+            textWrap.add(text, gc);
+
+            badge.setFont(Theme.fontBold(11));
+            badge.setForeground(new Color(0xC9CDD4));
+            badge.setBorder(BorderFactory.createEmptyBorder(3, 9, 3, 9));
+
+            add(chipWrap, BorderLayout.WEST);
+            add(textWrap, BorderLayout.CENTER);
+            add(badge, BorderLayout.EAST);
+        }
+
         @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
-            JLabel selectedTask = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+        public Component getListCellRendererComponent(JList<? extends Task> list, Task task,
+                int index, boolean isSelected, boolean cellHasFocus) {
+            selected = isSelected;
+            running = (currentExecutionIndex != -1 && index == currentExecutionIndex);
+            hovered = (index == hoveredTaskIndex);
 
-            // Show the per-task repeat count as a "×N" suffix (only when > 1).
-            if (value instanceof Task) {
-                int rep = ((Task) value).getRepeat();
-                if (rep > 1)
-                    selectedTask.setText(selectedTask.getText() + "   ×" + rep);
-            }
+            String first = (task.getActions() != null && !task.getActions().isEmpty() && task.getActions().get(0) != null)
+                    ? task.getActions().get(0).getName() : null;
+            chip.color = running ? Theme.ACCENT : chipColorFor(first);
+            chip.letter = (first != null && !first.isEmpty()) ? first.substring(0, 1).toUpperCase() : "·";
 
-            if (currentExecutionIndex != -1 && index == currentExecutionIndex) {
-                selectedTask.setForeground(COLOR_EXECUTING);
-                selectedTask.setText(ICON_EXECUTING + selectedTask.getText());
-                selectedTask.setFont(FONT_EXECUTING);
+            name.setText(task.getName());
+            name.setForeground(running ? Theme.AMBER : Theme.TEXT);
+
+            // action-chain preview, e.g. "Walk → Interact → Wait"
+            StringBuilder sb = new StringBuilder();
+            if (task.getActions() != null) {
+                int shown = 0;
+                for (Action a : task.getActions()) {
+                    if (a == null) continue;
+                    if (shown > 0) sb.append("  →  ");
+                    sb.append(a.getName());
+                    if (++shown >= 5) { sb.append(" …"); break; }
+                }
             }
-            return selectedTask;
+            preview.setText(sb.length() == 0 ? "empty task" : sb.toString());
+
+            int rep = task.getRepeat();
+            badge.setText(rep > 1 ? "×" + rep : "");
+
+            setToolTipText(task.getDescription());
+            return this;
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int w = getWidth(), h = getHeight();
+            int x = 2, y = 2, cw = w - 4, ch = h - 6; // leave a small gap between cards
+
+            g2.setColor(running ? Theme.SURFACE_2 : (selected ? Theme.SURFACE_2 : Theme.SURFACE_2_ALT));
+            g2.fillRoundRect(x, y, cw, ch, 11, 11);
+
+            g2.setColor(running ? new Color(0x2F2023)
+                    : (selected ? Theme.BORDER_STRONG : (hovered ? Theme.BORDER_STRONG : Theme.BORDER)));
+            g2.drawRoundRect(x, y, cw, ch, 11, 11);
+
+            if (running) { // left accent bar
+                g2.setColor(Theme.ACCENT);
+                g2.fillRoundRect(x, y + 4, 4, ch - 8, 3, 3);
+            }
+            g2.dispose();
+            super.paintComponent(g);
         }
     }
 

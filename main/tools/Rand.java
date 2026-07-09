@@ -1,60 +1,66 @@
 package main.tools;
 
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 
+/**
+ * Static secure-random helpers for delays and jitter.
+ *
+ * <p>FIX: the RNG was previously created only inside the (never-called) constructor, so every
+ * static {@code nextInt(...)} call hit a null field and threw, which made anything relying on it
+ * (e.g. the Wait action's delay) fail silently and appear to "hang forever". It's now initialised
+ * in a static block so the static methods work without anyone constructing the class.
+ *
+ * <p>Also switched from {@link SecureRandom#getInstanceStrong()} (which can BLOCK waiting for OS
+ * entropy - a real hazard for a bot generating constant delays) to a plain {@link SecureRandom},
+ * which is non-blocking and more than random enough for humanising timings.
+ */
 public class Rand {
-    private static SecureRandom secureRandom;
 
+    private static final SecureRandom secureRandom = new SecureRandom();
+
+    /** Kept for backward compatibility; no longer required to initialise the RNG. */
     public Rand() {
-        SecureRandom temp;
-        try {
-            temp = SecureRandom.getInstanceStrong();
-        } catch (NoSuchAlgorithmException e) {
-            // Fallback to default if strong algorithm isn't available
-            temp = new SecureRandom();
-        }
-        secureRandom = temp;
+        super();
     }
 
-    /**
-     * Returns a secure random int (full int range).
-     *
-     * @return A {@link SecureRandom} integer value between 0 and {@link Integer#MAX_VALUE}.
-     */
+    /** Secure random int across the full int range. */
     public static int nextInt() {
         return secureRandom.nextInt();
     }
 
-    /**
-     * Returns a secure random int from 0 (inclusive) to max (inclusive).
-     *
-     * @param max The highest possible value.
-     * @return A {@link SecureRandom} integer value between 0 and max (inclusive).
-     */
+    /** Secure random int from 0 (inclusive) to max (inclusive). */
     public static int nextInt(int max) {
-        if (max < 0) {
+        if (max < 0)
             throw new IllegalArgumentException("max must be >= 0");
-        }
-
         return secureRandom.nextInt(max + 1);
     }
 
-    /**
-     * Returns a secure random int from the min (inclusive) value to the max (inclusive) value.
-     *
-     * @param min The lowest possible value.
-     * @param max The highest possible value.
-     * @return A {@link SecureRandom} integer value between min and max (inclusive).
-     */
+    /** Secure random int from min (inclusive) to max (inclusive). */
     public static int nextInt(int min, int max) {
-        if (min > max) {
+        if (min > max)
             throw new IllegalArgumentException("min must be <= max");
-        }
-        int i = min + secureRandom.nextInt((max - min) + 1);
-        return i;
+        return min + secureRandom.nextInt((max - min) + 1);
     }
 
+    /** Quick jitter - tiny random delay for tight action sequences (~60-220ms). */
+    public static int quickDelay() {
+        return nextInt(60, 220);
+    }
+
+    /** A short, human-looking pause between actions (~300-900ms). */
+    public static int pauseDelay() {
+        return nextInt(300, 900);
+    }
+
+    /**
+     * A longer semi-AFK delay you can scale to mimic looking away / multitasking. The base is
+     * ~1.8-4.2s; multiply for longer AFKs (e.g. afkDelay(3) ≈ 5.4-12.6s).
+     */
+    public static int afkDelay(int multiplier) {
+        return nextInt(1800, 4200) * Math.max(1, multiplier);
+    }
+
+    /** A realistic delay between actions (randomised min AND max for extra spread). */
     public static int actionDelay() {
         return nextInt(
                 // lowest min -> highest min
@@ -63,13 +69,4 @@ public class Rand {
                 nextInt(1478, 3294)
         );
     }
-
-//    /**
-//     * Returns a secure random byte array of the given length.
-//     */
-//    public byte[] nextBytes(int length) {
-//        byte[] bytes = new byte[length];
-//        secureRandom.nextBytes(bytes);
-//        return bytes;
-//    }
 }

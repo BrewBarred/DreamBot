@@ -11,16 +11,16 @@ public class MenuHandler {
     static final Color COLOR_BTN_BACKGROUND = new Color(40,40,40);
     static final Color COLOR_BTN_FOREGROUND = Color.WHITE;
 
-    static final Color COLOR_SUBTITLE = new Color(193, 93, 13);
+    static final Color COLOR_SUBTITLE = Theme.TEXT_DIM;
 
-    public static final Color COLOR_BORDER_DIM = new Color(45, 45, 45);
+    public static final Color COLOR_BORDER_DIM = Theme.BORDER;
 
-    static final Color PANEL_SURFACE = new Color(24, 24, 24);
-    public static final Color TEXT_MAIN = new Color(210, 210, 210);
+    static final Color PANEL_SURFACE = Theme.SURFACE_1;
+    public static final Color TEXT_MAIN = Theme.TEXT;
 
-    public static final Color COLOR_BLOOD = new Color(150, 0, 0);
+    public static final Color COLOR_BLOOD = Theme.ACCENT;
 
-    static final Color COLOR_BTN_ADD = new Color(220, 80, 0);
+    static final Color COLOR_BTN_ADD = Theme.ACCENT;
 
     static final Color COLOR_NPC  = new Color(60,  120, 200);
     static final Color COLOR_OBJ  = new Color(40,  160,  70);
@@ -65,11 +65,13 @@ public class MenuHandler {
 
         // create button object
         JButton btn = new JButton(btnText);
-        // set button properties
-        btn.setBackground(backgroundColor == null ? COLOR_BTN_BACKGROUND : backgroundColor);
-        btn.setForeground(foregroundColor == null ? COLOR_BTN_FOREGROUND : foregroundColor);
         btn.setFocusPainted(false);
-        btn.setBorder(new LineBorder(COLOR_BORDER_DIM));
+        // Semantic colour (e.g. red Remove, green Add) paints as a FILLED button via the flat UI;
+        // a null colour leaves it as a quiet ghost button. (Border/paint handled by Theme.FlatButtonUI.)
+        if (backgroundColor != null)
+            btn.putClientProperty("fillColor", backgroundColor);
+        if (foregroundColor != null)
+            btn.setForeground(foregroundColor);
 
         return btn;
     }

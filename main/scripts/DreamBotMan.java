@@ -3,6 +3,13 @@ package main.scripts;
 import main.data.library.FileManager;
 import main.data.library.JLibrary;
 import main.menu.DreamBotMenu;
+import main.menu.Overlay;
+import main.menu.CanvasButtons;
+import main.menu.ScriptControls;
+import org.dreambot.api.methods.login.LoginUtility;
+import org.dreambot.api.methods.tabs.Tabs;
+import org.dreambot.api.script.listener.HumanMouseListener;
+import java.awt.event.MouseEvent;
 import main.tools.Rand;
 import org.dreambot.api.data.GameState;
 import org.dreambot.api.methods.interactive.Players;
@@ -17,7 +24,7 @@ import java.util.List;
 
 import main.actions.Action;
 
-public abstract class DreamBotMan extends AbstractScript implements GameStateListener {
+public abstract class DreamBotMan extends AbstractScript implements GameStateListener, HumanMouseListener, ScriptControls {
     ///  Class scope fields
 
     /**
@@ -31,6 +38,11 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
      * the menu would show the incorrect stats and tasks whenever you change accounts)
      */
     private String lastPlayerName = "";
+
+    /** Universal on-canvas buttons (Open settings / Skip / +30m / -30m). */
+    private final CanvasButtons canvasButtons = new CanvasButtons();
+    /** Optional run-time limit; when >0 and passed, the script stops (with logout). 0 = no limit. */
+    private volatile long runLimitEndMs = 0L;
 
     ///  Abstract functions
 
@@ -122,10 +134,25 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
         SwingUtilities.invokeLater(() -> {
             menu = new DreamBotMenu(this);
             menu.setAlwaysOnTop(true); //TODO add to "Client" settings
+            menu.setScriptControls(this); // lets the menu's Login/Logout buttons reach the script
             menu.setVisible(true);
 
             // fetch the task queue only after menu is instantiated
             queue = menu.getModelTaskList();
+
+            // Universal on-canvas buttons, drawn on the game screen (same for every script).
+            final DreamBotMenu m = menu;
+            // All actions marshalled to the EDT (the click arrives on DreamBot's listener thread,
+            // and Swing calls like setVisible/toFront must run on the EDT - this is why the old
+            // "Open settings" button appeared to do nothing).
+            canvasButtons.add("Menu",   m::bringToFront);
+            canvasButtons.add("Pause",  () -> SwingUtilities.invokeLater(() -> {
+                if (m.isMenuPaused()) m.resume("Resumed from overlay");
+                else m.pause("Paused from overlay");
+            }));
+            canvasButtons.add("Skip",   () -> SwingUtilities.invokeLater(m::advanceQueue));
+            canvasButtons.add("+30m",   () -> adjustRunLimit(30));
+            canvasButtons.add("-30m",   () -> adjustRunLimit(-30));
         });
 
         // call child on-start for script-specific on-start setup
@@ -143,6 +170,18 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             DefaultListModel<DreamBotMenu.Task> queue = this.queue;
             if (menu == null || queue == null || menu.libraryPanel == null)
                 return 500;
+
+            ///  Enforce an optional run-time limit (set via the +30m/-30m overlay buttons)
+            if (runLimitEndMs > 0) {
+                long remaining = runLimitEndMs - System.currentTimeMillis();
+                if (remaining <= 0) {
+                    menu.setStatus("Run-time limit reached - stopping");
+                    requestStop(true); // logout, then stop
+                    return 600;
+                }
+                long s = remaining / 1000;
+                menu.putOverlayStat("Time left", String.format("%02d:%02d", s / 60, s % 60));
+            }
 
             ///  Pause if the menu has requested it
             if (menu.isMenuPaused())
@@ -243,6 +282,44 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
         return 600;
     }
 
+    /** Adds (or removes) minutes to the run-time limit from the +30m/-30m overlay buttons. */
+    private void adjustRunLimit(int minutes) {
+        long now = System.currentTimeMillis();
+        long base = Math.max(now, runLimitEndMs);
+        long updated = base + minutes * 60_000L;
+        runLimitEndMs = (updated <= now) ? 0L : updated; // reducing below 'now' clears the limit
+        if (menu != null) {
+            if (runLimitEndMs == 0L) menu.removeOverlayStat("Time left");
+            menu.setStatus(runLimitEndMs == 0L ? "Run-time limit cleared"
+                    : "Run-time limit " + minutes + " min");
+        }
+    }
+
+    ///  ── HumanMouseListener: route user clicks to the on-canvas buttons ──
+    @Override
+    public void onMouseClicked(MouseEvent e) {
+        canvasButtons.handleClick(e); // consumed silently if it hits a button
+    }
+
+    ///  ── ScriptControls: login / logout / stop (called by the menu's control bar) ──
+    @Override
+    public void requestLogin() {
+        try { LoginUtility.login(); }
+        catch (Throwable t) { Logger.log("Login failed: " + t.getMessage()); }
+    }
+
+    @Override
+    public void requestLogout() {
+        try { Tabs.logout(); }
+        catch (Throwable t) { Logger.log("Logout failed: " + t.getMessage()); }
+    }
+
+    @Override
+    public void requestStop(boolean logout) {
+        if (logout) requestLogout();
+        stop();
+    }
+
     /**
      * Called when the current task has finished one full run of its action chain. Repeats the
      * task if it hasn't yet hit its configured repeat count; otherwise resets the counter and
@@ -317,6 +394,12 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     @Override
     public final void onPaint(Graphics graphics) {
         super.onPaint(graphics);
+        // Draw the in-game status overlay (safe: standard java.awt.Graphics).
+        if (menu != null) {
+            int overlayBottom = Overlay.render(graphics, menu);
+            // Attach the button row directly under the overlay, spanning its width (linked layout).
+            canvasButtons.renderRow(graphics, Overlay.getX(), overlayBottom + 4, Overlay.getWidth());
+        }
         postPaint(graphics);
     }
 

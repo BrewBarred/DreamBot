@@ -77,6 +77,22 @@ public final class ActionUtil {
         return (gi != null && within(gi.getTile(), radius)) ? gi : null;
     }
 
+    /**
+     * Rough "is the player idle" check used by actions that wait for completion (e.g. Interact
+     * in combat). Idle = not moving and not animating. Wrapped defensively so a client-version
+     * difference degrades to "treat as idle" rather than throwing.
+     */
+    public static boolean isIdle() {
+        try {
+            var p = Players.getLocal();
+            if (p == null) return true;
+            boolean moving = p.isMoving();
+            int anim = -1;
+            try { anim = p.getAnimation(); } catch (Throwable ignored) {}
+            return !moving && anim == -1;
+        } catch (Throwable t) { return true; }
+    }
+
     /** Stacks parameter sub-panels vertically into one styled panel. */
     public static JPanel stack(JComponent... panels) {
         JPanel box = new JPanel();
