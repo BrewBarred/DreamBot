@@ -13,10 +13,20 @@ import java.util.List;
  * rebuild the concrete actions on load via {@link main.menu.components.JActionSelector}.
  */
 public class TaskData {
+
+    /** Patch B.2: the task's stable identity (see Task.getId()); null in pre-B.2 saves. */
+    public String id;
+
+    /** Patch B.3: creation time (epoch ms); 0 in older saves. */
+    public long createdAt;
     public String name;
     public String description;
     public String status;
     /** How many times this task runs before the queue advances (>=1). */
     public int repeat = 1;
+    /** Patch B: automatic humanised pause between actions. */
+    public boolean autoDelay = false;
+    public int autoDelayMinMs = 600;
+    public int autoDelayMaxMs = 1400;
     public List<main.data.ActionData> actions = new ArrayList<>();
 }

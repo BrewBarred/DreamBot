@@ -12,5 +12,9 @@ public class BuilderData {
     public String taskName;
     public String taskDescription;
     public String taskStatus;
+    /** Patch B: the builder's auto-delay checkbox + range, so the draft restores completely. */
+    public boolean autoDelay = false;
+    public int autoDelayMinMs = 600;
+    public int autoDelayMaxMs = 1400;
     public List<main.data.ActionData> actions = new ArrayList<>();
 }

@@ -120,6 +120,8 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
      * cursor so the newly-selected task starts cleanly from its first action.
      */
     private int lastServedIndex = -999;
+    /** Patch B.4: evaluates watchers between actions (globals + the current action's own). */
+    private final main.watchers.WatcherEngine watchers = new main.watchers.WatcherEngine();
 
 
 
@@ -146,7 +148,8 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             // and Swing calls like setVisible/toFront must run on the EDT - this is why the old
             // "Open settings" button appeared to do nothing).
             canvasButtons.add("Menu",   m::bringToFront);
-            canvasButtons.add("Pause",  () -> SwingUtilities.invokeLater(() -> {
+            canvasButtons.add(() -> m.isMenuPaused() ? "Resume" : "Pause",
+                    () -> SwingUtilities.invokeLater(() -> {
                 if (m.isMenuPaused()) m.resume("Resumed from overlay");
                 else m.pause("Paused from overlay");
             }));
@@ -220,6 +223,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
                 actionCursor = 0;
                 taskRunsDone = 0;
                 lastServedIndex = index;
+                watchers.reset();   // Patch B.4: abandon any half-run watcher on Skip/edit
             }
 
             // fetch the current task (the queue can shrink on the EDT between the check and the get)
@@ -256,15 +260,59 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             // (Previously every action re-ran from the start of the list each loop, so a task
             // like [Walk A, Walk B] ping-ponged between targets and never finished.)
             Action action = actions.get(actionCursor);
+
+            // ── Patch B.4: watchers run BETWEEN actions, while the player is safe ──
+            // Consult globals + this action's own triggers. If a watcher is mid-response, or an
+            // "instead" watcher just fired, we do NOT run the queue action this loop.
+            main.watchers.WatcherEngine.Outcome wo = watchers.service(
+                    menu.getGlobalTriggers(),
+                    action != null ? action.getTriggers() : null);
+            if (wo == main.watchers.WatcherEngine.Outcome.RUNNING)
+                return Rand.nextInt(180, 420);   // let the response chain breathe
+            if (wo == main.watchers.WatcherEngine.Outcome.REPLACED) {
+                // an "instead of this action" watcher handled the situation - skip the action
+                // for this pass but treat it as satisfied so the task advances normally
+                action.resetAttempts();
+                lastPolledAction = null;
+                actionCursor++;
+                if (actionCursor >= actions.size()) {
+                    actionCursor = 0;
+                    onTaskRunComplete(menu, currentTask);
+                }
+                return Rand.nextInt(180, 420);
+            }
+
             if (action == null) {
                 Logger.log("Skipping null/invalid action in task: " + currentTask.getName());
                 actionCursor++;
-            } else if (action.execute()) {
-                if (!postAction())
-                    throw new Exception("Error executing after action logic!");
+            } else {
+                // Patch B.2: reset the attempt counter whenever the engine ENTERS an action
+                // (fresh task pass, loop-around, or skipping to it) so budgets are per-run.
+                if (action != lastPolledAction) {
+                    action.resetAttempts();
+                    lastPolledAction = action;
+                }
 
-                Logger.log(Logger.LogType.DEBUG, "Action complete: " + action.toBuildString());
-                actionCursor++;
+                if (action.execute()) {
+                    if (!postAction())
+                        throw new Exception("Error executing after action logic!");
+
+                    Logger.log(Logger.LogType.DEBUG, "Action complete: " + action.toBuildString());
+                    action.resetAttempts();
+                    actionCursor++;
+                } else if (action.attemptsExhausted()) {
+                    // Patch B.2: the action used up its tries (nothing in range, walks failing,
+                    // clicks failing...) - the task genuinely can't complete. Fail THIS task
+                    // with a clear status and move the queue on, instead of looping forever.
+                    String why = action.getName() + " gave up after " + action.getAttempts() + " tries";
+                    Logger.log(Logger.LogType.WARN, "Task failed: " + currentTask.getName() + " - " + why);
+                    menu.setStatus("Task failed: " + why);
+                    action.resetAttempts();
+                    actionCursor = 0;
+                    taskRunsDone = 0;
+                    menu.advanceQueue();
+                    return 600;
+                }
             }
 
             // all actions completed -> this counts as one full run of the task
@@ -279,6 +327,11 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             e.printStackTrace();
         }
 
+        int gap = pendingTaskGapMs;
+        if (gap > 0) {
+            pendingTaskGapMs = 0;
+            return gap;      // the between-task auto-wait (Patch B.2)
+        }
         return 600;
     }
 
@@ -298,7 +351,17 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     ///  ── HumanMouseListener: route user clicks to the on-canvas buttons ──
     @Override
     public void onMouseClicked(MouseEvent e) {
-        canvasButtons.handleClick(e); // consumed silently if it hits a button
+        if (canvasButtons.handleClick(e)) // consumed silently if it hits a button
+            return;
+        Overlay.handleClick(e);           // overlay titles toggle minimize/restore (Patch B.3)
+    }
+
+    // Patch B.3: feeds the cursor position so overlay titles brighten on hover. Deliberately
+    // no @Override: HumanMouseListener's members are default methods, and if a client build
+    // ever lacked this one the annotation would break compilation - without it, worst case the
+    // hover highlight simply doesn't fire while everything else keeps working.
+    public void onMouseMoved(MouseEvent e) {
+        Overlay.onMouseMoved(e.getPoint());
     }
 
     ///  ── ScriptControls: login / logout / stop (called by the menu's control bar) ──
@@ -325,8 +388,19 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
      * task if it hasn't yet hit its configured repeat count; otherwise resets the counter and
      * asks the menu to advance the queue (which handles whole-queue looping / finishing).
      */
+    /** Set by onTaskRunComplete when the queue-level auto-wait is on; onLoop returns it once. */
+    private volatile int pendingTaskGapMs = 0;
+    /** The action the engine polled last loop - used to reset attempt budgets on entry. */
+    private Action lastPolledAction;
+
     private void onTaskRunComplete(DreamBotMenu menu, DreamBotMenu.Task task) {
         taskRunsDone++;
+
+        // Patch B.2: the Task List's "auto-wait between tasks" - a humanised random pause after
+        // every completed task pass (you basically always wait a beat between tasks anyway).
+        // Delivered through onLoop's return value: non-blocking and pause-safe.
+        if (menu != null && menu.isQueueAutoWait())
+            pendingTaskGapMs = Rand.nextInt(menu.getQueueAutoWaitMinMs(), menu.getQueueAutoWaitMaxMs());
         int repeat = task != null ? Math.max(1, task.getRepeat()) : 1;
 
         if (taskRunsDone >= repeat) {
@@ -399,6 +473,9 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             int overlayBottom = Overlay.render(graphics, menu);
             // Attach the button row directly under the overlay, spanning its width (linked layout).
             canvasButtons.renderRow(graphics, Overlay.getX(), overlayBottom + 4, Overlay.getWidth());
+            // Patch B.2: tracked-skill cards in columns below - left column until the chatbox,
+            // then a new column to the right. Each card (and the main panel) is minimizable.
+            Overlay.renderSkills(graphics, menu, overlayBottom + 4 + 24 + 6);
         }
         postPaint(graphics);
     }

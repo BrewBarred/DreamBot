@@ -96,6 +96,19 @@ public final class LocalStore {
             return false;
         }
 
+        // Patch B.1: keep a one-deep backup of the previous profile before every overwrite,
+        // so any save - including a deliberate save of an empty workspace - is recoverable
+        // from profile.json.bak in the same folder.
+        if (target.exists()) {
+            try {
+                Files.copy(target.toPath(), new File(dir, PROFILE_FILE + ".bak").toPath(),
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException backupFailed) {
+                Logger.log(Logger.LogType.WARN,
+                        "[LocalStore] Could not write backup: " + backupFailed.getMessage());
+            }
+        }
+
         try {
             Files.move(tmp.toPath(), target.toPath(),
                     StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);

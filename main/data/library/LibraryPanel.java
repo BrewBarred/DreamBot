@@ -1,5 +1,6 @@
 package main.data.library;
 
+import main.menu.Theme;
 import org.dreambot.api.Client;
 import org.dreambot.api.methods.map.Tile;
 
@@ -306,7 +307,7 @@ public class LibraryPanel extends JPanel {
         p.setBackground(BG);
         p.setBorder(new EmptyBorder(8, 8, 8, 4));
 
-        JScrollPane scroll = new JScrollPane(resultTable);
+        JScrollPane scroll = Theme.thinScrollbars(new JScrollPane(resultTable));
         scroll.setBackground(BG);
         scroll.getViewport().setBackground(BG);
         scroll.setBorder(darkBorder("Results"));
@@ -477,7 +478,7 @@ public class LibraryPanel extends JPanel {
         logArea.setLineWrap(true);
         logArea.setWrapStyleWord(true);
 
-        JScrollPane scroll = new JScrollPane(logArea);
+        JScrollPane scroll = Theme.thinScrollbars(new JScrollPane(logArea));
         scroll.setBackground(BG2);
         scroll.getViewport().setBackground(BG2);
         scroll.setBorder(null);

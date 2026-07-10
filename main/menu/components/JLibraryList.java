@@ -125,6 +125,18 @@ public class JLibraryList extends JPanel {
     /** Scan radius in tiles. Adjust to taste. */
     private static final int NEARBY_RADIUS = 15;
 
+    /** Single background worker for nearby scans (Patch B.1) - keeps DreamBot API calls off the EDT. */
+    private final java.util.concurrent.ExecutorService scanPool =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "DreamMan-Scan");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /** Coalesces overlapping scan requests - only one scan runs at a time. */
+    private final java.util.concurrent.atomic.AtomicBoolean scanInFlight =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
     // =========================================================================
     // UI components (kept as fields so applyFilter / switchTo can access them)
     // =========================================================================
@@ -152,8 +164,10 @@ public class JLibraryList extends JPanel {
 
         buildUI();
         populateLibrary();
-        scanNearby();
         switchTo(ViewMode.NEARBY);
+        // Patch B.1: the first nearby scan runs on the background worker, not the EDT, so
+        // building the menu never stalls on DreamBot API calls.
+        rescanNearby();
     }
 
     // =========================================================================
@@ -242,8 +256,14 @@ public class JLibraryList extends JPanel {
         scroll.setBorder(BorderFactory.createMatteBorder(1, 0, 1, 0, BORDER_COLOR));
         scroll.setBackground(BG_LIST);
         scroll.getViewport().setBackground(BG_LIST);
-        scroll.getVerticalScrollBar().setUI(new DarkScrollBarUI());
-        scroll.getVerticalScrollBar().setPreferredSize(new Dimension(7, 0));
+        // Patch B.1: bind the dark scrollbar per-instance via updateUI() - immune to the client
+        // LAF's updateUI sweeps and to classloader lookups (no UIManager involvement).
+        JScrollBar darkBar = new JScrollBar(JScrollBar.VERTICAL) {
+            @Override public void updateUI() { setUI(new DarkScrollBarUI()); }
+        };
+        darkBar.setPreferredSize(new Dimension(7, 0));
+        darkBar.setUnitIncrement(16);
+        scroll.setVerticalScrollBar(darkBar);
         return scroll;
     }
 
@@ -302,11 +322,11 @@ public class JLibraryList extends JPanel {
         styleActionButton(refreshBtn, ACCENT_BLUE, ACCENT_HOVER);
         refreshBtn.addActionListener(e -> {
             if (currentMode == ViewMode.NEARBY) {
-                scanNearby();
+                rescanNearby();   // async (Patch B.1) - the click never blocks the EDT
             } else {
                 populateLibrary();
+                applyFilter();
             }
-            applyFilter();
         });
 
         actionRow.add(statusLabel, BorderLayout.CENTER);
@@ -327,8 +347,18 @@ public class JLibraryList extends JPanel {
      * an empty list if the client is not running).
      */
     public void scanNearby() {
+        List<EntityEntry> fresh = new ArrayList<>();
+        scanInto(fresh);
         nearbyFull.clear();
+        nearbyFull.addAll(fresh);
+        setStatus(nearbyFull.size() + " entities nearby");
+    }
 
+    /**
+     * The actual environment scan, writing into {@code out}. Pure of UI state so it can run on
+     * the background worker (Patch B.1); callers publish the result to the EDT themselves.
+     */
+    private void scanInto(List<EntityEntry> out) {
         try {
             // ── NPCs ──────────────────────────────────────────────────────────
             List<NPC> liveNpcs = NPCs.all(n -> n != null
@@ -340,7 +370,7 @@ public class JLibraryList extends JPanel {
                     if (withinRadius(npc.getTile())) {
                         EntityEntry e = new EntityEntry(npc.getName(), Library.TargetType.NPC, "NEARBY");
                         e.npcRef = npc;
-                        addUnique(nearbyFull, e);
+                        addUnique(out, e);
                     }
                 }
             }
@@ -355,7 +385,7 @@ public class JLibraryList extends JPanel {
                     if (withinRadius(obj.getTile())) {
                         EntityEntry e = new EntityEntry(obj.getName(), Library.TargetType.GAME_OBJECT, "NEARBY");
                         e.objectRef = obj;
-                        addUnique(nearbyFull, e);
+                        addUnique(out, e);
                     }
                 }
             }
@@ -370,7 +400,7 @@ public class JLibraryList extends JPanel {
                     if (withinRadius(item.getTile())) {
                         EntityEntry e = new EntityEntry(item.getName(), Library.TargetType.GROUND_ITEM, "NEARBY");
                         e.groundRef = item;
-                        addUnique(nearbyFull, e);
+                        addUnique(out, e);
                     }
                 }
             }
@@ -384,17 +414,15 @@ public class JLibraryList extends JPanel {
                 if (livePlayers != null) {
                     for (var p : livePlayers) {
                         if (withinRadius(p.getTile())) {
-                            addUnique(nearbyFull, new EntityEntry(p.getName(), Library.TargetType.PLAYER, "NEARBY"));
+                            addUnique(out, new EntityEntry(p.getName(), Library.TargetType.PLAYER, "NEARBY"));
                         }
                     }
                 }
             }
 
         } catch (Exception ignored) {
-            // Client not running — nearbyFull stays empty, which is fine
+            // Client not running — the list stays empty, which is fine
         }
-
-        setStatus(nearbyFull.size() + " entities nearby");
     }
 
     /** Loads all static Library enum entries into libraryFull. */
@@ -529,10 +557,31 @@ public class JLibraryList extends JPanel {
         });
     }
 
-    /** Forces a fresh nearby scan and refreshes the list if currently in Nearby mode. */
+    /**
+     * Refreshes the Nearby view (Patch B.1): re-filters the CACHED scan immediately - so
+     * switching actions updates the visible list instantly - then kicks a fresh scan on the
+     * background worker; results land on the EDT when ready. Overlapping calls coalesce.
+     */
     public void rescanNearby() {
-        scanNearby();
-        if (currentMode == ViewMode.NEARBY) applyFilter();
+        if (currentMode == ViewMode.NEARBY) applyFilter();   // instant, from cache
+
+        if (!scanInFlight.compareAndSet(false, true))
+            return;                                           // a scan is already running
+
+        scanPool.submit(() -> {
+            final List<EntityEntry> fresh = new ArrayList<>();
+            try {
+                scanInto(fresh);
+            } finally {
+                SwingUtilities.invokeLater(() -> {
+                    nearbyFull.clear();
+                    nearbyFull.addAll(fresh);
+                    setStatus(fresh.size() + " entities nearby");
+                    if (currentMode == ViewMode.NEARBY) applyFilter();
+                    scanInFlight.set(false);
+                });
+            }
+        });
     }
 
     /** Forces a fresh library load and refreshes the list if currently in Library mode. */

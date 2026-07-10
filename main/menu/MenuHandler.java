@@ -31,7 +31,10 @@ public class MenuHandler {
     }
 
     static JButton createIconButton(String symbol, String tooltip, ActionListener action) {
-        JButton btn = new JButton(symbol);
+        JButton btn = new Theme.ThemedButton(symbol);
+            // Patch B.2: a compact border - the default 14px side padding left ~12px for an
+            // 18pt glyph inside a 40px button, so Swing truncated every icon to "…"
+            btn.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
             btn.setPreferredSize(new Dimension(40, 40));
             btn.setFont(new Font("Segoe UI Symbol", Font.BOLD, 18));
             btn.setBackground(new Color(30, 0, 0));
@@ -63,8 +66,9 @@ public class MenuHandler {
         if (btnText.isEmpty())
             throw new IllegalArgumentException("Error creating button! Button text cannot be empty");
 
-        // create button object
-        JButton btn = new JButton(btnText);
+        // create button object (ThemedButton = UI bound per-instance; survives the client's
+        // Substance LAF and script classloader - see Theme, Patch B.1)
+        JButton btn = new Theme.ThemedButton(btnText);
         btn.setFocusPainted(false);
         // Semantic colour (e.g. red Remove, green Add) paints as a FILLED button via the flat UI;
         // a null colour leaves it as a quiet ghost button. (Border/paint handled by Theme.FlatButtonUI.)

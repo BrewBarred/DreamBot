@@ -29,7 +29,14 @@ public final class ProfileCodec {
     public static ActionData toData(Action action) {
         ActionData d = new ActionData();
         d.setType(action.getName());        // simple class name == JActionSelector registry key
-        d.setParams(action.serialize());
+        java.util.Map<String, String> params = action.serialize();
+        // Patch B.4: fold the action's attached watchers into its params centrally, so every
+        // action persists its triggers without each serialize() needing to know about them.
+        if (params != null && !action.getTriggers().isEmpty()) {
+            params = new java.util.LinkedHashMap<>(params);
+            params.put(Action.TRIGGERS_KEY, main.watchers.TriggerCodec.toJson(action.getTriggers()));
+        }
+        d.setParams(params);
         return d;
     }
 
@@ -44,8 +51,16 @@ public final class ProfileCodec {
             return null;
         }
 
-        if (data.getParams() != null)
+        if (data.getParams() != null) {
             action.deserialize(data.getParams());
+            // Patch B.4: restore attached watchers centrally (deserialize() ignores the
+            // reserved __triggers key, so pull it back here).
+            String tj = data.getParams().get(Action.TRIGGERS_KEY);
+            if (tj != null && !tj.isBlank()) {
+                action.getTriggers().clear();
+                action.getTriggers().addAll(main.watchers.TriggerCodec.fromJson(tj));
+            }
+        }
         return action;
     }
 
@@ -73,10 +88,15 @@ public final class ProfileCodec {
 
     public static TaskData toData(DreamBotMenu.Task task) {
         TaskData d = new TaskData();
+        d.id = task.getId();
+        d.createdAt = task.getCreatedAt();
         d.name = task.getName();
         d.description = task.getDescription();
         d.status = task.getStatus();
         d.repeat = task.getRepeat();
+        d.autoDelay = task.isAutoDelay();
+        d.autoDelayMinMs = task.getAutoDelayMinMs();
+        d.autoDelayMaxMs = task.getAutoDelayMaxMs();
         d.actions = actionsToData(task.getActions());
         return d;
     }
@@ -85,7 +105,10 @@ public final class ProfileCodec {
         if (d == null)
             return null;
         DreamBotMenu.Task t = new DreamBotMenu.Task(d.name, d.description, actionsFromData(d.actions), d.status);
+        t.restoreId(d.id);   // Patch B.2: keep the saved identity (no-op for pre-B.2 files)
+        t.restoreCreatedAt(d.createdAt);
         t.setRepeat(d.repeat);
+        t.setAutoDelay(d.autoDelay, d.autoDelayMinMs, d.autoDelayMaxMs);
         return t;
     }
 
