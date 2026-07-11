@@ -388,6 +388,16 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
      * task if it hasn't yet hit its configured repeat count; otherwise resets the counter and
      * asks the menu to advance the queue (which handles whole-queue looping / finishing).
      */
+    /**
+     * Patch B.5: the menu calls this when a PAUSED queue is reordered and the currently-executing
+     * tile changed position. Adopting the new index here (instead of letting the next loop see a
+     * mismatch) preserves actionCursor and taskRunsDone - execution resumes from exactly where it
+     * left off, in the task's new slot, as though it never moved.
+     */
+    public void remapServedIndex(int newIndex) {
+        lastServedIndex = newIndex;
+    }
+
     /** Set by onTaskRunComplete when the queue-level auto-wait is on; onLoop returns it once. */
     private volatile int pendingTaskGapMs = 0;
     /** The action the engine polled last loop - used to reset attempt budgets on entry. */

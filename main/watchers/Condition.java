@@ -25,6 +25,20 @@ public enum Condition {
             try { return Inventory.isFull(); } catch (Throwable t) { return false; }
         }
         @Override public String describe(String arg) { return "inventory full"; }
+        @Override public boolean needsArg() { return false; }   // it's a boolean - no "15"
+    },
+
+    INVENTORY_SLOTS_BELOW("Empty slots below N") {
+        @Override public boolean test(String arg) {
+            try {
+                int occupied = 0;
+                for (Object i : Inventory.all()) if (i != null) occupied++;
+                int empty = 28 - occupied;
+                return empty < parseInt(arg, 0);
+            } catch (Throwable t) { return false; }
+        }
+        @Override public String describe(String arg) { return "empty slots < " + arg; }
+        @Override public String argHint() { return "number of empty slots, e.g. 3"; }
     },
 
     INVENTORY_CONTAINS("Inventory contains item") {
@@ -33,6 +47,7 @@ public enum Condition {
             try { return Inventory.contains(arg.trim()); } catch (Throwable t) { return false; }
         }
         @Override public String describe(String arg) { return "have \"" + arg + "\""; }
+        @Override public String argHint() { return "exact item name, e.g. Lobster"; }
     },
 
     INVENTORY_LACKS("Inventory is missing item") {
@@ -41,6 +56,7 @@ public enum Condition {
             try { return !Inventory.contains(arg.trim()); } catch (Throwable t) { return false; }
         }
         @Override public String describe(String arg) { return "missing \"" + arg + "\""; }
+        @Override public String argHint() { return "exact item name, e.g. Prayer potion(4)"; }
     },
 
     HP_BELOW("HP below (value or %)") {
@@ -50,6 +66,7 @@ public enum Condition {
             return belowThreshold(v, maxLevel(Skill.HITPOINTS), arg);
         }
         @Override public String describe(String arg) { return "HP < " + arg; }
+        @Override public String argHint() { return "absolute (15) or percent of max (40%)"; }
     },
 
     PRAYER_BELOW("Prayer below (value or %)") {
@@ -59,6 +76,7 @@ public enum Condition {
             return belowThreshold(v, maxLevel(Skill.PRAYER), arg);
         }
         @Override public String describe(String arg) { return "Prayer < " + arg; }
+        @Override public String argHint() { return "absolute (10) or percent of max (25%)"; }
     },
 
     RUN_ENERGY_BELOW("Run energy below %") {
@@ -69,6 +87,7 @@ public enum Condition {
             } catch (Throwable t) { return false; }
         }
         @Override public String describe(String arg) { return "run < " + arg + "%"; }
+        @Override public String argHint() { return "percent, e.g. 20"; }
     },
 
     IN_AREA("Inside area (x1,y1,x2,y2[,z])") {
@@ -78,6 +97,7 @@ public enum Condition {
             return a != null && t != null && a.contains(t);
         }
         @Override public String describe(String arg) { return "in area"; }
+        @Override public String argHint() { return "x1,y1,x2,y2 or x1,y1,x2,y2,z"; }
     },
 
     NOT_IN_AREA("Outside area (x1,y1,x2,y2[,z])") {
@@ -88,6 +108,7 @@ public enum Condition {
             return !a.contains(t);
         }
         @Override public String describe(String arg) { return "outside area"; }
+        @Override public String argHint() { return "x1,y1,x2,y2 or x1,y1,x2,y2,z"; }
     },
 
     AT_TILE("On coordinate (x,y[,z])") {
@@ -99,6 +120,7 @@ public enum Condition {
                     && t.getZ() == target.getZ();
         }
         @Override public String describe(String arg) { return "at " + arg; }
+        @Override public String argHint() { return "x,y or x,y,z"; }
     };
 
     private final String label;
@@ -110,6 +132,12 @@ public enum Condition {
     public abstract String describe(String arg);
     /** Menu-facing label. */
     public String label() { return label; }
+
+    /** Whether this condition takes an argument at all (Patch B.5). Booleans return false. */
+    public boolean needsArg() { return true; }
+
+    /** A one-line hint describing what the argument means, shown under the field (B.5). */
+    public String argHint() { return "value"; }
 
     // ── shared helpers ──
 

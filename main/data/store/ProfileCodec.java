@@ -90,6 +90,7 @@ public final class ProfileCodec {
         TaskData d = new TaskData();
         d.id = task.getId();
         d.createdAt = task.getCreatedAt();
+        d.origin = task.getOrigin();
         d.name = task.getName();
         d.description = task.getDescription();
         d.status = task.getStatus();
@@ -107,6 +108,7 @@ public final class ProfileCodec {
         DreamBotMenu.Task t = new DreamBotMenu.Task(d.name, d.description, actionsFromData(d.actions), d.status);
         t.restoreId(d.id);   // Patch B.2: keep the saved identity (no-op for pre-B.2 files)
         t.restoreCreatedAt(d.createdAt);
+        t.setOrigin(d.origin);
         t.setRepeat(d.repeat);
         t.setAutoDelay(d.autoDelay, d.autoDelayMinMs, d.autoDelayMaxMs);
         return t;
@@ -142,6 +144,15 @@ public final class ProfileCodec {
     }
 
     // ---- List-model helpers (convenience for the menu) -------------------------------------
+
+    /** Master-list variant (Patch B.5): captures ALL tasks, filtered-out ones included. */
+    public static List<TaskData> tasksToData(java.util.List<DreamBotMenu.Task> tasks) {
+        List<TaskData> out = new ArrayList<>();
+        if (tasks != null)
+            for (DreamBotMenu.Task t : tasks)
+                if (t != null) out.add(toData(t));
+        return out;
+    }
 
     public static List<TaskData> tasksToData(DefaultListModel<DreamBotMenu.Task> model) {
         List<TaskData> out = new ArrayList<>();

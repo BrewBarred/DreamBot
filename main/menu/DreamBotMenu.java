@@ -74,6 +74,8 @@ public class DreamBotMenu extends JFrame {
         });
     }
     private volatile boolean isMenuPaused;
+    /** The owning script - lets the menu coordinate with the engine (Patch B.5). */
+    private AbstractScript script;
     private final TaskBuilder taskBuilder;
     public final LibraryPanel libraryPanel;
     private static final int PRESET_COLUMNS = 4;
@@ -167,8 +169,62 @@ public class DreamBotMenu extends JFrame {
     private final DefaultListModel<Task> modelTaskList = new DefaultListModel<>();
     private final JList<Task> listTaskList = new JList<>(modelTaskList);
 
+    /**
+     * Patch B.5: the library's single source of truth. {@link #modelTaskLibrary} is only the
+     * filtered/sorted VIEW the JList shows - search and the origin filter rebuild the view from
+     * here, so hiding tasks can never lose them: saves, exports, use-counts, TaskRef resolution
+     * and builder propagation all read THIS list.
+     */
+    final java.util.List<Task> libraryAll = new java.util.ArrayList<>();
     final DefaultListModel<Task> modelTaskLibrary = new DefaultListModel<>();
     private final JList<Task> listTaskLibrary = new JList<>(modelTaskLibrary);
+    private JTextField librarySearchField;
+    /** The Checks tab's editor - reloaded after profile loads so restored checks show (B.5). */
+    private main.menu.components.TriggerEditor checksEditor;
+    private JComboBox<String> libraryFilterCombo;
+
+    /** Adds to the master library and refreshes the view (Patch B.5). */
+    public void libraryAdd(Task t) {
+        if (t == null) return;
+        libraryAll.add(t);
+        refilterLibrary();
+    }
+
+    /** Removes from the master library and refreshes the view. @return removed? */
+    public boolean libraryRemove(Task t) {
+        boolean ok = libraryAll.remove(t);
+        if (ok) refilterLibrary();
+        return ok;
+    }
+
+    /** Replaces the whole master library (profile load / overwrite import). */
+    public void librarySetAll(java.util.List<Task> tasks) {
+        libraryAll.clear();
+        if (tasks != null)
+            for (Task t : tasks)
+                if (t != null) libraryAll.add(t);
+        refilterLibrary();
+    }
+
+    /** Replaces every master entry matching id (or name for legacy) with a copy of updated. */
+    public int libraryPropagate(Task updated, String id, String name) {
+        int touched = 0;
+        for (int i = 0; i < libraryAll.size(); i++) {
+            Task t = libraryAll.get(i);
+            if (t == null) continue;
+            boolean match = (id != null && id.equals(t.getId()))
+                    || (id == null && name != null && name.equalsIgnoreCase(t.getName()));
+            if (match) {
+                Task copy = new Task(updated);
+                copy.setRepeat(t.getRepeat());
+                copy.setOrigin(t.getOrigin());   // editing doesn't change where it came from
+                libraryAll.set(i, copy);
+                touched++;
+            }
+        }
+        if (touched > 0) refilterLibrary();
+        return touched;
+    }
 
     final DefaultListModel<Action> modelTaskBuilder = new DefaultListModel<>();
     private final JList<Action> listTaskBuilder = new JList<>(modelTaskBuilder);
@@ -319,6 +375,7 @@ public class DreamBotMenu extends JFrame {
         // so every tab/button/scrollbar/input picks it up automatically (Patch A).
         Theme.install();
 
+        this.script = script;   // Patch B.5: kept for engine coordination (pause-drag remap)
         this.scriptManager = script.getScriptManager();
         this.isMenuPaused(scriptManager.isPaused());
         this.startTime = System.currentTimeMillis();
@@ -347,7 +404,8 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Task Library", loadTabIcon("task_library_tab"), createTaskLibraryTab());
         mainTabs.addTab("Task Builder", loadTabIcon("task_builder_tab"), taskBuilder);
         mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
-        mainTabs.addTab("Watchers", loadTabIcon("settings_tab"), createWatchersTab());
+        mainTabs.addTab("Checks", loadTabIcon("settings_tab"), createWatchersTab());
+        mainTabs.addTab("Loot Tracker", loadTabIcon("library_tab"), createLootTrackerTab());
         mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
         // Patch B.3: the Developers Console is locked to YOU specifically. It unlocks only if
@@ -962,8 +1020,12 @@ public class DreamBotMenu extends JFrame {
 
             @Override public boolean importData(TransferSupport support) {
                 if (!canImport(support)) return false;
-                if (currentExecutionIndex != -1) {
-                    showToast("Stop the queue before reordering", listTaskList, false);
+                // Patch B.5: reordering is allowed while the script is PAUSED - only a live,
+                // actively-executing queue blocks it. If the currently-executing tile itself is
+                // moved, execution follows it to its new position and resumes from the same
+                // action, as though it never moved.
+                if (currentExecutionIndex != -1 && !isMenuPaused()) {
+                    showToast("Pause or stop before reordering", listTaskList, false);
                     return false;
                 }
                 JList.DropLocation dl = (JList.DropLocation) support.getDropLocation();
@@ -974,6 +1036,24 @@ public class DreamBotMenu extends JFrame {
                 if (to > fromIndex) to--;              // account for the removal shift
                 to = Math.max(0, Math.min(to, modelTaskList.size()));
                 modelTaskList.add(to, moved);
+
+                // remap the execution pointer around the move (paused case)
+                if (currentExecutionIndex != -1) {
+                    int exec = currentExecutionIndex;
+                    int newExec;
+                    if (fromIndex == exec)                     newExec = to;      // moved the live tile
+                    else if (fromIndex < exec && to >= exec)   newExec = exec - 1; // pulled one out from above
+                    else if (fromIndex > exec && to <= exec)   newExec = exec + 1; // pushed one in above
+                    else                                        newExec = exec;    // move was fully below/above
+                    if (newExec != exec) {
+                        setCurrentExecutionIndex(newExec);
+                        // tell the engine its served index moved WITHOUT resetting the action
+                        // cursor - "continue as though it never moved"
+                        if (script instanceof main.scripts.DreamBotMan)
+                            ((main.scripts.DreamBotMan) script).remapServedIndex(newExec);
+                    }
+                }
+
                 listTaskList.setSelectedIndex(to);
                 updateQueueProgress();
                 fromIndex = -1;
@@ -1178,17 +1258,38 @@ public class DreamBotMenu extends JFrame {
 
         librarySortCombo = new JComboBox<>(new String[]{"A-Z", "Newest", "Most used"});
         librarySortCombo.setToolTipText("Sort the library");
-        librarySortCombo.addActionListener(e -> sortLibrary());
+        librarySortCombo.addActionListener(e -> refilterLibrary());
+
+        // Patch B.5: search + origin filter. Both only change the VIEW - hidden tasks remain in
+        // the master list, so saving/exporting while filtered never loses anything.
+        librarySearchField = new JTextField();
+        librarySearchField.setToolTipText("Search by name or description");
+        librarySearchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { refilterLibrary(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { refilterLibrary(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { refilterLibrary(); }
+        });
+        libraryFilterCombo = new JComboBox<>(new String[]{"All", "Built by me", "Imported", "Default"});
+        libraryFilterCombo.setToolTipText("Filter by where tasks came from");
+        libraryFilterCombo.addActionListener(e -> refilterLibrary());
 
         JPanel listSide = new JPanel(new BorderLayout(0, 6));
         listSide.setOpaque(false);
-        JPanel sortRow = new JPanel(new BorderLayout());
-        sortRow.setOpaque(false);
-        JLabel lblSort = new JLabel("Sort: ");
-        lblSort.setForeground(TEXT_DIM);
-        sortRow.add(lblSort, BorderLayout.WEST);
-        sortRow.add(librarySortCombo, BorderLayout.CENTER);
-        listSide.add(sortRow, BorderLayout.NORTH);
+        JPanel header = new JPanel(new BorderLayout(6, 4));
+        header.setOpaque(false);
+        JLabel lblSearch = new JLabel("\uD83D\uDD0D ");
+        lblSearch.setForeground(TEXT_DIM);
+        JPanel searchRow = new JPanel(new BorderLayout(4, 0));
+        searchRow.setOpaque(false);
+        searchRow.add(lblSearch, BorderLayout.WEST);
+        searchRow.add(librarySearchField, BorderLayout.CENTER);
+        JPanel comboRow = new JPanel(new GridLayout(1, 2, 6, 0));
+        comboRow.setOpaque(false);
+        comboRow.add(libraryFilterCombo);
+        comboRow.add(librarySortCombo);
+        header.add(searchRow, BorderLayout.NORTH);
+        header.add(comboRow, BorderLayout.SOUTH);
+        listSide.add(header, BorderLayout.NORTH);
 
         /// CENTER EAST: Edit panel + buttons
         JPanel panelCenterEastLibraryTab = new JPanel(new BorderLayout(0, 10));
@@ -1216,7 +1317,7 @@ public class DreamBotMenu extends JFrame {
         btnTaskLibraryDelete.addActionListener(e -> {
             int selectedIndex = listTaskLibrary.getSelectedIndex();
             if (selectedIndex != -1) {
-                modelTaskLibrary.remove(selectedIndex);
+                libraryRemove(modelTaskLibrary.getElementAt(selectedIndex));
                 this.showToast("Deleted Task!", btnTaskLibraryDelete, true);
             } else {
                 this.showToast("Select an Action to delete!", btnTaskLibraryDelete, false);
@@ -1610,13 +1711,11 @@ public class DreamBotMenu extends JFrame {
     private void computeLibraryUseCounts() {
         java.util.Map<String, Integer> byId = new java.util.HashMap<>();
         java.util.Map<String, String> nameToId = new java.util.HashMap<>();
-        for (int i = 0; i < modelTaskLibrary.size(); i++) {
-            Task t = modelTaskLibrary.get(i);
+        for (Task t : libraryAll)
             if (t != null) nameToId.put(t.getName().toLowerCase(), t.getId());
-        }
         java.util.List<Task> everywhere = new java.util.ArrayList<>();
         for (int i = 0; i < modelTaskList.size(); i++) everywhere.add(modelTaskList.get(i));
-        for (int i = 0; i < modelTaskLibrary.size(); i++) everywhere.add(modelTaskLibrary.get(i));
+        everywhere.addAll(libraryAll);
         for (int i = 0; i < modelPresets.size(); i++) {
             Preset pr = modelPresets.get(i);
             if (pr != null && pr.tasks != null) everywhere.addAll(pr.tasks);
@@ -1636,13 +1735,34 @@ public class DreamBotMenu extends JFrame {
         libraryUseCounts = byId;
     }
 
-    /** Re-sorts the library per the sort combo, keeping the selection. */
-    private void sortLibrary() {
+    /** Legacy alias - the combo/search/filter all funnel into {@link #refilterLibrary()}. */
+    private void sortLibrary() { refilterLibrary(); }
+
+    /**
+     * Rebuilds the library VIEW from the master list (Patch B.5): applies the search text
+     * (name/description contains), the origin filter (All / Built by me / Imported / Default),
+     * then the chosen sort. Hidden tasks stay safely in {@link #libraryAll}.
+     */
+    private void refilterLibrary() {
         computeLibraryUseCounts();
         String mode = librarySortCombo == null ? "A-Z" : (String) librarySortCombo.getSelectedItem();
-        java.util.List<Task> all = new java.util.ArrayList<>();
-        for (int i = 0; i < modelTaskLibrary.size(); i++) all.add(modelTaskLibrary.get(i));
-        Task selected = listTaskLibrary.getSelectedValue();
+        String search = librarySearchField == null ? "" : librarySearchField.getText().trim().toLowerCase();
+        String filter = libraryFilterCombo == null ? "All" : (String) libraryFilterCombo.getSelectedItem();
+
+        java.util.List<Task> view = new java.util.ArrayList<>();
+        for (Task t : libraryAll) {
+            if (t == null) continue;
+            if (!search.isEmpty()) {
+                String hay = (t.getName() + " " + (t.getDescription() == null ? "" : t.getDescription()))
+                        .toLowerCase();
+                if (!hay.contains(search)) continue;
+            }
+            String origin = t.getOrigin();
+            if ("Built by me".equals(filter) && !"user".equals(origin)) continue;
+            if ("Imported".equals(filter) && !"imported".equals(origin)) continue;
+            if ("Default".equals(filter) && !"default".equals(origin)) continue;
+            view.add(t);
+        }
 
         java.util.Comparator<Task> cmp;
         if ("Newest".equals(mode))
@@ -1653,17 +1773,18 @@ public class DreamBotMenu extends JFrame {
                     .thenComparing(Task::getName, String.CASE_INSENSITIVE_ORDER);
         else
             cmp = java.util.Comparator.comparing(Task::getName, String.CASE_INSENSITIVE_ORDER);
-        all.sort(cmp);
+        view.sort(cmp);
 
+        Task selected = listTaskLibrary.getSelectedValue();
         modelTaskLibrary.clear();
-        for (Task t : all) modelTaskLibrary.addElement(t);
+        for (Task t : view) modelTaskLibrary.addElement(t);
         if (selected != null) listTaskLibrary.setSelectedValue(selected, true);
         listTaskLibrary.repaint();
     }
 
     /** Exports the ENTIRE library to one shareable .json file (Patch B.3). */
     private void exportWholeLibrary(JComponent anchor) {
-        if (modelTaskLibrary.isEmpty()) { showToast("Library is empty", anchor, false); return; }
+        if (libraryAll.isEmpty()) { showToast("Library is empty", anchor, false); return; }
         JFileChooser chooser = new JFileChooser();
         chooser.setDialogTitle("Export whole library");
         chooser.setSelectedFile(new java.io.File("DreamMan_library.json"));
@@ -1674,8 +1795,8 @@ public class DreamBotMenu extends JFrame {
 
         LibraryData lib = new LibraryData();
         lib.exportedAt = System.currentTimeMillis();
-        for (int i = 0; i < modelTaskLibrary.size(); i++)
-            lib.tasks.add(ProfileCodec.toData(modelTaskLibrary.get(i)));
+        for (Task t : libraryAll)
+            if (t != null) lib.tasks.add(ProfileCodec.toData(t));
         boolean ok = LocalStore.exportToFile(lib, file);
         showToast(ok ? "Exported " + lib.tasks.size() + " task(s)" : "Export failed", anchor, ok);
     }
@@ -1727,12 +1848,17 @@ public class DreamBotMenu extends JFrame {
                     new Object[]{"Extend (keep mine too)", "Overwrite mine", "Cancel"},
                     "Extend (keep mine too)");
             if (choice == 2 || choice == JOptionPane.CLOSED_OPTION) return;
-            if (choice == 1) modelTaskLibrary.clear();
+            if (choice == 1) libraryAll.clear();
             int added = 0;
             for (TaskData td : lib.tasks) {
                 Task t = ProfileCodec.fromData(td);
-                if (t != null) { modelTaskLibrary.addElement(t); added++; }
+                if (t != null) {
+                    t.setOrigin("imported");   // Patch B.5: drives the origin filter
+                    libraryAll.add(t);
+                    added++;
+                }
             }
+            refilterLibrary();
             refreshTaskLibrary();
             sortLibrary();
             showToast((choice == 1 ? "Library replaced: " : "Library extended: +") + added + " task(s)",
@@ -1747,7 +1873,8 @@ public class DreamBotMenu extends JFrame {
             return;
         }
 
-        modelTaskLibrary.addElement(task);
+        task.setOrigin("imported");
+        libraryAdd(task);
         refreshTaskLibrary();
         showToast("Imported " + task.getName(), anchor, true);
     }
@@ -1778,33 +1905,42 @@ public class DreamBotMenu extends JFrame {
      * builder's Watchers… button instead.
      */
     private JPanel createWatchersTab() {
+        // Patch B.5 redesign: the old layout was one chunky card per watcher inside a split
+        // pane you had to drag before anything was visible. Now the tab is full-width (the loot
+        // readout moved to its own Loot Tracker tab): a compact LIST of checks on the left, one
+        // line each, and a clear DETAIL editor for the selected check on the right. Renamed
+        // user-facing to "Checks".
         JPanel panel = new JPanel(new BorderLayout(12, 12));
         panel.setBorder(new EmptyBorder(15, 15, 15, 15));
         panel.setBackground(BG_BASE);
 
-        JLabel blurb = new JLabel("<html>Always-on checks, evaluated between actions while the "
-                + "player is safe. Each watcher runs its response chain when its condition trips."
-                + "<br>For checks tied to one action (e.g. bank instead of loot when full), "
-                + "use the <b>Watchers…</b> button in the Task Builder.</html>");
+        JLabel blurb = new JLabel("<html>Checks run automatically between actions - several at "
+                + "once when needed (run away <i>and</i> eat). Pick one on the left to edit it. "
+                + "Checks tied to a single action live on the <b>Checks…</b> button in the Task "
+                + "Builder.</html>");
         blurb.setForeground(TEXT_DIM);
         blurb.setBorder(new EmptyBorder(0, 0, 8, 0));
 
-        main.menu.components.TriggerEditor editor = new main.menu.components.TriggerEditor(
+        checksEditor = new main.menu.components.TriggerEditor(
                 globalTriggers, false, this::pickResponseAction);
+        main.menu.components.TriggerEditor editor = checksEditor;
 
-        panel.add(createSubtitle("Watchers"), BorderLayout.NORTH);
+        panel.add(createSubtitle("Checks"), BorderLayout.NORTH);
         JPanel body = new JPanel(new BorderLayout(0, 8));
         body.setOpaque(false);
         body.add(blurb, BorderLayout.NORTH);
-
-        // left: the trigger editor · right: the learned loot-table readout (Patch B.4)
-        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, editor, buildLootTablePanel());
-        split.setResizeWeight(0.62);
-        split.setOpaque(false);
-        split.setBorder(null);
-        body.add(split, BorderLayout.CENTER);
-
+        body.add(editor, BorderLayout.CENTER);
         panel.add(body, BorderLayout.CENTER);
+        return panel;
+    }
+
+    /** The Loot Tracker's own tab (Patch B.5) - kill counts and learned drop tables. */
+    private JPanel createLootTrackerTab() {
+        JPanel panel = new JPanel(new BorderLayout(12, 12));
+        panel.setBorder(new EmptyBorder(15, 15, 15, 15));
+        panel.setBackground(BG_BASE);
+        panel.add(createSubtitle("Loot Tracker"), BorderLayout.NORTH);
+        panel.add(buildLootTablePanel(), BorderLayout.CENTER);
         return panel;
     }
 
@@ -1904,11 +2040,26 @@ public class DreamBotMenu extends JFrame {
 
     private Action pickResponseAction() {
         main.menu.components.JActionSelector sel = new main.menu.components.JActionSelector();
-        int r = JOptionPane.showConfirmDialog(this, sel, "Add response action",
+        // Patch B.5: checks can respond with library TASKS too - populate the picker with the
+        // same gold task entries the builder's dropdown gets.
+        sel.setLibraryTasks(buildLibraryEntries());
+        int r = JOptionPane.showConfirmDialog(this, sel, "Add response (action or library task)",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (r != JOptionPane.OK_OPTION) return null;
         Action a = sel.getSelectedAction();
         return a == null ? null : a.copy();
+    }
+
+    /** Bound TaskRef entries for every library task (shared by all selector instances, B.5). */
+    private java.util.List<main.actions.TaskRef> buildLibraryEntries() {
+        java.util.List<main.actions.TaskRef> entries = new java.util.ArrayList<>();
+        for (Task t : libraryAll) {           // master: filtered-out tasks stay selectable
+            if (t == null) continue;
+            main.actions.TaskRef ref = new main.actions.TaskRef();
+            ref.bind(t.getName(), t.getId());
+            entries.add(ref);
+        }
+        return entries;
     }
 
     private JPanel createStatusTab() {
@@ -2033,6 +2184,8 @@ public class DreamBotMenu extends JFrame {
         private String id = java.util.UUID.randomUUID().toString();
         /** When this logical task was first created (Patch B.3) - drives "Newest" sorting. */
         private long createdAt = System.currentTimeMillis();
+        /** Where this task came from (Patch B.5): "user" (built here), "imported", "default". */
+        private String origin = "user";
         private String name;
         private String description;
         private String status;
@@ -2054,6 +2207,7 @@ public class DreamBotMenu extends JFrame {
         public Task(Task o) {
             this.id = o.id;
             this.createdAt = o.createdAt;
+            this.origin = o.origin;
             this.name = o.name;
             this.description = o.description;
             this.status = o.status;
@@ -2083,6 +2237,10 @@ public class DreamBotMenu extends JFrame {
 
         /** When this task was created (0 for pre-B.3 saves). */
         public long getCreatedAt() { return createdAt; }
+
+        /** "user" | "imported" | "default" (Patch B.5) - drives the library filter. */
+        public String getOrigin() { return origin == null || origin.isEmpty() ? "user" : origin; }
+        public void setOrigin(String o) { if (o != null && !o.isEmpty()) this.origin = o; }
         /** Persistence only. */
         public void restoreCreatedAt(long t) { if (t > 0) this.createdAt = t; }
 
@@ -2377,6 +2535,7 @@ public class DreamBotMenu extends JFrame {
 
         // Start from a clean slate so a character doesn't inherit another profile's rows.
         modelTaskList.clear();
+        libraryAll.clear();          // Patch B.5: master first; the view refilters below
         modelTaskLibrary.clear();
         modelPresets.clear();
 
@@ -2390,8 +2549,9 @@ public class DreamBotMenu extends JFrame {
             if (data.library != null)
                 for (TaskData td : data.library) {
                     Task task = ProfileCodec.fromData(td);
-                    if (task != null) modelTaskLibrary.addElement(task);
+                    if (task != null) libraryAll.add(task);
                 }
+            refilterLibrary();
 
             if (data.presets != null)
                 for (PresetData pd : data.presets) {
@@ -2420,7 +2580,7 @@ public class DreamBotMenu extends JFrame {
             applySettings(data.settings);
             Logger.log(Logger.LogType.INFO, "Profile applied: "
                     + modelTaskList.size() + " queued, "
-                    + modelTaskLibrary.size() + " in library, "
+                    + libraryAll.size() + " in library, "
                     + modelPresets.size() + " presets.");
         } else {
             Logger.log(Logger.LogType.INFO, "No saved profile - starting with an empty workspace.");
@@ -2434,6 +2594,7 @@ public class DreamBotMenu extends JFrame {
         globalTriggers.clear();
         if (data != null && data.globalTriggers != null && !data.globalTriggers.isBlank())
             globalTriggers.addAll(main.watchers.TriggerCodec.fromJson(data.globalTriggers));
+        if (checksEditor != null) checksEditor.reload();   // B.5: the UI list must follow
 
         // Patch B.3: restore per-skill XP goals
         if (data != null && data.skillGoals != null)
@@ -2557,14 +2718,9 @@ public class DreamBotMenu extends JFrame {
                 if (fetchedTasks != null) {
                     // 3. Update the UI on the Swing thread
                     SwingUtilities.invokeLater(() -> {
-                        modelTaskLibrary.clear();
-                        for (Task task : fetchedTasks.values()) {
-                            // Because GSON uses the Task constructor, these are
-                            // now real objects with executable action lists.
-                            modelTaskLibrary.addElement(task);
-                        }
+                        librarySetAll(new java.util.ArrayList<>(fetchedTasks.values()));
                         refreshTaskLibrary();
-                        Logger.log("Successfully unpacked " + modelTaskLibrary.size() + " tasks into Task Library");
+                        Logger.log("Successfully unpacked " + libraryAll.size() + " tasks into Task Library");
                     });
                 }
             }
@@ -2792,27 +2948,19 @@ public class DreamBotMenu extends JFrame {
      * @param flashColor The color to flash (e.g., new Color(100, 0, 0) for red).
      */
     private void flashControl(JComponent component, Color flashColor) {
-        if (component.getBackground().equals(flashColor))
-            return;
-
-        // Only capture the restore color if we aren't already flashing
-        final Color restoreColor = component.getClientProperty("originalColor") != null
-                ? (Color) component.getClientProperty("originalColor")
-                : component.getBackground();
-
-        // Store the original color on first flash only
-        component.putClientProperty("originalColor", restoreColor);
-
-        component.setBackground(flashColor);
-        component.setOpaque(true);
+        // Patch B.5 fix: FlatButtonUI paints from the "fillColor" client property, NOT from
+        // setBackground(). The old code set an opaque background the UI ignored, so the raw
+        // component background showed through and STAYED after the flash - the "arrows change
+        // colour and stick" bug. Flash the property the UI reads, then clear it to restore the
+        // button's normal look exactly.
+        if (component == null) return;
+        component.putClientProperty("fillColor", flashColor);
         component.repaint();
 
         Timer revertTimer = new Timer(TIME_FLASH, e -> {
-            component.setBackground(restoreColor);
-            component.putClientProperty("originalColor", null); // Clear it after revert
+            component.putClientProperty("fillColor", null);
             component.repaint();
         });
-
         revertTimer.setRepeats(false);
         revertTimer.start();
     }
@@ -2952,29 +3100,16 @@ public class DreamBotMenu extends JFrame {
     /** Rebuilds the action dropdown's "library tasks" group from the current library (B.3). */
     private void syncSelectorLibraryEntries() {
         if (actionSelector == null) return;
-        java.util.List<main.actions.TaskRef> entries = new java.util.ArrayList<>();
-        for (int i = 0; i < modelTaskLibrary.size(); i++) {
-            Task t = modelTaskLibrary.get(i);
-            if (t == null) continue;
-            main.actions.TaskRef ref = new main.actions.TaskRef();
-            ref.bind(t.getName(), t.getId());
-            entries.add(ref);
-        }
-        actionSelector.setLibraryTasks(entries);
+        actionSelector.setLibraryTasks(buildLibraryEntries());
     }
 
     /** Resolves a library task by id first, then by name (case-insensitive). Null if absent. */
     public Task findLibraryTask(String id, String name) {
-        for (int i = 0; i < modelTaskLibrary.size(); i++) {
-            Task t = modelTaskLibrary.get(i);
+        for (Task t : libraryAll)
             if (t != null && id != null && id.equals(t.getId())) return t;
-        }
-        if (name != null && !name.isEmpty()) {
-            for (int i = 0; i < modelTaskLibrary.size(); i++) {
-                Task t = modelTaskLibrary.get(i);
+        if (name != null && !name.isEmpty())
+            for (Task t : libraryAll)
                 if (t != null && name.equalsIgnoreCase(t.getName())) return t;
-            }
-        }
         return null;
     }
 
@@ -2991,7 +3126,7 @@ public class DreamBotMenu extends JFrame {
     public void resume(String status) {
         if (isMenuPaused()) {
             // Swing components may only be touched on the EDT (this is called from the script thread too)
-            SwingUtilities.invokeLater(() -> btnPlayPause.setText("▮▮"));
+            SwingUtilities.invokeLater(() -> btnPlayPause.setText("\u23F8"));  // ⏸ single glyph
             setStatus(status);
             ///  MUST SET MENU STATE BEFORE SCRIPT STATE TO PREVENT INFINITE LOOPS
             isMenuPaused(false);
@@ -3300,7 +3435,7 @@ public class DreamBotMenu extends JFrame {
             // keep the play/pause button icon in sync with the actual paused state
             // (so pausing from the in-game overlay flips the Swing button too)
             if (btnPlayPause != null)
-                btnPlayPause.setText(isMenuPaused() ? "▶" : "▮▮");
+                btnPlayPause.setText(isMenuPaused() ? "\u25B6" : "\u23F8");
 
             // update keyboard/mouse inputs as mock listeners. This will keep UI in sync at least every 1 second
             setMouseInput(getMouseInput());
@@ -3590,7 +3725,9 @@ public class DreamBotMenu extends JFrame {
         gbc.weightx = 1.0; gbc.gridx = 0;
         JPanel top = new JPanel(new BorderLayout());
         top.setOpaque(false);
-        JLabel icon = new JLabel(loadSkillIcon(data.getSkill()));
+        ImageIcon skillIcon = loadSkillIcon(data.getSkill());
+        data.setIcon(skillIcon);   // Patch B.5: the overlay draws the same icon
+        JLabel icon = new JLabel(skillIcon);
         data.getLabelLevel().setForeground(COLOR_BLOOD);
         data.getLabelLevel().setFont(new Font("Arial", Font.BOLD, 18));
         top.add(icon, BorderLayout.WEST);
@@ -3816,7 +3953,9 @@ public class DreamBotMenu extends JFrame {
         data.queueAutoWaitMinMs = queueAutoWaitMinMs;
         data.queueAutoWaitMaxMs = queueAutoWaitMaxMs;
         data.taskList = ProfileCodec.tasksToData(modelTaskList);
-        data.library = ProfileCodec.tasksToData(modelTaskLibrary);
+        // Patch B.5: capture from the MASTER list - an active search/filter must never cause
+        // hidden tasks to be dropped from the save.
+        data.library = ProfileCodec.tasksToData(libraryAll);
         data.presets = ProfileCodec.presetsToData(modelPresets);
 
         BuilderData bd = new BuilderData();

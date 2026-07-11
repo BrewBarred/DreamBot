@@ -19,6 +19,9 @@ public class TaskData {
 
     /** Patch B.3: creation time (epoch ms); 0 in older saves. */
     public long createdAt;
+
+    /** Patch B.5: "user" | "imported" | "default"; null in older saves (treated as user). */
+    public String origin;
     public String name;
     public String description;
     public String status;

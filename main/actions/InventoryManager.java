@@ -97,7 +97,9 @@ public class InventoryManager extends Action {
                 if (it == null) continue;
 
                 long now = System.currentTimeMillis();
-                if (ActionUtil.isIdle() && now - lastActAt > 700) {
+                // Patch B.5: as a check response (emergency) the idle gate is skipped - you CAN
+                // eat while running; that's exactly what an "HP low" check needs.
+                if ((isEmergency() || ActionUtil.isIdle()) && now - lastActAt > 700) {
                     lastActAt = now;
                     if (!applyOnce(r.verb, it)) noteAttempt();
                 }

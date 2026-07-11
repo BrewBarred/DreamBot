@@ -35,6 +35,22 @@ public class SkillData {
     // Patch B.3: absolute current xp + a per-skill XP goal (0 = none). Set via right-click on
     // the tracker tile; persisted with the profile; shown as a progress bar in tracker + overlay.
     private volatile int lastXp, goalXp;
+    // Patch B.5: numbers the on-canvas overlay v2 renders directly (updated in update()).
+    private volatile double lastLevelFrac;      // 0..1 within the current level
+    private volatile int lastRemainingXp;       // xp to next level
+    private volatile double lastTtlHours = -1;  // time to level (-1 = unknown)
+    private volatile int goalRemaining;         // xp to goal (0 when no goal)
+    private volatile double goalTtlHours = -1;  // time to goal (-1 = unknown)
+    /** The same icon the menu's tracker tile shows - drawn on the overlay too (Patch B.5). */
+    private transient javax.swing.ImageIcon icon;
+
+    public void setIcon(javax.swing.ImageIcon i) { this.icon = i; }
+    public java.awt.Image getIconImage() { return icon == null ? null : icon.getImage(); }
+    public double getLevelFraction() { return lastLevelFrac; }
+    public int getRemainingXp() { return lastRemainingXp; }
+    public double getTtlHours() { return lastTtlHours; }
+    public int getGoalRemainingXp() { return goalRemaining; }
+    public double getGoalTtlHours() { return goalTtlHours; }
 
     final JLabel lblGoal = new JLabel();
     final JProgressBar goalBar = new JProgressBar(0, 1000) {
@@ -132,6 +148,9 @@ public class SkillData {
         lastGainedXp = Math.max(0, curXp - startXP);
         lastXpPerHour = xph;
         int rem = Math.max(0, curMax - curXp);
+        lastLevelFrac = Math.max(0, Math.min(1, (double) (curXp - curMin) / Math.max(1, curMax - curMin)));
+        lastRemainingXp = rem;
+        lastTtlHours = xph > 0 ? (double) rem / xph : -1;
         lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP));
         lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph));
         lblRemaining.setText(" TO LEVEL: " + String.format("%,d", rem));
@@ -148,6 +167,11 @@ public class SkillData {
             double f = getGoalFraction();
             lblGoal.setText(String.format(" GOAL: %,d XP \u2014 %.1f%%", goalXp, f * 100));
             goalBar.setValue((int) (f * 1000));
+            goalRemaining = Math.max(0, goalXp - curXp);
+            goalTtlHours = lastXpPerHour > 0 ? (double) goalRemaining / lastXpPerHour : -1;
+        } else {
+            goalRemaining = 0;
+            goalTtlHours = -1;
         }
     }
 }

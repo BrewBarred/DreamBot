@@ -57,6 +57,15 @@ public abstract class Action {
     public static final String TRIGGERS_KEY = "__triggers";
 
     /**
+     * Patch B.5: set while this action runs as a CHECK response. Emergency actions may act even
+     * when the player isn't idle (e.g. eat while running away) - the whole point of a check like
+     * "HP low" is that it can't wait for the current movement to finish.
+     */
+    private transient boolean emergency = false;
+    public final void setEmergency(boolean e) { this.emergency = e; }
+    public final boolean isEmergency() { return emergency; }
+
+    /**
      * Folds attached triggers into a params map (call at the end of serialize()). Kept separate
      * so subclasses opt in explicitly; the engine and codec also handle it centrally.
      */

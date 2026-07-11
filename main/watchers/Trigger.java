@@ -89,6 +89,7 @@ public class Trigger {
         if (a == null) { cursor++; return false; }
         if (a != lastStepped) { a.resetAttempts(); lastStepped = a; }
 
+        a.setEmergency(true);   // Patch B.5: responses may act mid-run (eat while fleeing)
         if (a.execute()) {
             a.resetAttempts();
             cursor++;

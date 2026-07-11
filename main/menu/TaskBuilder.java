@@ -35,7 +35,9 @@ public class TaskBuilder extends JPanel {
     private JButton btnWatchers;
 
     // ── Injected dependencies ─────────────────────────────────────────────────
-    private final DefaultListModel<DreamBotMenu.Task> modelTaskLibrary;
+    // Patch B.5: the raw library model is no longer touched here - the menu owns a MASTER list
+    // (libraryAll) and all builder mutations route through its helpers, so an active search or
+    // filter can never make the builder miss (or lose) hidden tasks.
     private final DefaultListModel<Action> modelTaskBuilder;
     private final JActionSelector actionSelector;
 
@@ -79,7 +81,7 @@ public class TaskBuilder extends JPanel {
         this.actionSelector   = botMenu.actionSelector;
 
         this.modelTaskBuilder = botMenu.modelTaskBuilder;
-        this.modelTaskLibrary = botMenu.modelTaskLibrary;
+
         this.listTaskBuilder = new JList<>(modelTaskBuilder);
         this.listLibrary = new JLibraryList();
 
@@ -290,7 +292,7 @@ public class TaskBuilder extends JPanel {
                 action.getTriggers(), true, botMenu::pickResponseActionPublic);
         editor.setPreferredSize(new Dimension(460, 380));
         JOptionPane.showMessageDialog(this, editor,
-                "Watchers for " + action.getName(), JOptionPane.PLAIN_MESSAGE);
+                "Checks for " + action.getName(), JOptionPane.PLAIN_MESSAGE);
         refreshList();   // build-string previews may now show attached-watcher counts
     }
 
@@ -368,11 +370,12 @@ public class TaskBuilder extends JPanel {
         // Patch B.4: per-action watchers - attach conditional checks to the SELECTED action in
         // the chain (e.g. Loot carries "if inventory full -> bank instead"). Distinct from the
         // always-on Watchers tab.
-        btnWatchers = createButton("Watchers\u2026", new Color(70, 55, 20), null);
+        btnWatchers = createButton("Checks\u2026", new Color(70, 55, 20), null);
         btnWatchers.setEnabled(false);
         btnWatchers.addActionListener(e -> {
             int idx = listTaskBuilder.getSelectedIndex();
             if (idx < 0) { toast("Select an action first", btnWatchers, false); return; }
+            // (user-facing name is "Checks"; internals keep the Trigger/Watcher class names)
             openActionWatchers(modelTaskBuilder.getElementAt(idx));
         });
 
@@ -550,7 +553,7 @@ public class TaskBuilder extends JPanel {
             task.restoreId(editingTaskId);
             int touched = propagate(task, editingTaskId, editingTaskName);
             if (touched == 0) {
-                modelTaskLibrary.addElement(task);   // original was deleted meanwhile - re-add
+                botMenu.libraryAdd(task);   // original was deleted meanwhile - re-add
                 touched = 1;
             }
             toast("Saved - updated " + touched + " place(s)", btnAddToLibrary, true);
@@ -559,16 +562,10 @@ public class TaskBuilder extends JPanel {
             return;
         }
 
-        boolean exists = false;
-        for (int i = 0; i < modelTaskLibrary.getSize(); i++) {
-            if (modelTaskLibrary.getElementAt(i).getName().equalsIgnoreCase(task.getName())) {
-                exists = true;
-                break;
-            }
-        }
+        boolean exists = botMenu.findLibraryTask(null, task.getName()) != null;
 
         if (!exists) {
-            modelTaskLibrary.addElement(task);
+            botMenu.libraryAdd(task);
             toast("Added to library!", btnAddToLibrary, true);
             reset();
             botMenu.refreshLibraryFromBuilder();
@@ -582,10 +579,8 @@ public class TaskBuilder extends JPanel {
             );
             if (choice == JOptionPane.YES_OPTION) {
                 // adopt the existing task's identity so queue copies update too
-                String existingId = null;
-                for (int i = 0; i < modelTaskLibrary.getSize(); i++)
-                    if (modelTaskLibrary.getElementAt(i).getName().equalsIgnoreCase(task.getName()))
-                        existingId = modelTaskLibrary.getElementAt(i).getId();
+                DreamBotMenu.Task existing = botMenu.findLibraryTask(null, task.getName());
+                String existingId = existing != null ? existing.getId() : null;
                 if (existingId != null) task.restoreId(existingId);
                 int touched = propagate(task, existingId, task.getName());
                 toast("Task updated in " + Math.max(1, touched) + " place(s)!", btnAddToLibrary, true);
@@ -604,7 +599,8 @@ public class TaskBuilder extends JPanel {
      */
     private int propagate(DreamBotMenu.Task updated, String id, String name) {
         int touched = 0;
-        touched += propagateInto(modelTaskLibrary, updated, id, name);
+        // library side goes through the MASTER list (filtered-out instances update too)
+        touched += botMenu.libraryPropagate(updated, id, name);
         try {
             touched += propagateInto(botMenu.getModelTaskList(), updated, id, name);
         } catch (Throwable ignored) {}
@@ -622,6 +618,7 @@ public class TaskBuilder extends JPanel {
             if (match) {
                 DreamBotMenu.Task copy = new DreamBotMenu.Task(updated);  // copy keeps the id
                 copy.setRepeat(t.getRepeat());   // per-instance repeat is queue state, not content
+                copy.setOrigin(t.getOrigin());   // provenance survives edits (Patch B.5)
                 model.set(i, copy);
                 touched++;
             }

@@ -222,21 +222,23 @@ public final class Overlay {
         return y + h;
     }
 
-    // ── Tracked-skill overlay cards (Patch B.3 rework) ───────────────────────
-    private static final int SKILL_W = 170, SKILL_GAP = 5;
-    private static final int CARD_H = 58, CARD_GOAL_H = 74, CHIP_W = 84, CHIP_H = 22;
+    // ── Tracked-skill overlay cards (Patch B.5: v2 with icons, bars & ETAs) ──
+    private static final int SKILL_W = 176, SKILL_GAP = 5;
+    private static final int CHIP_W = 118, CHIP_H = 22;
     /** Fixed-mode fallback when the canvas size can't be read from the Graphics clip. */
     private static final int FALLBACK_BOTTOM = 332;
     /** Above this many tracked skills, cards auto-shrink to compact chips. */
     private static final int CHIP_THRESHOLD = 10;
 
     /**
-     * Tracked-skill cards, stacked DOWN the left side of the screen (Patch B.3). The column
-     * height comes from the live canvas (so resizable clients use the full height instead of
-     * wrapping into a grid across the top); a second column only starts when the first truly
-     * runs out of room. More than {@value CHIP_THRESHOLD} tracked skills auto-shrink to compact
-     * chips. Every card/chip TITLE is the minimize/restore control - gold and underlined like
-     * the main overlay's - and goals render as a progress bar (kept even in compact mode).
+     * Tracked-skill overlays v2 (Patch B.5). Each EXPANDED card is one mini canvas: the same
+     * skill icon the menu uses, the login→current level, a progress bar to the next level with
+     * time-to-level and remaining XP - and, when a goal is set (right-click the tracker tile),
+     * a second bar with time-to-goal and remaining-to-goal. MINIMIZED is the simple 3-component
+     * overlay: icon + progress bar (goal if set, else level) + floating "+xp gained" text.
+     * Click a card's title to collapse it; click a chip to expand it. Columns stack down the
+     * left and use the live canvas height; above {@value CHIP_THRESHOLD} tracked skills,
+     * everything defaults to chips.
      */
     public static void renderSkills(Graphics g, DreamBotMenu menu, int startY) {
         if (!visible || menu == null || !(g instanceof Graphics2D)) return;
@@ -255,15 +257,16 @@ public final class Overlay {
 
         boolean chipDefault = tracked.size() > CHIP_THRESHOLD;
         int cx = x, cy = Math.max(startY, y);
+        Font fName = new Font("Segoe UI", Font.BOLD, 12);
+        Font fBody = new Font("Consolas", Font.PLAIN, 10);
 
         for (main.menu.skills.SkillData sd : tracked) {
             if (sd == null) continue;
             String name = sd.getSkill() != null ? sd.getSkill().name() : "?";
-            // SKILL_MIN overrides the default: users can expand a chip or collapse a card.
             Boolean override = SKILL_MIN.get(name);
             boolean compact = override != null ? override : chipDefault;
             boolean hasGoal = sd.getGoalXp() > 0;
-            int h = compact ? CHIP_H : (hasGoal ? CARD_GOAL_H : CARD_H);
+            int h = compact ? CHIP_H : (hasGoal ? 92 : 66);
             int w = compact ? CHIP_W : SKILL_W;
 
             if (cy + h > colBottom) {           // out of vertical room -> next column
@@ -278,63 +281,82 @@ public final class Overlay {
             g2.drawRoundRect(cx, cy, w, h, 10, 10);
 
             final String key = name;
-            final boolean nowCompact = compact;
             Rectangle box = new Rectangle(cx, cy, w, h);
+            Image icon = sd.getIconImage();
 
             if (compact) {
-                // chip: "ATK 38>40" (or level) + the goal strip along the bottom
-                g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
-                String abbrev = name.length() > 3 ? name.substring(0, 3) : name;
-                String lvl = sd.getCurrentLevel() > sd.getStartLevel()
-                        ? sd.getStartLevel() + "→" + sd.getCurrentLevel()
-                        : String.valueOf(sd.getCurrentLevel());
-                clickableTitle(g2, abbrev + " " + lvl, cx + 7, cy + 13, box);
-                if (hasGoal) {
-                    double f = sd.getGoalFraction();
-                    g2.setColor(new Color(60, 60, 60));
-                    g2.fillRoundRect(cx + 5, cy + h - 5, w - 10, 3, 3, 3);
-                    g2.setColor(ACCENT);
-                    g2.fillRoundRect(cx + 5, cy + h - 5, (int) ((w - 10) * f), 3, 3, 3);
-                }
-                hit(box, () -> SKILL_MIN.put(key, !nowCompact ? Boolean.TRUE : Boolean.FALSE));
+                // ── the simple 3-component overlay: icon + bar + floating "+xp" ──
+                if (icon != null)
+                    g2.drawImage(icon, cx + 4, cy + 3, 16, 16, null);
+                double f = hasGoal ? sd.getGoalFraction() : sd.getLevelFraction();
+                int barX = cx + 24, barW = 48;
+                g2.setColor(new Color(60, 60, 60));
+                g2.fillRoundRect(barX, cy + 9, barW, 5, 4, 4);
+                g2.setColor(hasGoal ? ACCENT : VALUE);
+                g2.fillRoundRect(barX, cy + 9, (int) (barW * clamp01(f)), 5, 4, 4);
+                g2.setFont(fBody);
+                g2.setColor(ACCENT);
+                g2.drawString("+" + fmt(sd.getGainedXp()), barX + barW + 6, cy + 15);
+                hit(box, () -> SKILL_MIN.put(key, Boolean.FALSE));   // click chip -> expand
             } else {
-                // full card: clickable skill-name title, login->current level, xp, xp/hr, goal
-                g2.setFont(new Font("Segoe UI", Font.BOLD, 12));
-                Rectangle titleRect = new Rectangle(cx + 6, cy + 3,
+                // ── expanded mini canvas ──
+                if (icon != null)
+                    g2.drawImage(icon, cx + 6, cy + 4, 18, 18, null);
+                g2.setFont(fName);
+                Rectangle titleRect = new Rectangle(cx + 26, cy + 3,
                         g2.getFontMetrics().stringWidth(name) + 10, 16);
-                clickableTitle(g2, name, cx + 9, cy + 15, titleRect);
-                hit(titleRect, () -> SKILL_MIN.put(key, Boolean.TRUE));
+                clickableTitle(g2, name, cx + 28, cy + 16, titleRect);
+                hit(titleRect, () -> SKILL_MIN.put(key, Boolean.TRUE)); // title -> collapse
 
-                g2.setFont(new Font("Consolas", Font.PLAIN, 11));
+                g2.setFont(fBody);
                 g2.setColor(ACCENT);
                 String lvl = sd.getCurrentLevel() > sd.getStartLevel()
                         ? "Lvl " + sd.getStartLevel() + "→" + sd.getCurrentLevel()
                         : "Lvl " + sd.getCurrentLevel();
                 int lw = g2.getFontMetrics().stringWidth(lvl);
-                g2.drawString(lvl, cx + SKILL_W - 9 - lw, cy + 15);
+                g2.drawString(lvl, cx + w - 8 - lw, cy + 15);
 
+                // level progress bar + "to level" stats
+                int barX = cx + 8, barW = w - 16;
+                g2.setColor(new Color(60, 60, 60));
+                g2.fillRoundRect(barX, cy + 26, barW, 5, 4, 4);
                 g2.setColor(VALUE);
-                g2.drawString("XP  +" + fmt(sd.getGainedXp()), cx + 9, cy + 32);
+                g2.fillRoundRect(barX, cy + 26, (int) (barW * clamp01(sd.getLevelFraction())), 5, 4, 4);
                 g2.setColor(LABEL);
-                g2.drawString(fmt(sd.getXpPerHour()) + " xp/hr", cx + 9, cy + 47);
+                g2.drawString("To lvl " + fmt(sd.getRemainingXp()) + " · " + fmtH(sd.getTtlHours()),
+                        barX, cy + 44);
+                g2.setColor(TITLE);
+                String gained = "+" + fmt(sd.getGainedXp());
+                g2.drawString(gained, cx + w - 8 - g2.getFontMetrics().stringWidth(gained), cy + 44);
 
+                // goal bar + "to goal" stats (only when set)
                 if (hasGoal) {
-                    double f = sd.getGoalFraction();
-                    g2.setColor(LABEL);
-                    g2.setFont(new Font("Consolas", Font.PLAIN, 10));
-                    String pct = String.format("%.0f%%", f * 100);
-                    g2.drawString("Goal " + fmt(sd.getGoalXp()), cx + 9, cy + 61);
-                    g2.drawString(pct, cx + SKILL_W - 9 - g2.getFontMetrics().stringWidth(pct), cy + 61);
                     g2.setColor(new Color(60, 60, 60));
-                    g2.fillRoundRect(cx + 9, cy + 65, SKILL_W - 18, 4, 4, 4);
+                    g2.fillRoundRect(barX, cy + 54, barW, 5, 4, 4);
                     g2.setColor(ACCENT);
-                    g2.fillRoundRect(cx + 9, cy + 65, (int) ((SKILL_W - 18) * f), 4, 4, 4);
+                    g2.fillRoundRect(barX, cy + 54, (int) (barW * clamp01(sd.getGoalFraction())), 5, 4, 4);
+                    g2.setColor(LABEL);
+                    g2.drawString("To goal " + fmt(sd.getGoalRemainingXp()) + " · "
+                            + fmtH(sd.getGoalTtlHours()), barX, cy + 72);
+                    g2.setColor(ACCENT);
+                    String pct = String.format("%.0f%%", sd.getGoalFraction() * 100);
+                    g2.drawString(pct, cx + w - 8 - g2.getFontMetrics().stringWidth(pct), cy + 72);
                 }
             }
 
             cy += h + SKILL_GAP;
         }
         g2.dispose();
+    }
+
+    private static double clamp01(double v) { return Math.max(0, Math.min(1, v)); }
+
+    /** "0.8h", "12h", ">99h", or "-" when the rate is unknown. */
+    private static String fmtH(double hours) {
+        if (hours < 0) return "-";
+        if (hours > 99) return ">99h";
+        if (hours >= 10) return String.format("%.0fh", hours);
+        return String.format("%.1fh", hours);
     }
 
     private static String fmt(int n) {
