@@ -266,7 +266,7 @@ public final class Overlay {
             Boolean override = SKILL_MIN.get(name);
             boolean compact = override != null ? override : chipDefault;
             boolean hasGoal = sd.getGoalXp() > 0;
-            int h = compact ? CHIP_H : (hasGoal ? 92 : 66);
+            int h = compact ? CHIP_H : (hasGoal ? 108 : 82);
             int w = compact ? CHIP_W : SKILL_W;
 
             if (cy + h > colBottom) {           // out of vertical room -> next column
@@ -329,18 +329,22 @@ public final class Overlay {
                 String gained = "+" + fmt(sd.getGainedXp());
                 g2.drawString(gained, cx + w - 8 - g2.getFontMetrics().stringWidth(gained), cy + 44);
 
+                // Patch B.6: xp/hour on the overlay too (matches the tracker tab)
+                g2.setColor(VALUE);
+                g2.drawString(fmt(sd.getXpPerHour()) + " xp/hr", barX, cy + 60);
+
                 // goal bar + "to goal" stats (only when set)
                 if (hasGoal) {
                     g2.setColor(new Color(60, 60, 60));
-                    g2.fillRoundRect(barX, cy + 54, barW, 5, 4, 4);
+                    g2.fillRoundRect(barX, cy + 70, barW, 5, 4, 4);
                     g2.setColor(ACCENT);
-                    g2.fillRoundRect(barX, cy + 54, (int) (barW * clamp01(sd.getGoalFraction())), 5, 4, 4);
+                    g2.fillRoundRect(barX, cy + 70, (int) (barW * clamp01(sd.getGoalFraction())), 5, 4, 4);
                     g2.setColor(LABEL);
                     g2.drawString("To goal " + fmt(sd.getGoalRemainingXp()) + " · "
-                            + fmtH(sd.getGoalTtlHours()), barX, cy + 72);
+                            + fmtH(sd.getGoalTtlHours()), barX, cy + 88);
                     g2.setColor(ACCENT);
                     String pct = String.format("%.0f%%", sd.getGoalFraction() * 100);
-                    g2.drawString(pct, cx + w - 8 - g2.getFontMetrics().stringWidth(pct), cy + 72);
+                    g2.drawString(pct, cx + w - 8 - g2.getFontMetrics().stringWidth(pct), cy + 88);
                 }
             }
 

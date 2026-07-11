@@ -70,6 +70,13 @@ public class SkillData {
         TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(COLOR_BORDER_DIM), " " + s.name() + " ");
         b.setTitleColor(COLOR_BLOOD);
         trackerPanel.setBorder(b);
+        // Patch B.6: the level progress bar leads the detail block so the tracker tab matches
+        // the on-screen overlay (which shows a level bar). Same rounded style as the goal bar.
+        progressLevel.setUI(new main.menu.Theme.RoundProgressBarUI());
+        progressLevel.setPreferredSize(new Dimension(10, 8));
+        progressLevel.setStringPainted(false);
+        trackerPanel.add(progressLevel);
+
         JLabel[] ls = {lblGained, lblPerHour, lblRemaining, lblActs, lblTTL, lblProj};
 
         for (JLabel l : ls) {
