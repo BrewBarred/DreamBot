@@ -20,10 +20,14 @@ public class Walk extends Action {
     private final String DEFAULT_TARGET = "3217, 3238, 0"; // Default target: Lumbridge magic tutor
     private Runnable variation;
 
+    private JParamTextField paramArrive;
+    private transient long lastWalkIssueAt;
+
     // Existing empty constructor for initial UI setup
     public Walk() {
         super();
         paramTarget = new JParamTextField(DEFAULT_TARGET);
+        paramArrive = new JParamTextField("3");
     }
 
     // New constructor for the actual functional action
@@ -35,6 +39,7 @@ public class Walk extends Action {
     public Walk(Walk w) {
         this(w.getParamTarget());
         this.variation = w.variation;
+        this.paramArrive.setParam(w.paramArrive.getParam());
     }
 
     private void load(String target) {
@@ -98,7 +103,11 @@ public class Walk extends Action {
     private boolean isComplete() {
         Tile tile = Library.resolveToTile(paramTarget.getParam());
         if (tile == null) return true; // can't find it, give up
-        return Players.getLocal().getTile().distance(tile) <= 3 && !Players.getLocal().isMoving();
+        // Patch B.2: adjustable arrive radius. Already within N tiles of the destination (or
+        // of the resolved target's tile for named targets)? The step is skipped outright -
+        // no pointless walk click, moving or not.
+        int arrive = ActionUtil.parseInt(paramArrive.getParam(), 3);
+        return Players.getLocal().getTile().distance(tile) <= Math.max(0, arrive);
     }
 
     public static Set<String> scanTargets() {
@@ -137,7 +146,14 @@ public class Walk extends Action {
                 "        \"Oak Tree\" -> GameObject\n" +
                 "        \"Zezima\" -> Player, etc...";
 
-        return createParameterPanel(subtitle, description, paramTarget, example);
+        JPanel target = createParameterPanel(subtitle, description, paramTarget, example);
+
+        JPanel arrive = createParameterPanel("Arrive within (tiles):",
+                "Skip this step when the player is already this close to the destination"
+                        + " (or the target's approximate tile for named targets).",
+                paramArrive, "  e.g. \"3\"");
+
+        return main.actions.ActionUtil.stack(target, arrive);
     }
 
     @Override
@@ -147,15 +163,26 @@ public class Walk extends Action {
             return true;
 
         // Only (re)issue a walk when the player is idle - previously this fired a fresh
-        // Walking.walk() every single loop, spamming clicks while mid-path.
+        // Walking.walk() every single loop, spamming clicks while mid-path. Each idle re-issue
+        // that still hasn't arrived counts as one attempt (rate-limited to one per 2s), so a
+        // destination we genuinely can't reach fails the task instead of walking forever.
         if (!Players.getLocal().isMoving()) {
+            long now = System.currentTimeMillis();
+            if (now - lastWalkIssueAt > 2000) {
+                lastWalkIssueAt = now;
+                noteAttempt();
+            }
             load(paramTarget.getParam());
 
             if (variation != null)
                 variation.run();
         }
 
-        return isComplete();
+        if (isComplete()) {
+            resetAttempts();
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -171,7 +198,8 @@ public class Walk extends Action {
     @Override
     public Map<String, String> serialize() {
         return Map.of(
-                "Target", paramTarget.getParam()
+                "Target", paramTarget.getParam(),
+                "Arrive", paramArrive.getParam()
         );
     }
 
@@ -182,5 +210,7 @@ public class Walk extends Action {
         if (target != null) {
             paramTarget.setParam(target);   // restore UI field
         }
+        if (data.get("Arrive") != null)
+            paramArrive.setParam(data.get("Arrive"));
     }
 }

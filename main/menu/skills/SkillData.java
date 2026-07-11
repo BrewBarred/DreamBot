@@ -30,6 +30,17 @@ public class SkillData {
 
     boolean isTracking = false;
 
+    // Patch B.2: raw live numbers for the on-canvas overlay cards (updated in update()).
+    private volatile int lastLevel, lastGainedXp, lastXpPerHour;
+    // Patch B.3: absolute current xp + a per-skill XP goal (0 = none). Set via right-click on
+    // the tracker tile; persisted with the profile; shown as a progress bar in tracker + overlay.
+    private volatile int lastXp, goalXp;
+
+    final JLabel lblGoal = new JLabel();
+    final JProgressBar goalBar = new JProgressBar(0, 1000) {
+        @Override public void updateUI() { setUI(new main.menu.Theme.RoundProgressBarUI()); }
+    };
+
     /**
      * Constructs a new {@link SkillData} object, used by the Skill tiles to track player stats.
      *
@@ -50,6 +61,26 @@ public class SkillData {
             l.setFont(new Font("Consolas", Font.PLAIN, 12));
             trackerPanel.add(l);
         }
+
+        lblGoal.setForeground(new Color(230, 190, 90));
+        lblGoal.setFont(new Font("Consolas", Font.PLAIN, 12));
+        goalBar.setPreferredSize(new Dimension(10, 8));
+        goalBar.setStringPainted(false);
+        lblGoal.setVisible(false);
+        goalBar.setVisible(false);
+        trackerPanel.add(lblGoal);
+        trackerPanel.add(goalBar);
+    }
+
+    /** Sets an XP goal (0 clears). Right-click a tracker tile to change it. */
+    public void setGoalXp(int xp) { this.goalXp = Math.max(0, xp); }
+    public int getGoalXp() { return goalXp; }
+    public int getLastXp() { return lastXp > 0 ? lastXp : startXP; }
+
+    /** 0..1 progress toward the goal (0 when no goal). */
+    public double getGoalFraction() {
+        if (goalXp <= 0) return 0;
+        return Math.max(0, Math.min(1, (double) getLastXp() / goalXp));
     }
 
     public Skill getSkill() {
@@ -84,13 +115,22 @@ public class SkillData {
         return trackerPanel;
     }
 
+    /** Live values for the canvas overlay (Patch B.2). Zero until the first update() tick. */
+    public int getCurrentLevel() { return lastLevel > 0 ? lastLevel : startLevel; }
+    public int getGainedXp()     { return lastGainedXp; }
+    public int getXpPerHour()    { return lastXpPerHour; }
+
     public void update(int curXp, int curLvl, long start, int ph) {
         int curMin = Skills.getExperienceForLevel(curLvl), curMax = Skills.getExperienceForLevel(curLvl + 1);
-        labelLevel.setText(String.valueOf(curLvl));
+        // Patch B.3: show the login level pointing at the current one when it has risen
+        labelLevel.setText(curLvl > startLevel ? startLevel + "\u2192" + curLvl : String.valueOf(curLvl));
         labelXP.setText(String.format("%,d / %,d XP", curXp, curMax));
         progressLevel.setValue((int) (((double)(curXp - curMin) / Math.max(1, curMax - curMin)) * 100));
         long elapsed = System.currentTimeMillis() - start;
         int xph = (int) (Math.max(0, curXp - startXP) / Math.max(0.0001, elapsed / 3600000.0));
+        lastLevel = curLvl;
+        lastGainedXp = Math.max(0, curXp - startXP);
+        lastXpPerHour = xph;
         int rem = Math.max(0, curMax - curXp);
         lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP));
         lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph));
@@ -98,6 +138,16 @@ public class SkillData {
         if (xph > 0) {
             lblTTL.setText(String.format(" TIME TO L: %.2f hrs", (double) rem / xph));
             lblProj.setText(String.format(" PROJ (%dH): Lvl %d", ph, curLvl + (xph * ph / 100000)));
+        }
+
+        lastXp = curXp;
+        boolean hasGoal = goalXp > 0;
+        lblGoal.setVisible(hasGoal);
+        goalBar.setVisible(hasGoal);
+        if (hasGoal) {
+            double f = getGoalFraction();
+            lblGoal.setText(String.format(" GOAL: %,d XP \u2014 %.1f%%", goalXp, f * 100));
+            goalBar.setValue((int) (f * 1000));
         }
     }
 }

@@ -13,6 +13,67 @@ import static main.menu.MenuHandler.*;
 public abstract class Action {
     public JParamTextField paramTarget;
 
+    // ── Attempt tracking (Patch B.2) ─────────────────────────────────────────
+    // Actions call noteAttempt() when a try genuinely fails (nothing in range, click failed,
+    // couldn't take an item...). The engine skips the task once attemptsExhausted() - so a task
+    // only fails when it really can't be completed. Soft retries (a cow someone else grabbed,
+    // with other cows available) should NOT call noteAttempt(): pick another target instead.
+    // Attempts reset automatically when the engine sees the action complete or re-enter.
+    private transient int attempts = 0;
+    /** Max failed tries before the task is considered impossible; <=0 means retry forever. */
+    protected int maxAttempts = 12;
+
+    /** Records one genuinely failed try. */
+    protected final void noteAttempt() { attempts++; }
+    /** @return failed tries since the last reset. */
+    public final int getAttempts() { return attempts; }
+    /** @return true when this action has used up its tries (and doesn't retry forever). */
+    public final boolean attemptsExhausted() { return maxAttempts > 0 && attempts >= maxAttempts; }
+    /** Called by the engine when the action completes or is (re-)entered. */
+    public final void resetAttempts() { attempts = 0; }
+    /** @return the configured try budget (<=0 = infinite). */
+    public final int getMaxAttempts() { return maxAttempts; }
+
+    // ── Attached watchers (Patch B.4) ────────────────────────────────────────
+    // Triggers bound to THIS action: checked by the engine when this action is the current one.
+    // A trigger marked replacesAction() runs its response INSTEAD of this action for that pass
+    // (e.g. Loot carries "if inventory full -> bank"); others run alongside as safety chains.
+    // The list travels inside serialize()/deserialize() under the reserved "__triggers" key, so
+    // every existing action persists its watchers for free without changing the JSON schema.
+    private final java.util.List<main.watchers.Trigger> triggers = new java.util.ArrayList<>();
+
+    /** Watchers attached to this action (mutable). */
+    public java.util.List<main.watchers.Trigger> getTriggers() { return triggers; }
+
+    /** Copies attached triggers from another action - call this in every subclass copy ctor. */
+    protected final void copyTriggersFrom(Action other) {
+        if (other == null) return;
+        triggers.clear();
+        for (main.watchers.Trigger t : other.getTriggers())
+            if (t != null) triggers.add(new main.watchers.Trigger(t));
+    }
+
+    /** Reserved key under which attached triggers ride inside serialize()/deserialize(). */
+    public static final String TRIGGERS_KEY = "__triggers";
+
+    /**
+     * Folds attached triggers into a params map (call at the end of serialize()). Kept separate
+     * so subclasses opt in explicitly; the engine and codec also handle it centrally.
+     */
+    protected final void writeTriggers(java.util.Map<String, String> m) {
+        if (m == null || triggers.isEmpty()) return;
+        m.put(TRIGGERS_KEY, main.watchers.TriggerCodec.toJson(triggers));
+    }
+
+    /** Restores attached triggers from a params map (call at the start of deserialize()). */
+    protected final void readTriggers(java.util.Map<String, String> m) {
+        triggers.clear();
+        if (m == null) return;
+        String json = m.get(TRIGGERS_KEY);
+        if (json != null && !json.isBlank())
+            triggers.addAll(main.watchers.TriggerCodec.fromJson(json));
+    }
+
     ///
     ///     Every subclass must implement these:
     ///

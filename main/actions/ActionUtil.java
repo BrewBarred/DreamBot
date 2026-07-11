@@ -49,7 +49,7 @@ public final class ActionUtil {
         return out;
     }
 
-    private static boolean within(Tile t, int radius) {
+    static boolean within(Tile t, int radius) {
         if (t == null) return false;
         var local = Players.getLocal();
         if (local == null || local.getTile() == null) return false;
@@ -57,6 +57,22 @@ public final class ActionUtil {
     }
 
     /** Nearest NPC with the given name within {@code radius} tiles, or null. */
+    /**
+     * Combat-aware variant (Patch B.2): when {@code skipBusy} is true, NPCs already fighting are
+     * skipped - you can't attack a cow that's in someone else's combat, so a busy target is
+     * never a valid candidate; the caller soft-retries with the next one instead of failing.
+     */
+    public static NPC nearestNpc(String name, int radius, boolean skipBusy) {
+        return org.dreambot.api.methods.interactive.NPCs.closest(n -> {
+            if (n == null || n.getName() == null || !n.getName().equalsIgnoreCase(name)) return false;
+            if (!within(n.getTile(), radius)) return false;
+            if (skipBusy) {
+                try { if (n.isInCombat()) return false; } catch (Throwable ignored) {}
+            }
+            return true;
+        });
+    }
+
     public static NPC nearestNpc(String name, int radius) {
         if (name == null || name.isEmpty()) return null;
         NPC npc = NPCs.closest(n -> n != null && n.getName() != null && n.getName().equalsIgnoreCase(name));

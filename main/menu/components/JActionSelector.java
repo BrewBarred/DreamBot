@@ -25,6 +25,11 @@ public class JActionSelector extends JComboBox<Action> {
     private Action selectedAction;
     private JPanel currentPanel;
 
+    /** Guards against rebuild storms while the model is being swapped (Patch B.3). */
+    private boolean muted = false;
+    /** How many built-in prototypes lead the model (library entries follow). */
+    private int builtInCount = 0;
+
     static {
         // NOTE: each registry KEY must equal the action class's simple name, because Action.getName()
         // (used as the saved type) returns getClass().getSimpleName() and createByType() looks it up here.
@@ -34,6 +39,12 @@ public class JActionSelector extends JComboBox<Action> {
         REGISTRY.put("Drop", new Drop());
         REGISTRY.put("Bank", new Bank());
         REGISTRY.put("Wait", new Wait());
+        REGISTRY.put("Bury", new main.actions.Bury());
+        REGISTRY.put("Chat", new main.actions.Chat());
+        REGISTRY.put("FindBank", new main.actions.FindBank());
+        REGISTRY.put("Shop", new main.actions.Shop());
+        REGISTRY.put("TaskRef", new main.actions.TaskRef());
+        REGISTRY.put("InventoryManager", new main.actions.InventoryManager());
     }
 
     public JActionSelector() {
@@ -41,14 +52,71 @@ public class JActionSelector extends JComboBox<Action> {
         super(REGISTRY.values().toArray(new Action[0]));
         Logger.log(Logger.LogType.DEBUG, "Setting up action selector...");
         setSelectedIndex(0);
+        builtInCount = REGISTRY.size();
         rebuildTemplate();
         Logger.log(Logger.LogType.DEBUG, "Rebuild complete!");
         currentPanel = selectedAction.getParamPanel();
         Logger.log(Logger.LogType.DEBUG, "Fetch params!");
-        addActionListener(e -> rebuildTemplate());
+        addActionListener(e -> { if (!muted) rebuildTemplate(); });
         Logger.log(Logger.LogType.DEBUG, "Added listener!");
 
+        // Patch B.3: the dropdown is split into the default actions and, below a divider,
+        // your library tasks - rendered gold so the two groups read at a glance.
+        setRenderer(new DefaultListCellRenderer() {
+            @Override public java.awt.Component getListCellRendererComponent(
+                    JList<?> list, Object value, int index, boolean sel, boolean foc) {
+                JLabel l = (JLabel) super.getListCellRendererComponent(list, value, index, sel, foc);
+                boolean library = value instanceof main.actions.TaskRef
+                        && ((main.actions.TaskRef) value).isBoundEntry();
+                if (library) {
+                    l.setText("  ◆ " + ((main.actions.TaskRef) value).getParamTarget());
+                    if (!sel) l.setForeground(new java.awt.Color(212, 175, 55));
+                    if (index == builtInCount && index > 0)
+                        l.setBorder(BorderFactory.createCompoundBorder(
+                                BorderFactory.createMatteBorder(1, 0, 0, 0, new java.awt.Color(90, 90, 90)),
+                                BorderFactory.createEmptyBorder(2, 2, 2, 2)));
+                }
+                return l;
+            }
+        });
+
         styleComp(this);
+    }
+
+    /**
+     * Refreshes the "library tasks" half of the dropdown (Patch B.3): every library task shows
+     * up as a ready-made entry - pick one and Add to builder inserts a live reference to it
+     * (resolved by id at run time, so library edits propagate into every script using it).
+     * Selection is preserved across refreshes.
+     */
+    public void setLibraryTasks(java.util.List<main.actions.TaskRef> entries) {
+        Object keepSel = getSelectedItem();
+        String keepBound = keepSel instanceof main.actions.TaskRef
+                ? ((main.actions.TaskRef) keepSel).getParamTarget() : null;
+
+        muted = true;
+        try {
+            DefaultComboBoxModel<Action> model = new DefaultComboBoxModel<>();
+            for (Action proto : REGISTRY.values()) model.addElement(proto);
+            builtInCount = model.getSize();
+            if (entries != null)
+                for (main.actions.TaskRef t : entries)
+                    if (t != null) model.addElement(t);
+            setModel(model);
+
+            int target = 0;
+            for (int i = 0; i < model.getSize(); i++) {
+                Action a = model.getElementAt(i);
+                if (keepBound != null && a instanceof main.actions.TaskRef
+                        && keepBound.equals(a.getParamTarget())) { target = i; break; }
+                if (keepBound == null && keepSel != null && a.getClass() == keepSel.getClass()
+                        && !(a instanceof main.actions.TaskRef)) { target = i; break; }
+            }
+            setSelectedIndex(target);
+        } finally {
+            muted = false;
+        }
+        rebuildTemplate();
     }
 
     public void setSelectedAction(Action action) {

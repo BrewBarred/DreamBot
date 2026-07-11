@@ -33,6 +33,17 @@ public class ProfileData {
     /** Whole-queue loop count for the live queue (0 = infinite). */
     public int queueLoops = 1;
 
+    /** Patch B.3: per-skill XP goals (skill name -> goal xp). */
+    public java.util.Map<String, Integer> skillGoals;
+
+    /** Patch B.4: always-on watchers, serialized to a JSON string via TriggerCodec. */
+    public String globalTriggers;
+
+    /** Patch B.2: auto-wait between completed tasks. */
+    public boolean queueAutoWait = false;
+    public int queueAutoWaitMinMs = 400;
+    public int queueAutoWaitMaxMs = 1200;
+
     /** All menu settings (reuses the menu's own snapshot type). */
     public DreamBotMenu.SettingsSnapshot settings;
 }
