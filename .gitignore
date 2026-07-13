@@ -1,1 +1,4 @@
 /DreamMan/out/
+/.idea/
+*.iml
+*.class
