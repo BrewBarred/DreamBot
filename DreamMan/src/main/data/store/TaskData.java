@@ -1,0 +1,44 @@
+package main.data.store;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Serialisable, storage-safe mirror of {@code DreamBotMenu.Task}.
+ * <p>
+ * A {@code Task} holds a {@code List<Action>}, and {@code Action} is abstract, so Gson cannot
+ * (de)serialise a Task directly - it has no way to know which concrete subclass to instantiate.
+ * (This was a latent crash in the old Supabase load path.) Instead we store each action as an
+ * {@link main.data.ActionData} (type-name + flat param map), which round-trips cleanly, and
+ * rebuild the concrete actions on load via {@link main.menu.components.JActionSelector}.
+ */
+public class TaskData {
+
+    /** Patch B.2: the task's stable identity (see Task.getId()); null in pre-B.2 saves. */
+    public String id;
+
+    /** Patch B.3: creation time (epoch ms); 0 in older saves. */
+    public long createdAt;
+
+    /** Patch B.5: "user" | "imported" | "default"; null in older saves (treated as user). */
+    public String origin;
+
+    /** Patch B.14: VIP-only task flag. */
+    public boolean vipOnly = false;
+    public String name;
+    public String description;
+    public String status;
+    /** How many times this task runs before the queue advances (>=1). */
+    public int repeat = 1;
+    /** Patch B: automatic humanised pause between actions. */
+    /** Patch B.8: timed-task config. */
+    public boolean timed = false;
+    public int timerMinutes = 30;
+    public int timerJitterPct = 20;
+    public String timerWhen;
+
+    public boolean autoDelay = false;
+    public int autoDelayMinMs = 600;
+    public int autoDelayMaxMs = 1400;
+    public List<main.data.ActionData> actions = new ArrayList<>();
+}

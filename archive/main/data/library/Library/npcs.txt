@@ -1,5 +1,0 @@
-# NPC JLibrary — auto-managed, manual edits are safe
-# Format: name, x, y, z, area, interaction
-
-Hans, 0, 0, 0, Lumbridge, Talk-to
-Lumbridge Tutors, 3217, 3238, 0, Lumbridge, Talk-to
