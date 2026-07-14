@@ -34,6 +34,12 @@ public class TaskBuilder extends JPanel {
     JButton btnRemove;
     private JButton btnWatchers;
     private JButton btnChance;
+    /** Patch B.17: in-place duplicate of the selected chain action. */
+    private JButton btnDuplicate;
+    /** Patch B.17: writes the editor's params back onto the selected chain action. */
+    private JButton btnUpdateAction;
+    /** The chain row currently loaded for editing (-1 = none). Mirrors the list selection. */
+    private int editingActionIndex = -1;
     /** Patch B.14: admin-only "VIP task" toggle. Hidden for non-admins. */
     private JCheckBox chkVipOnly;
 
@@ -99,10 +105,10 @@ public class TaskBuilder extends JPanel {
                     Action action = (Action) value;
                     // write as build string to task builder display
                     String text = action.toBuildString();
-                    // Patch B.7: surface a non-100% chance right in the row so it's obvious which
-                    // actions are randomised and by how much.
+                    // Patch B.7 (glyph-safe in B.17): surface a non-100% chance right in the row
+                    // so it's obvious which actions are randomised and by how much.
                     if (action.getChancePercent() < 100)
-                        text = "⚄ " + action.getChancePercent() + "%  " + text;
+                        text = "[" + action.getChancePercent() + "%]  " + text;
                     setText(text);
                 }
 
@@ -174,6 +180,7 @@ public class TaskBuilder extends JPanel {
         taskDescriptionInput.setText(description == null ? "" : description);
         taskStatusInput.setText(status == null ? "" : status);
         chkAutoDelay.setSelected(autoDelay);
+        syncAutoDelayEnabled();   // v1.30: setSelected() fires no listener - sync explicitly
         int min = Math.max(0, autoDelayMin);
         autoDelayMinInput.setText(String.valueOf(min));
         autoDelayMaxInput.setText(String.valueOf(Math.max(min, autoDelayMax)));
@@ -213,11 +220,14 @@ public class TaskBuilder extends JPanel {
         taskDescriptionInput.setText("");
         taskStatusInput.setText("");
         chkAutoDelay.setSelected(false);
+        syncAutoDelayEnabled();   // v1.30: same - keep the fields greyed to match
         autoDelayMinInput.setText(String.valueOf(AUTO_DELAY_DEFAULT_MIN));
         autoDelayMaxInput.setText(String.valueOf(AUTO_DELAY_DEFAULT_MAX));
         syncAutoDelayEnabled();
         editingTaskId = null;
         editingTaskName = null;
+        editingActionIndex = -1;                                  // B.17: nothing armed for edit
+        if (btnUpdateAction != null) btnUpdateAction.setEnabled(false);
         if (btnAddToLibrary != null) btnAddToLibrary.setText("Add to library...");
         modelTaskBuilder.clear();
         refreshList();
@@ -226,69 +236,81 @@ public class TaskBuilder extends JPanel {
     ///  Panel construction
 
     private JPanel buildLeft() {
-        JPanel left = createPanelBorderLayout(0, 10);
-        JPanel config = createPanelGridBagLayout();
+        // ── Patch B.17 layout rework ─────────────────────────────────────────
+        // The old left column put the "Select action" dropdown INSIDE the same scroll pane as
+        // the parameter fields, so a tall action (Interact) scrolled the dropdown clean out of
+        // view - baffling if you didn't know it was up there. Now the column is:
+        //   NORTH  - the label + dropdown, pinned, always visible
+        //   CENTER - just the selected action's parameters, scrolling on their own
+        //   SOUTH  - "Add to builder" / "Update action", pinned, always reachable
+        // The entity list that used to squat under all this now lives in the RIGHT column
+        // (above the task-name fields), where the widths match anyway.
+        JPanel left = createPanelBorderLayout(0, 8);
+        left.setPreferredSize(new Dimension(300, 0));
 
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        //gbc.anchor = GridBagConstraints.WEST;
-        gbc.insets  = new Insets(3, 3, 3, 3);
-        // fill horizontally?
-        gbc.weightx = 1.0;
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        config.add(createLabel("Select action:"), gbc);
-
-        gbc.gridy = 1;
+        JPanel head = new JPanel(new BorderLayout(0, 4));
+        head.setOpaque(false);
+        head.add(createLabel("Select action:"), BorderLayout.NORTH);
         styleComp(actionSelector);
-        config.add(actionSelector, gbc);
+        head.add(actionSelector, BorderLayout.CENTER);
         actionSelector.addSelectionListener(e -> onSelectionChanged());
 
-        gbc.gridy = 2;
-        // TODO potentially remove this control panel
         dynamicControlPanel = createPanel();
         dynamicControlPanel.setOpaque(false);
-
-        // force it to stretch wide
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        // give it the horizontal priority
-        gbc.weightx = 1.0;
         JPanel initialPanel = actionSelector.getParamsPanel();
         if (initialPanel != null)
-            dynamicControlPanel.add(initialPanel, BorderLayout.WEST);
-        config.add(dynamicControlPanel, gbc);
+            dynamicControlPanel.add(initialPanel, BorderLayout.CENTER);
 
-        gbc.gridy  = 3;
-        gbc.insets = new Insets(8, 3, 3, 3);
-        JButton btnAdd = createButton("Add to builder...", COLOR_BTN_ADD, null);
-        btnAdd.addActionListener(e -> addTemplateToBuilder());
-        config.add(btnAdd, gbc);
-
-        // Patch B.1: tall param panels (Interact has four fields + mode) used to crush - and,
-        // when the client's EDT was drowning in UI errors, paint OVER - the entity list below.
-        // The params now live in a scrolling wrapper that never claims more than the column
-        // height minus ~240px, so the library always keeps a usable strip and the params
-        // scroll instead of colliding.
-        JScrollPane cfgScroll = new JScrollPane(config,
+        // the params are the ONLY thing that scrolls; the wrapper keeps them pinned to the top
+        JPanel paramsWrap = new JPanel(new BorderLayout());
+        paramsWrap.setOpaque(false);
+        paramsWrap.add(dynamicControlPanel, BorderLayout.NORTH);
+        JScrollPane cfgScroll = new JScrollPane(paramsWrap,
                 ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER) {
-            @Override public Dimension getPreferredSize() {
-                Dimension d = super.getPreferredSize();
-                Container parent = getParent();
-                int columnHeight = parent != null ? parent.getHeight() : 0;
-                if (columnHeight > 0)
-                    // Patch B.2: params and the entity list each get at least half the column
-                    d.height = Math.min(d.height, Math.max(220, columnHeight / 2));
-                return d;
-            }
-        };
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         Theme.thinScrollbars(cfgScroll);
         cfgScroll.setBorder(BorderFactory.createEmptyBorder());
         cfgScroll.setOpaque(false);
         cfgScroll.getViewport().setOpaque(false);
+        cfgScroll.getVerticalScrollBar().setUnitIncrement(14);
+        cfgScroll.setMinimumSize(new Dimension(0, 140));
 
-        left.add(cfgScroll,   BorderLayout.NORTH);
-        left.add(listLibrary, BorderLayout.CENTER);
+        JButton btnAdd = createButton("Add to builder...", COLOR_BTN_ADD, null);
+        btnAdd.addActionListener(e -> addTemplateToBuilder());
+        btnUpdateAction = createButton("Update action", new Color(70, 55, 20), null);
+        btnUpdateAction.setEnabled(false);
+        btnUpdateAction.setToolTipText("Save these parameter changes back onto the action "
+                + "selected in the chain");
+        btnUpdateAction.addActionListener(e -> updateSelectedAction());
+        JPanel btns = new JPanel(new GridLayout(1, 2, 6, 0));
+        btns.setOpaque(false);
+        btns.add(btnAdd);
+        btns.add(btnUpdateAction);
+
+        // ── v1.30: the buttons HUG the params ────────────────────────────────
+        // Previously they were pinned to the very bottom of the column, leaving a dead gap
+        // under short forms (Wait). Now a GridBag stack gives the params scroller its
+        // preferred height (weighty 0, so the buttons sit directly beneath it) and a glue row
+        // soaks up the leftovers. When the params are taller than the column, GridBag
+        // compresses the scroller toward its minimum instead of pushing the buttons off
+        // screen - so the attributes scroll ONLY when all three genuinely can't fit, and the
+        // buttons are always visible either way.
+        JPanel stack = new JPanel(new GridBagLayout());
+        stack.setOpaque(false);
+        GridBagConstraints sc = new GridBagConstraints();
+        sc.gridx = 0; sc.weightx = 1.0; sc.fill = GridBagConstraints.HORIZONTAL;
+        sc.gridy = 0; sc.weighty = 0; sc.fill = GridBagConstraints.BOTH;
+        stack.add(cfgScroll, sc);
+        sc.gridy = 1; sc.weighty = 0; sc.fill = GridBagConstraints.HORIZONTAL;
+        sc.insets = new Insets(8, 0, 0, 0);
+        stack.add(btns, sc);
+        sc.gridy = 2; sc.weighty = 1.0; sc.insets = new Insets(0, 0, 0, 0);
+        JPanel glue = new JPanel();
+        glue.setOpaque(false);
+        stack.add(glue, sc);
+
+        left.add(head,  BorderLayout.NORTH);
+        left.add(stack, BorderLayout.CENTER);
 
         return left;
     }
@@ -362,6 +384,7 @@ public class TaskBuilder extends JPanel {
 
         Action newAction = selected.copy();
         modelTaskBuilder.addElement(newAction);
+        int addedIndex = modelTaskBuilder.getSize() - 1;   // B.17: reselect THIS row after add
 
         // Patch B.2 (corrected semantics): the auto-wait checkbox INSERTS a visible Wait action
         // after each action you add - a real, editable step in the chain rolling a random time
@@ -381,14 +404,21 @@ public class TaskBuilder extends JPanel {
         }
 
         toast("Added " + newAction + (insertedWait ? " + auto-wait" : "") + "!", btnAddToLibrary, true);
-        refreshList(true);
+        // Patch B.17: selection now means "editing", so select the action just added - not the
+        // trailing auto-wait - or the editor would flip to Wait after every add.
+        listTaskBuilder.setSelectedIndex(addedIndex);
+        refreshList(false);
     }
 
     /**
      * This function is called when the action selector selection changed event is triggered.
      */
     private void onSelectionChanged() {
-        refresh();
+        // v1.30 LAG FIX: switching the action type used to call refresh(), which ALSO kicked a
+        // full nearby entity rescan (DreamBot API calls) on every combo change. The entity
+        // list doesn't depend on which action type is selected, so a switch now only swaps the
+        // parameter panel - instant. Rescans still run on tab-shown, the timer, and Scan.
+        refreshDynamicControls();
     }
 
     private JPanel buildCenter() {
@@ -445,32 +475,52 @@ public class TaskBuilder extends JPanel {
             openActionChance(modelTaskBuilder.getElementAt(idx));
         });
 
+        // Patch B.17: one-click duplicate of the selected action (also on the right-click menu).
+        btnDuplicate = createButton("Duplicate", new Color(45, 45, 60), null);
+        btnDuplicate.setEnabled(false);
+        btnDuplicate.setToolTipText("Insert a copy of the selected action right below it "
+                + "(keeps its randomness and checks)");
+        btnDuplicate.addActionListener(e -> {
+            int idx = listTaskBuilder.getSelectedIndex();
+            if (idx < 0) { toast("Select an action first", btnDuplicate, false); return; }
+            duplicateAction(idx);
+        });
+
+        // ── Patch B.17: selecting an action EDITS it ─────────────────────────
+        // The selected row's parameters load into the left column; change them and press
+        // "Update action" to write them back onto that row. Chance-to-run and attached checks
+        // are preserved across the update (they're edited via their own dialogs).
         listTaskBuilder.addListSelectionListener(e -> {
-            boolean has = !listTaskBuilder.isSelectionEmpty();
+            if (e.getValueIsAdjusting()) return;
+            int idx = listTaskBuilder.getSelectedIndex();
+            boolean has = idx >= 0;
             btnRemove.setEnabled(has);
             btnWatchers.setEnabled(has);
             btnChance.setEnabled(has);
+            btnDuplicate.setEnabled(has);
+            if (btnUpdateAction != null) btnUpdateAction.setEnabled(has);
+            editingActionIndex = idx;
+            if (has) loadAction(modelTaskBuilder.getElementAt(idx));
         });
 
+        // Right-click any action for the full menu (Patch B.17). Double-click no longer
+        // deletes - that was one slip away from losing work; Remove/Delete are explicit now.
         listTaskBuilder.addMouseListener(new MouseAdapter() {
-            public void mouseClicked(MouseEvent e) {
-                int idx = listTaskBuilder.getSelectedIndex();
-                if (idx == -1) return;
-                if (e.getClickCount() == 1) {
-                    loadAction(modelTaskBuilder.getElementAt(idx));
-                } else if (e.getClickCount() == 2) {
-                    int[] sel = listTaskBuilder.getSelectedIndices();
-                    for (int i = sel.length - 1; i >= 0; i--)
-                        modelTaskBuilder.remove(sel[i]);
-                    toast("Removed " + sel.length + " action(s)!", btnRemove, true);
-                    refreshList();
-                }
+            @Override public void mousePressed(MouseEvent e)  { maybePopup(e); }
+            @Override public void mouseReleased(MouseEvent e) { maybePopup(e); }
+            private void maybePopup(MouseEvent e) {
+                if (!e.isPopupTrigger()) return;
+                int idx = listTaskBuilder.locationToIndex(e.getPoint());
+                if (idx < 0) return;
+                listTaskBuilder.setSelectedIndex(idx);
+                buildActionContextMenu(idx).show(listTaskBuilder, e.getX(), e.getY());
             }
         });
 
-        JPanel bottomBtns = new JPanel(new GridLayout(1, 4, 5, 5));
+        JPanel bottomBtns = new JPanel(new GridLayout(1, 5, 5, 5));
         bottomBtns.setOpaque(false);
         bottomBtns.add(btnRemove);
+        bottomBtns.add(btnDuplicate);
         bottomBtns.add(btnChance);
         bottomBtns.add(btnWatchers);
         bottomBtns.add(btnReset);
@@ -481,6 +531,79 @@ public class TaskBuilder extends JPanel {
         center.add(bottomBtns,                       BorderLayout.SOUTH);
 
         return center;
+    }
+
+    /** The right-click menu for one action in the chain (Patch B.17). */
+    private JPopupMenu buildActionContextMenu(int idx) {
+        JPopupMenu menu = new JPopupMenu();
+        JMenuItem miEdit = new JMenuItem("Edit");
+        miEdit.setToolTipText("Load this action's parameters into the editor on the left");
+        miEdit.addActionListener(e -> {
+            listTaskBuilder.setSelectedIndex(idx);   // selection listener arms the edit
+            loadAction(modelTaskBuilder.getElementAt(idx));
+        });
+        JMenuItem miDuplicate = new JMenuItem("Duplicate");
+        miDuplicate.addActionListener(e -> duplicateAction(idx));
+        JMenuItem miDelete = new JMenuItem("Delete");
+        miDelete.addActionListener(e -> {
+            listTaskBuilder.setSelectedIndex(idx);
+            removeSelected();
+        });
+        JMenuItem miChance = new JMenuItem("Add randomness\u2026");
+        miChance.setToolTipText("Give this action a chance-to-run below 100%");
+        miChance.addActionListener(e -> openActionChance(modelTaskBuilder.getElementAt(idx)));
+        JMenuItem miCheck = new JMenuItem("Add a check\u2026");
+        miCheck.setToolTipText("Attach a conditional check to this action");
+        miCheck.addActionListener(e -> openActionWatchers(modelTaskBuilder.getElementAt(idx)));
+
+        menu.add(miEdit);
+        menu.add(miDuplicate);
+        menu.add(miDelete);
+        menu.addSeparator();
+        menu.add(miChance);
+        menu.add(miCheck);
+        return menu;
+    }
+
+    /** Duplicates the action at {@code idx} in place (deep copy: params, chance AND checks). */
+    private void duplicateAction(int idx) {
+        if (idx < 0 || idx >= modelTaskBuilder.size()) return;
+        Action original = modelTaskBuilder.getElementAt(idx);
+        if (original == null) return;
+        modelTaskBuilder.add(idx + 1, original.copyDeep());
+        listTaskBuilder.setSelectedIndex(idx + 1);
+        toast("Duplicated " + original.getName(), btnDuplicate, true);
+        refreshList();
+    }
+
+    /**
+     * Writes the editor's parameter values back onto the selected action in the chain
+     * (Patch B.17). The action's chance-to-run and attached checks are taken from the CHAIN
+     * copy, not the editor template - those are edited through their own dialogs and must
+     * survive a parameter tweak.
+     */
+    private void updateSelectedAction() {
+        int idx = listTaskBuilder.getSelectedIndex();
+        if (idx < 0) idx = editingActionIndex;
+        if (idx < 0 || idx >= modelTaskBuilder.size()) {
+            toast("Select an action in the chain first", btnUpdateAction, false);
+            return;
+        }
+        Action template = actionSelector.getSelectedAction();
+        if (template == null) { toast("Nothing to save", btnUpdateAction, false); return; }
+
+        Action current = modelTaskBuilder.getElementAt(idx);
+        Action updated = template.copyDeep();
+        if (current != null) {
+            updated.setChancePercent(current.getChancePercent());
+            updated.getTriggers().clear();
+            for (main.watchers.Trigger t : current.getTriggers())
+                if (t != null) updated.getTriggers().add(new main.watchers.Trigger(t));
+        }
+        modelTaskBuilder.set(idx, updated);
+        listTaskBuilder.setSelectedIndex(idx);
+        toast("Updated " + updated.getName(), btnUpdateAction, true);
+        refreshList();
     }
 
     private void removeSelected() {
@@ -495,8 +618,12 @@ public class TaskBuilder extends JPanel {
     }
 
     private JPanel buildRight() {
-        JPanel east = new JPanel(new GridBagLayout());
-        east.setOpaque(false);
+        // ── Patch B.17: the entity list lives HERE now, above the task fields ──
+        // Same column width as the text inputs, and clicking an entry auto-fills the current
+        // action's target: tile-targeted actions (Walk) get "X, Y, Z", name-targeted actions
+        // (Interact, Loot, Attack-style...) get the name. See applyEntityToCurrentAction().
+        JPanel form = new JPanel(new GridBagLayout());
+        form.setOpaque(false);
 
         GridBagConstraints g = new GridBagConstraints();
         g.fill    = GridBagConstraints.HORIZONTAL;
@@ -511,19 +638,19 @@ public class TaskBuilder extends JPanel {
         styleComp(taskDescriptionInput);
         styleComp(taskStatusInput);
 
-        g.gridy = 0; east.add(createLabel("Task name:"),   g);
-        g.gridy = 1; east.add(taskNameInput,               g);
-        g.gridy = 2; east.add(createLabel("Description:"), g);
-        g.gridy = 3; east.add(taskDescriptionInput,        g);
-        g.gridy = 4; east.add(createLabel("Status:"),      g);
-        g.gridy = 5; east.add(taskStatusInput,             g);
+        g.gridy = 0; form.add(createLabel("Task name:"),   g);
+        g.gridy = 1; form.add(taskNameInput,               g);
+        g.gridy = 2; form.add(createLabel("Description:"), g);
+        g.gridy = 3; form.add(taskDescriptionInput,        g);
+        g.gridy = 4; form.add(createLabel("Status:"),      g);
+        g.gridy = 5; form.add(taskStatusInput,             g);
 
         g.gridy = 6;
         g.insets = new Insets(12, 5, 2, 5);
-        east.add(buildAutoDelayHeader(), g);
+        form.add(buildAutoDelayHeader(), g);
         g.gridy = 7;
         g.insets = new Insets(2, 5, 5, 5);
-        east.add(buildAutoDelayControls(), g);
+        form.add(buildAutoDelayControls(), g);
 
         // Patch B.14: admins can flag a task VIP-only from here. Invisible to everyone else.
         chkVipOnly = new JCheckBox("VIP-only task");
@@ -538,13 +665,43 @@ public class TaskBuilder extends JPanel {
 
         g.gridy  = 8;
         g.insets = new Insets(12, 5, 2, 5);
-        east.add(chkVipOnly, g);           // Patch B.14: admin-only, above the save button
+        form.add(chkVipOnly, g);           // Patch B.14: admin-only, above the save button
 
         g.gridy  = 9;
         g.insets = new Insets(6, 5, 5, 5);
-        east.add(btnAddToLibrary, g);
+        form.add(btnAddToLibrary, g);
+
+        // the entity list matches the form width and takes all the height above it
+        listLibrary.setPreferredSize(new Dimension(300, 300));
+        listLibrary.addClickListener(this::applyEntityToCurrentAction);
+
+        JPanel east = new JPanel(new BorderLayout(0, 8));
+        east.setOpaque(false);
+        east.setPreferredSize(new Dimension(310, 0));
+        east.add(listLibrary, BorderLayout.CENTER);
+        east.add(form,        BorderLayout.SOUTH);
 
         return east;
+    }
+
+    /**
+     * Patch B.17: clicking an entity sets it as the current action's target - no re-typing.
+     * Location-based actions (Walk) get the tile "X, Y, Z" (falling back to the name if the
+     * entry has no known tile); everything else gets the name. Actions with no target of their
+     * own (Wait, Chat, library tasks...) are left alone.
+     */
+    private void applyEntityToCurrentAction(JLibraryList.EntityEntry entry) {
+        if (entry == null) return;
+        Action template = actionSelector.getSelectedAction();
+        if (template == null || template.paramTarget == null || !template.acceptsEntityTarget()) {
+            toast("\"" + actionSelector.getSelectedItem() + "\" has no entity target", listLibrary, false);
+            return;
+        }
+        String value = (template.prefersTileTarget() && entry.hasTile())
+                ? entry.tileString()
+                : entry.name;
+        template.paramTarget.setParam(value);
+        toast("Target set: " + value, listLibrary, true);
     }
 
     /** The "Auto-delay between actions" checkbox (Patch B). */
@@ -567,33 +724,56 @@ public class TaskBuilder extends JPanel {
         styleComp(autoDelayMinInput);
         styleComp(autoDelayMaxInput);
 
-        JPanel range = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        range.setOpaque(false);
-        range.add(autoDelayMinInput);
-        range.add(createLabel("-"));
-        range.add(autoDelayMaxInput);
-        range.add(createLabel("ms"));
-
-        JPanel steppers = new JPanel(new GridLayout(1, 4, 4, 0));
-        steppers.setOpaque(false);
+        // v1.30: each bound gets its own [-] field [+] stepper - clearer than the old
+        // "+/-50 +/-100 nudge the whole range" buttons - and typing a value still works.
         autoDelayControls.clear();
         autoDelayControls.add(autoDelayMinInput);
         autoDelayControls.add(autoDelayMaxInput);
-        for (int delta : new int[]{ -100, -50, 50, 100 }) {
-            JButton b = createButton((delta > 0 ? "+" : "") + delta, new Color(50, 50, 50), null);
-            b.setToolTipText("Nudge the whole delay range by " + delta + "ms");
-            b.addActionListener(e -> nudgeAutoDelay(delta));
-            steppers.add(b);
-            autoDelayControls.add(b);
-        }
 
         JPanel box = new JPanel(new GridLayout(0, 1, 0, 4));
         box.setOpaque(false);
-        box.add(range);
-        box.add(steppers);
+        box.add(delayStepperRow("Min", autoDelayMinInput));
+        box.add(delayStepperRow("Max", autoDelayMaxInput));
 
         syncAutoDelayEnabled();
         return box;
+    }
+
+    /** One "[label] [-] [field] [+] ms" row for an auto-delay bound (v1.30). */
+    private JPanel delayStepperRow(String label, JTextField field) {
+        JButton minus = createButton("-", new Color(50, 50, 50), null);
+        JButton plus  = createButton("+", new Color(50, 50, 50), null);
+        minus.setPreferredSize(new Dimension(34, 24));
+        plus.setPreferredSize(new Dimension(34, 24));
+        minus.setToolTipText(label + " delay: 50ms less");
+        plus.setToolTipText(label + " delay: 50ms more");
+        minus.addActionListener(e -> stepDelayField(field, -50));
+        plus.addActionListener(e -> stepDelayField(field, +50));
+        autoDelayControls.add(minus);
+        autoDelayControls.add(plus);
+
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        row.setOpaque(false);
+        JLabel l = createLabel(label + ":");
+        l.setPreferredSize(new Dimension(32, 20));
+        row.add(l);
+        row.add(minus);
+        row.add(field);
+        row.add(plus);
+        row.add(createLabel("ms"));
+        return row;
+    }
+
+    /** Steps one bound by deltaMs (min 0), then re-orders so max >= min stays true. */
+    private void stepDelayField(JTextField field, int deltaMs) {
+        int v = ActionUtil.parseInt(field.getText(), AUTO_DELAY_DEFAULT_MIN);
+        field.setText(String.valueOf(Math.max(0, v + deltaMs)));
+        int min = ActionUtil.parseInt(autoDelayMinInput.getText(), AUTO_DELAY_DEFAULT_MIN);
+        int max = ActionUtil.parseInt(autoDelayMaxInput.getText(), AUTO_DELAY_DEFAULT_MAX);
+        if (max < min) {
+            if (field == autoDelayMinInput) autoDelayMaxInput.setText(String.valueOf(min));
+            else autoDelayMinInput.setText(String.valueOf(max));
+        }
     }
 
     /** Shifts both auto-delay bounds by {@code deltaMs}, clamped at 0 and keeping max >= min. */

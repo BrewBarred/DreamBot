@@ -70,7 +70,12 @@ public class TriggerEditor extends JPanel {
                     // Patch B.8: the number IS the priority - drag to reorder. When two checks
                     // want the same resource (both freeing inventory, both walking), the lower
                     // number wins that cycle and the other waits.
-                    lab.setText((i + 1) + ". " + (t.isEnabled() ? "\u25cf " : "\u25cb ") + t.describe());
+                    // v1.30: the on/off dot is DRAWN (UIIcons.dot) - the \u25cf/\u25cb glyphs
+                    // were the last font-dependent icons in this tab.
+                    lab.setText((i + 1) + ". " + t.describe());
+                    lab.setIcon(UIIcons.dot(12,
+                            t.isEnabled() ? Theme.ACCENT : Theme.TEXT_MUTED, t.isEnabled()));
+                    lab.setIconTextGap(6);
                     lab.setForeground(sel ? Theme.ACCENT : (t.isEnabled() ? Theme.TEXT : Theme.TEXT_DIM));
                 }
                 lab.setBorder(new EmptyBorder(6, 6, 6, 6));
@@ -133,7 +138,9 @@ public class TriggerEditor extends JPanel {
             listModel.addElement(t);
             list.setSelectedValue(t, true);
         });
-        JButton remove = new Theme.ThemedButton("\u2715 Remove");
+        // Patch B.17: plain "Remove" - the \u2715 glyph rendered as an empty box on clients
+        // whose UI font doesn't carry it (same missing-glyph family as the market stars).
+        JButton remove = new Theme.ThemedButton("Remove");
         remove.addActionListener(e -> {
             Trigger t = list.getSelectedValue();
             if (t == null) return;
@@ -248,6 +255,70 @@ public class TriggerEditor extends JPanel {
             optRow = row("Cooldown:", cooldownField, cdLbl);
         }
 
+        // ── v1.30: whole-check randomness ──
+        // "Only bury bones ~10% of the time" - the check rolls once per eligible moment; a miss
+        // consumes that moment, so the odds are per-opportunity, not per-poll.
+        JSlider chance = new JSlider(1, 100, t.getChancePercent());
+        chance.setOpaque(false);
+        chance.setPreferredSize(new Dimension(170, 24));
+        chance.setMaximumSize(new Dimension(170, 24));
+        JLabel chanceLbl = new JLabel();
+        chanceLbl.setForeground(Theme.TEXT_MUTED);
+        Runnable chanceText = () -> {
+            int v = chance.getValue();
+            chanceLbl.setText(v >= 100 ? "always fires"
+                    : "~" + v + "%  (about " + Math.max(1, Math.round(v / 10.0)) + " in 10 chances)");
+        };
+        chance.addChangeListener(e -> {
+            t.setChancePercent(chance.getValue());
+            chanceText.run();
+            list.repaint();
+        });
+        chanceText.run();
+        JPanel chanceRow = row("Chance:", chance, chanceLbl);
+
+        // ── v1.30: run-every timer ──
+        // "Only perform this check every H/M/S" (each 0-60). Below 5s total the timer can't
+        // meaningfully gate anything, so it stays inert and says so.
+        JCheckBox chkTimer = new JCheckBox("only every", t.isTimerEnabled());
+        chkTimer.setOpaque(false);
+        chkTimer.setForeground(Theme.TEXT);
+        chkTimer.setToolTipText("Fire this check at most once per interval (minimum 5 seconds)");
+        long iv = Math.max(0, t.getTimerIntervalMs()) / 1000;
+        JSpinner spH = new JSpinner(new SpinnerNumberModel((int) Math.min(60, iv / 3600), 0, 60, 1));
+        JSpinner spM = new JSpinner(new SpinnerNumberModel((int) ((iv % 3600) / 60), 0, 60, 1));
+        JSpinner spS = new JSpinner(new SpinnerNumberModel((int) (iv % 60), 0, 60, 1));
+        for (JSpinner sp : new JSpinner[]{spH, spM, spS})
+            sp.setMaximumSize(new Dimension(52, 26));
+        JLabel timerHint = new JLabel();
+        timerHint.setFont(timerHint.getFont().deriveFont(Font.ITALIC, 11f));
+        Runnable syncTimer = () -> {
+            boolean on = chkTimer.isSelected();
+            spH.setEnabled(on); spM.setEnabled(on); spS.setEnabled(on);
+            long ms = (((int) spH.getValue()) * 3600L
+                    + ((int) spM.getValue()) * 60L
+                    + (int) spS.getValue()) * 1000L;
+            t.setTimer(on, ms);
+            if (!on) {
+                timerHint.setText("  off - the check fires whenever its condition holds");
+                timerHint.setForeground(Theme.TEXT_MUTED);
+            } else if (ms < Trigger.MIN_TIMER_MS) {
+                timerHint.setText("  needs at least 5 seconds - timer inactive");
+                timerHint.setForeground(new Color(200, 90, 70));
+            } else {
+                timerHint.setText("  at most once per " + Trigger.formatInterval(ms));
+                timerHint.setForeground(Theme.TEXT_MUTED);
+            }
+            list.repaint();
+        };
+        chkTimer.addActionListener(e -> syncTimer.run());
+        spH.addChangeListener(e -> syncTimer.run());
+        spM.addChangeListener(e -> syncTimer.run());
+        spS.addChangeListener(e -> syncTimer.run());
+        syncTimer.run();
+        JPanel timerRow = row("Timer:", chkTimer, spH, dimLabel("h"), spM, dimLabel("m"),
+                spS, dimLabel("s"), timerHint);
+
         // THEN: response chain (actions and/or library tasks)
         respModel = new DefaultListModel<>();
         for (Action a : t.getResponse()) respModel.addElement(a);
@@ -269,7 +340,7 @@ public class TriggerEditor extends JPanel {
             Action a = actionFactory != null ? actionFactory.get() : null;
             if (a != null) { t.getResponse().add(a); respModel.addElement(a); list.repaint(); }
         });
-        JButton delAct = new Theme.ThemedButton("\u2715 remove");
+        JButton delAct = new Theme.ThemedButton("remove");   // B.17: \u2715 was a missing glyph
         delAct.addActionListener(e -> {
             int idx = resp.getSelectedIndex();
             if (idx >= 0) { t.getResponse().remove(idx); respModel.remove(idx); list.repaint(); }
@@ -295,6 +366,10 @@ public class TriggerEditor extends JPanel {
         detail.add(argRow);
         detail.add(Box.createVerticalStrut(4));
         detail.add(optRow);
+        detail.add(Box.createVerticalStrut(4));
+        detail.add(chanceRow);                      // v1.30
+        detail.add(Box.createVerticalStrut(4));
+        detail.add(timerRow);                       // v1.30
         detail.add(Box.createVerticalStrut(10));
         detail.add(thenLbl);
         detail.add(Box.createVerticalStrut(4));
@@ -314,6 +389,13 @@ public class TriggerEditor extends JPanel {
         boolean needs = c != null && c.needsArg();
         argRow.setVisible(needs);
         if (needs) argHint.setText("  " + c.argHint());
+    }
+
+    /** A small muted unit label ("h", "m", "s") for the timer row (v1.30). */
+    private JLabel dimLabel(String text) {
+        JLabel l = new JLabel(text);
+        l.setForeground(Theme.TEXT_MUTED);
+        return l;
     }
 
     private JPanel row(String label, JComponent... comps) {

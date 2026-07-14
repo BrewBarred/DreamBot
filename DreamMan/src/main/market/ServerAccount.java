@@ -347,9 +347,24 @@ public class ServerAccount {
                 Map<?, ?> err = GSON.fromJson(text, Map.class);
                 if (err != null && err.get("error") != null) msg = String.valueOf(err.get("error"));
             } catch (Throwable ignored) {}
-            throw new IOException(msg.isEmpty() ? ("Server said " + code) : msg);
+            // v1.30: a TYPED error carrying the HTTP status, so the login UI can tell
+            // "wrong password" (401/403/404) apart from "server broke" and say the right thing.
+            throw new HttpError(code, msg.isEmpty() ? ("Server said " + code) : msg);
         }
         return text;
+    }
+
+    /** An HTTP-level failure with its status code (v1.30). */
+    public static final class HttpError extends IOException {
+        public final int status;
+        public HttpError(int status, String message) {
+            super(message);
+            this.status = status;
+        }
+        /** 401/403/404 on the auth endpoints all mean "we don't know you / wrong secret". */
+        public boolean looksLikeBadCredentials() {
+            return status == 401 || status == 403 || status == 404;
+        }
     }
 
     private static String read(InputStream in) throws IOException {

@@ -66,7 +66,7 @@ public final class LoginDialog {
         char[] password = pass.getPassword();
         if (username.isEmpty() || password.length == 0) { toast(parent, "Enter both fields."); return; }
 
-        runAsync(parent, "Logging in...", () -> {
+        runAsync(parent, "Logging in...", ex -> loginFailed(parent, url, cb, ex), () -> {
             ServerAccount server = new ServerAccount(url);
             // step 1: salts
             Map<String, Object> salts = server.vaultSalts(username);
@@ -114,7 +114,7 @@ public final class LoginDialog {
 
         // all crypto up-front so we can show the recovery code, then register
         final String[] recoveryHolder = new String[1];
-        runThen(parent, () -> {
+        runThen(parent, ex -> registerFailed(parent, url, cb, ex), () -> {
             String authSalt = Vault.newSalt(), kekSalt = Vault.newSalt(), recSalt = Vault.newSalt();
             String authHash = Vault.authHash(p1.clone(), authSalt);
             SecretKey kek = Vault.deriveKek(p1.clone(), kekSalt);
@@ -222,7 +222,7 @@ public final class LoginDialog {
             toast(parent, "Fill all fields; new password 8+ chars."); return;
         }
 
-        runAsync(parent, "Recovering...", () -> {
+        runAsync(parent, "Recovering...", ex -> recoveryFailed(parent, url, cb, ex), () -> {
             ServerAccount server = new ServerAccount(url);
             Map<String, Object> salts = server.vaultSalts(username);
             String recSalt = str(salts.get("recoverySalt"));
@@ -266,26 +266,116 @@ public final class LoginDialog {
     }
 
     /** Convenience: run work, then toast a success message and fire the callback. */
-    private static void runAsync(Component parent, String msg, ThrowingSupplier work,
-                                 Callback cb, String successMsg) {
-        runThen(parent, work, () -> {
+    private static void runAsync(Component parent, String msg,
+                                 java.util.function.Consumer<Throwable> onError,
+                                 ThrowingSupplier work, Callback cb, String successMsg) {
+        runThen(parent, onError, work, () -> {
             if (successMsg != null) toast(parent, successMsg);
             if (cb != null) cb.onChanged();
         });
     }
 
-    /** Run work off the EDT; on success run onSuccess on the EDT; on error show a dialog. */
-    private static void runThen(Component parent, ThrowingSupplier work, Runnable onSuccess) {
+    /** Run work off the EDT; on success run onSuccess on the EDT; on error hand to onError. */
+    private static void runThen(Component parent, java.util.function.Consumer<Throwable> onError,
+                                ThrowingSupplier work, Runnable onSuccess) {
         new Thread(() -> {
             try {
                 work.get();
                 SwingUtilities.invokeLater(onSuccess);
             } catch (Throwable ex) {
-                String m = ex.getMessage() == null ? ex.toString() : ex.getMessage();
-                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(parent,
-                        m, "Couldn't complete", JOptionPane.ERROR_MESSAGE));
+                SwingUtilities.invokeLater(() -> {
+                    if (onError != null) onError.accept(ex);
+                    else JOptionPane.showMessageDialog(parent, friendly(ex),
+                            "Couldn't complete", JOptionPane.ERROR_MESSAGE);
+                });
             }
         }, "DreamMan-Auth").start();
+    }
+
+    // ── v1.30: human error handling ──────────────────────────────────────────
+    // The old path surfaced raw exception text, so a dead DNS lookup showed the naked
+    // hostname ("market.dreamman.app") in an error box. Failures are now classified:
+    // wrong-credentials errors say so and offer the two ways forward; network failures say
+    // "couldn't reach the server" - because telling someone with no internet that their
+    // password is wrong sends them on a reset quest that can't help.
+
+    /** True for "the wire is broken" failures, as opposed to "the server said no". */
+    private static boolean isNetworkIssue(Throwable ex) {
+        return ex instanceof java.net.UnknownHostException
+                || ex instanceof java.net.ConnectException
+                || ex instanceof java.net.SocketTimeoutException
+                || ex instanceof java.net.NoRouteToHostException
+                || ex instanceof javax.net.ssl.SSLException;
+    }
+
+    /** True when the failure means the username/password pair was rejected. */
+    private static boolean isBadCredentials(Throwable ex) {
+        if (ex instanceof ServerAccount.HttpError)
+            return ((ServerAccount.HttpError) ex).looksLikeBadCredentials();
+        // Vault.unwrapKey failing = right account, wrong password (thrown as this message)
+        return ex instanceof IllegalStateException
+                && String.valueOf(ex.getMessage()).toLowerCase().contains("wrong");
+    }
+
+    private static String friendly(Throwable ex) {
+        if (isNetworkIssue(ex))
+            return "Couldn't reach the DreamMan server.\nCheck your internet connection "
+                    + "(or the server may be down) and try again.";
+        String m = ex.getMessage();
+        return m == null || m.isBlank() ? ex.toString() : m;
+    }
+
+    /** Login failed: invalid credentials get the requested guidance; the rest stay honest. */
+    private static void loginFailed(Component parent, String url, Callback cb, Throwable ex) {
+        if (isBadCredentials(ex)) {
+            Object[] options = {"Try again", "Forgot password", "Create account", "Cancel"};
+            int pick = JOptionPane.showOptionDialog(parent,
+                    "<html><b>Invalid username or password.</b><br><br>"
+                            + "Check both and try again \u2014 or use your recovery code via "
+                            + "<i>Forgot password</i>, or make a new account.</html>",
+                    "Couldn't sign in", JOptionPane.DEFAULT_OPTION,
+                    JOptionPane.ERROR_MESSAGE, null, options, options[0]);
+            if (pick == 0) doLogin(parent, url, cb);
+            else if (pick == 1) doRecovery(parent, url, cb);
+            else if (pick == 2) doRegister(parent, url, cb);
+            return;
+        }
+        JOptionPane.showMessageDialog(parent, friendly(ex),
+                "Couldn't sign in", JOptionPane.ERROR_MESSAGE);
+    }
+
+    /** Register failed: taken names and bad requests show the server's reason; wire issues don't lie. */
+    private static void registerFailed(Component parent, String url, Callback cb, Throwable ex) {
+        if (ex instanceof ServerAccount.HttpError && ((ServerAccount.HttpError) ex).status == 409) {
+            Object[] options = {"Try again", "Log in instead", "Cancel"};
+            int pick = JOptionPane.showOptionDialog(parent,
+                    "<html><b>That username is already taken.</b><br>"
+                            + "Pick another name \u2014 or if it's yours, just log in.</html>",
+                    "Couldn't create account", JOptionPane.DEFAULT_OPTION,
+                    JOptionPane.ERROR_MESSAGE, null, options, options[0]);
+            if (pick == 0) doRegister(parent, url, cb);
+            else if (pick == 1) doLogin(parent, url, cb);
+            return;
+        }
+        JOptionPane.showMessageDialog(parent, friendly(ex),
+                "Couldn't create account", JOptionPane.ERROR_MESSAGE);
+    }
+
+    /** Recovery failed: a wrong code says so plainly. */
+    private static void recoveryFailed(Component parent, String url, Callback cb, Throwable ex) {
+        if (isBadCredentials(ex) || (ex instanceof IllegalStateException)) {
+            Object[] options = {"Try again", "Cancel"};
+            int pick = JOptionPane.showOptionDialog(parent,
+                    "<html><b>That recovery code didn't match.</b><br>"
+                            + "Codes are the long dashed string shown when the account was "
+                            + "created \u2014 check for typos and try again.</html>",
+                    "Couldn't recover", JOptionPane.DEFAULT_OPTION,
+                    JOptionPane.ERROR_MESSAGE, null, options, options[0]);
+            if (pick == 0) doRecovery(parent, url, cb);
+            return;
+        }
+        JOptionPane.showMessageDialog(parent, friendly(ex),
+                "Couldn't recover", JOptionPane.ERROR_MESSAGE);
     }
 
     private interface ThrowingSupplier { Object get() throws Exception; }

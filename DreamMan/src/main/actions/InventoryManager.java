@@ -27,6 +27,10 @@ import static main.menu.MenuHandler.createParameterPanel;
  */
 public class InventoryManager extends Action {
 
+    /** Patch B.17: no entity target - the entity list never writes into this action. */
+    @Override public boolean acceptsEntityTarget() { return false; }
+
+
     private transient long lastActAt;
 
     public InventoryManager() {

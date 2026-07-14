@@ -9,8 +9,8 @@ import java.awt.*;
 
 @ScriptManifest(
         author = "ETA",
-        name = "DreamBot",
-        version = 1.27,
+        name = "DreamBot (Beta)",
+        version = 1.30,
         category = Category.MISC
 )
 public class DreamBot extends DreamBotMan {

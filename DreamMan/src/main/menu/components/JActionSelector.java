@@ -69,7 +69,7 @@ public class JActionSelector extends JComboBox<Action> {
                 boolean library = value instanceof main.actions.TaskRef
                         && ((main.actions.TaskRef) value).isBoundEntry();
                 if (library) {
-                    l.setText("  ◆ " + ((main.actions.TaskRef) value).getParamTarget());
+                    l.setText("  \u00bb " + ((main.actions.TaskRef) value).getParamTarget());
                     if (!sel) l.setForeground(new java.awt.Color(212, 175, 55));
                     if (index == builtInCount && index > 0)
                         l.setBorder(BorderFactory.createCompoundBorder(
@@ -168,7 +168,9 @@ public class JActionSelector extends JComboBox<Action> {
 
         selectedAction = prototype.copy();
         currentPanel = selectedAction.getParamPanel();
-        Logger.log(Logger.LogType.DEBUG, "Action template rebuilt: " + selectedAction);
+        // v1.30 LAG FIX: no logging here. This runs on the EDT for EVERY dropdown change, and
+        // DreamBot's Logger can block behind the client thread for seconds - which is exactly
+        // the "attributes take ~3s to load" symptom. Keep this path pure Swing.
     }
 
     public void addSelectionListener(ActionListener l) {

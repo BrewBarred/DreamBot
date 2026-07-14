@@ -90,6 +90,21 @@ public abstract class Action {
      */
     public String conflictGroup() { return null; }
 
+    /**
+     * Patch B.17: whether this action's target is a PLACE rather than a THING. Drives what the
+     * Task Builder's entity list auto-fills on selection: tile-targeted actions (Walk today;
+     * Dig and friends tomorrow) receive the entity's "X, Y, Z", everything else gets the name.
+     * Default false - override in location-based actions.
+     */
+    public boolean prefersTileTarget() { return false; }
+
+    /**
+     * Patch B.17: whether this action has a meaningful entity target at all. Actions like Wait
+     * or Chat return false so clicking the entity list never scribbles a cow's name into a
+     * milliseconds field. Default true.
+     */
+    public boolean acceptsEntityTarget() { return true; }
+
     /** Reserved key under which the chance-to-run rides inside serialize()/deserialize(). */
     public static final String CHANCE_KEY = "__chance";
 

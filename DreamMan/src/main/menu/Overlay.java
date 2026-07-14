@@ -158,9 +158,18 @@ public final class Overlay {
                 rows.add(new String[]{e.getKey(), e.getValue()});
         }
 
+        // v1.30: the player's live tile, shown subtly (task authors read it constantly).
+        // onPaint runs on the game thread, so the API read here is safe; logged out = hidden.
+        String tileText = null;
+        try {
+            var me = org.dreambot.api.methods.interactive.Players.getLocal();
+            var t = me == null ? null : me.getTile();
+            if (t != null) tileText = t.getX() + ", " + t.getY() + ", " + t.getZ();
+        } catch (Throwable ignored) {}
+
         int titleH = 26;
         int barH = 16;
-        int h = titleH + PADY + rows.size() * ROW + 6 + barH + PADY;
+        int h = titleH + PADY + rows.size() * ROW + 6 + barH + PADY + (tileText != null ? 12 : 0);
 
         // Panel
         g2.setColor(BG);
@@ -217,6 +226,15 @@ public final class Overlay {
         String pct = (int) Math.round(frac * 100) + "%";
         int pw = g2.getFontMetrics().stringWidth(pct);
         g2.drawString(pct, x + PADX + (bw - pw) / 2, by + 12);
+
+        // v1.30: the live tile, bottom-right, tiny and dim - there when you're placing Walk
+        // targets, invisible when you're not looking for it. (Height was reserved above.)
+        if (tileText != null) {
+            g2.setFont(new Font("Consolas", Font.PLAIN, 10));
+            g2.setColor(new Color(0x8A, 0x84, 0x74));
+            int tw = g2.getFontMetrics().stringWidth(tileText);
+            g2.drawString(tileText, x + WIDTH - PADX - tw, by + barH + 11);
+        }
 
         g2.dispose();
         return y + h;

@@ -31,6 +31,10 @@ import static main.menu.MenuHandler.createParameterPanel;
  */
 public class TaskRef extends Action {
 
+    /** Patch B.17: no entity target - the entity list never writes into this action. */
+    @Override public boolean acceptsEntityTarget() { return false; }
+
+
     /** Set by the menu at startup: (id, name) -> live library task, or null. */
     private static volatile BiFunction<String, String, DreamBotMenu.Task> RESOLVER;
     /** Tasks currently executing on this chain - the circular-reference guard. */

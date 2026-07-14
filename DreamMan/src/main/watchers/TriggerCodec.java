@@ -33,6 +33,9 @@ public final class TriggerCodec {
         boolean enabled = true;
         boolean replacesAction = false;
         long cooldownMs = 3000;
+        int chancePercent = 100;        // v1.30: whole-check fire chance
+        boolean timerEnabled = false;   // v1.30: run-every timer
+        long timerIntervalMs = 0;
         List<ActionData> response = new ArrayList<>();
     }
 
@@ -48,6 +51,9 @@ public final class TriggerCodec {
             d.enabled = t.isEnabled();
             d.replacesAction = t.replacesAction();
             d.cooldownMs = t.getCooldownMs();
+            d.chancePercent = t.getChancePercent();          // v1.30
+            d.timerEnabled = t.isTimerEnabled();             // v1.30
+            d.timerIntervalMs = t.getTimerIntervalMs();      // v1.30
             for (Action a : t.getResponse())
                 if (a != null) d.response.add(ProfileCodec.toData(a));
             dtos.add(d);
@@ -73,6 +79,8 @@ public final class TriggerCodec {
                 t.setEnabled(d.enabled);
                 t.setReplacesAction(d.replacesAction);
                 t.setCooldownMs(d.cooldownMs);
+                t.setChancePercent(d.chancePercent);                 // v1.30 (100 in old saves)
+                t.setTimer(d.timerEnabled, d.timerIntervalMs);       // v1.30 (off in old saves)
                 if (d.response != null)
                     for (ActionData ad : d.response) {
                         Action a = ProfileCodec.fromData(ad);

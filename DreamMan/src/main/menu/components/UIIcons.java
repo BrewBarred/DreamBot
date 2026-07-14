@@ -149,6 +149,37 @@ public final class UIIcons {
         };
     }
 
+    /** A small filled (on) or hollow (off) status dot - replaces the \u25cf/\u25cb glyphs. */
+    public static Icon dot(int s, Color c, boolean filled) {
+        return new Icon() {
+            public int getIconWidth() { return s; }
+            public int getIconHeight() { return s; }
+            public void paintIcon(Component comp, Graphics g, int x, int y) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                int p = Math.max(1, s / 5);
+                Ellipse2D e = new Ellipse2D.Float(x + p, y + p, s - 2f * p, s - 2f * p);
+                g2.setColor(c);
+                if (filled) g2.fill(e);
+                else { g2.setStroke(new BasicStroke(Math.max(1f, s / 10f))); g2.draw(e); }
+                g2.dispose();
+            }
+        };
+    }
+
+    /** 🔍 search (magnifier). Replaces the emoji label that showed as a missing-glyph box. */
+    public static Icon search(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g) {
+                int d = (int) (s * 0.52);
+                int x = (int) (s * 0.14), y = (int) (s * 0.14);
+                g.drawOval(x, y, d, d);
+                g.drawLine(x + d - s / 20, y + d - s / 20,
+                        (int) (s * 0.84), (int) (s * 0.84));
+            }
+        };
+    }
+
     /** A filled or outline star, for the rating widget. */
     public static Icon star(int s, Color c, boolean filled) {
         return new Icon() {

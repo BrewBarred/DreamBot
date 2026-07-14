@@ -91,10 +91,40 @@ public class JLibraryList extends JPanel {
         public GameObject objectRef;
         public GroundItem groundRef;
 
+        /**
+         * Patch B.17: the entity's tile, captured at scan time (nearby) or from the static
+         * Library data. Null when unknown (e.g. inventory items, or library objects that are
+         * resolved live). Coordinates are the single most-used value in the Task Builder, so
+         * they're carried on the row instead of hiding behind a live ref.
+         */
+        public Integer x, y, z;
+        /** Ground-item stack size (1 for everything else). */
+        public int quantity = 1;
+
         public EntityEntry(String name, Library.TargetType type, String source) {
             this.name   = name;
             this.type   = type;
             this.source = source;
+        }
+
+        /** Remembers a tile on this entry (no-op for a null tile). @return this, for chaining. */
+        public EntityEntry withTile(org.dreambot.api.methods.map.Tile t) {
+            if (t != null) { this.x = t.getX(); this.y = t.getY(); this.z = t.getZ(); }
+            return this;
+        }
+
+        /** @return true when this entry knows where it is. */
+        public boolean hasTile() { return x != null && y != null; }
+
+        /** The tile as the "X, Y, Z" string every location parameter in DreamMan accepts. */
+        public String tileString() {
+            return hasTile() ? x + ", " + y + ", " + (z == null ? 0 : z) : null;
+        }
+
+        /** Compact row text for the coords, e.g. "3258,3271" (z shown only when non-zero). */
+        public String coordsLabel() {
+            if (!hasTile()) return null;
+            return x + "," + y + (z != null && z != 0 ? "," + z : "");
         }
 
         @Override public String toString() { return name; }
@@ -192,8 +222,8 @@ public class JLibraryList extends JPanel {
         tabRow.setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 1));
         tabRow.setPreferredSize(new Dimension(0, 26));
 
-        btnNearby  = buildTabButton("📍 Nearby",  true);
-        btnLibrary = buildTabButton("📚 Library", false);
+        btnNearby  = buildTabButton("Nearby",  true);
+        btnLibrary = buildTabButton("Library", false);
 
         btnNearby .addActionListener(e -> switchTo(ViewMode.NEARBY));
         btnLibrary.addActionListener(e -> switchTo(ViewMode.LIBRARY));
@@ -221,8 +251,8 @@ public class JLibraryList extends JPanel {
             public void changedUpdate(DocumentEvent e) { applyFilter(); }
         });
 
-        // tiny ✕ clear button on the right of the search bar
-        JButton clearBtn = new JButton("✕");
+        // tiny clear button (plain "x" - glyph-safe, B.17) on the right of the search bar
+        JButton clearBtn = new JButton("x");
         clearBtn.setFont(new Font("Consolas", Font.PLAIN, 9));
         clearBtn.setForeground(TEXT_DIM);
         clearBtn.setBackground(BG_LIST);
@@ -318,7 +348,7 @@ public class JLibraryList extends JPanel {
         statusLabel.setFont(new Font("Consolas", Font.PLAIN, 9));
         statusLabel.setForeground(TEXT_DIM);
 
-        refreshBtn = new JButton("⟳ Scan Nearby");
+        refreshBtn = new JButton("Scan Nearby");
         styleActionButton(refreshBtn, ACCENT_BLUE, ACCENT_HOVER);
         refreshBtn.addActionListener(e -> {
             if (currentMode == ViewMode.NEARBY) {
@@ -368,7 +398,8 @@ public class JLibraryList extends JPanel {
             if (liveNpcs != null) {
                 for (NPC npc : liveNpcs) {
                     if (withinRadius(npc.getTile())) {
-                        EntityEntry e = new EntityEntry(npc.getName(), Library.TargetType.NPC, "NEARBY");
+                        EntityEntry e = new EntityEntry(npc.getName(), Library.TargetType.NPC, "NEARBY")
+                                .withTile(npc.getTile());   // B.17: coords ride on the row
                         e.npcRef = npc;
                         addUnique(out, e);
                     }
@@ -383,7 +414,8 @@ public class JLibraryList extends JPanel {
             if (liveObjs != null) {
                 for (GameObject obj : liveObjs) {
                     if (withinRadius(obj.getTile())) {
-                        EntityEntry e = new EntityEntry(obj.getName(), Library.TargetType.GAME_OBJECT, "NEARBY");
+                        EntityEntry e = new EntityEntry(obj.getName(), Library.TargetType.GAME_OBJECT, "NEARBY")
+                                .withTile(obj.getTile());
                         e.objectRef = obj;
                         addUnique(out, e);
                     }
@@ -398,7 +430,10 @@ public class JLibraryList extends JPanel {
             if (liveItems != null) {
                 for (GroundItem item : liveItems) {
                     if (withinRadius(item.getTile())) {
-                        EntityEntry e = new EntityEntry(item.getName(), Library.TargetType.GROUND_ITEM, "NEARBY");
+                        EntityEntry e = new EntityEntry(item.getName(), Library.TargetType.GROUND_ITEM, "NEARBY")
+                                .withTile(item.getTile());
+                        // B.17: stack size on the row (same defensive read LootTracker uses)
+                        try { e.quantity = Math.max(1, item.getAmount()); } catch (Throwable ignored) {}
                         e.groundRef = item;
                         addUnique(out, e);
                     }
@@ -414,7 +449,8 @@ public class JLibraryList extends JPanel {
                 if (livePlayers != null) {
                     for (var p : livePlayers) {
                         if (withinRadius(p.getTile())) {
-                            addUnique(out, new EntityEntry(p.getName(), Library.TargetType.PLAYER, "NEARBY"));
+                            addUnique(out, new EntityEntry(p.getName(), Library.TargetType.PLAYER, "NEARBY")
+                                    .withTile(p.getTile()));
                         }
                     }
                 }
@@ -430,13 +466,16 @@ public class JLibraryList extends JPanel {
         libraryFull.clear();
 
         for (Library.Npcs n : Library.Npcs.values()) {
-            libraryFull.add(new EntityEntry(n.npcName, Library.TargetType.NPC, "LIBRARY"));
+            libraryFull.add(new EntityEntry(n.npcName, Library.TargetType.NPC, "LIBRARY")
+                    .withTile(n.approxTile));   // B.17: known spawn coords on the row
         }
         for (Library.GameObjects o : Library.GameObjects.values()) {
+            // objects are resolved live (no stored tile) - the row just shows the name
             libraryFull.add(new EntityEntry(o.objectName, Library.TargetType.GAME_OBJECT, "LIBRARY"));
         }
         for (Library.GroundItems i : Library.GroundItems.values()) {
-            libraryFull.add(new EntityEntry(i.itemName, Library.TargetType.GROUND_ITEM, "LIBRARY"));
+            libraryFull.add(new EntityEntry(i.itemName, Library.TargetType.GROUND_ITEM, "LIBRARY")
+                    .withTile(i.spawnTile));
         }
 
         setStatus("Library: " + libraryFull.size() + " entries");
@@ -450,7 +489,7 @@ public class JLibraryList extends JPanel {
         currentMode = mode;
         setTabActive(btnNearby,  mode == ViewMode.NEARBY);
         setTabActive(btnLibrary, mode == ViewMode.LIBRARY);
-        refreshBtn.setText(mode == ViewMode.NEARBY ? "⟳ Scan Nearby" : "⟳ Refresh");
+        refreshBtn.setText(mode == ViewMode.NEARBY ? "Scan Nearby" : "Refresh");
         applyFilter();
     }
 
@@ -553,6 +592,27 @@ public class JLibraryList extends JPanel {
         entityList.addMouseListener(new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) {
                 if (e.getClickCount() == 2) listener.mouseClicked(e);
+            }
+        });
+    }
+
+    /**
+     * Patch B.17: fires on ANY left-click of a row - the hook the Task Builder uses to auto-fill
+     * the current action's target. Deliberately a mouse gesture rather than a selection
+     * listener: background rescans re-apply the selection programmatically, and that must never
+     * overwrite a target the user has hand-edited since.
+     */
+    public void addClickListener(java.util.function.Consumer<EntityEntry> listener) {
+        entityList.addMouseListener(new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent e) {
+                if (!SwingUtilities.isLeftMouseButton(e)) return;
+                int idx = entityList.locationToIndex(e.getPoint());
+                if (idx < 0) return;
+                Rectangle cell = entityList.getCellBounds(idx, idx);
+                if (cell == null || !cell.contains(e.getPoint())) return;
+                entityList.setSelectedIndex(idx);
+                EntityEntry entry = entityList.getSelectedValue();
+                if (entry != null) listener.accept(entry);
             }
         });
     }
@@ -706,18 +766,27 @@ public class JLibraryList extends JPanel {
             // Type badge (painted pill)
             row.add(buildBadge(entry.type), BorderLayout.WEST);
 
-            // Entity name
-            JLabel name = new JLabel(entry.name);
+            // Entity name (+ stack size for items, Patch B.17)
+            JLabel name = new JLabel(entry.name + (entry.quantity > 1 ? "  x" + entry.quantity : ""));
             name.setFont(new Font("Consolas", Font.PLAIN, 11));
             name.setForeground(isSelected ? Color.WHITE : TEXT_PRIMARY);
             row.add(name, BorderLayout.CENTER);
 
-            // Source tag (tiny, right-aligned)
-            JLabel src = new JLabel(entry.source.equals("NEARBY") ? "live" : "lib");
+            // Right side: coordinates (the value you'll actually paste into Walk/dig targets)
+            // with the tiny live/lib tag after them (Patch B.17)
+            String coords = entry.coordsLabel();
+            JLabel src = new JLabel((coords != null ? coords + " \u00b7 " : "")
+                    + (entry.source.equals("NEARBY") ? "live" : "lib"));
             src.setFont(new Font("Consolas", Font.PLAIN, 9));
             src.setForeground(isSelected ? new Color(180, 200, 230) : TEXT_DIM);
             src.setBorder(new EmptyBorder(0, 0, 0, 2));
             row.add(src, BorderLayout.EAST);
+
+            String tip = "<html><b>" + entry.name + "</b>"
+                    + (entry.quantity > 1 ? " x" + entry.quantity : "")
+                    + (entry.tileString() != null ? "<br>Tile: " + entry.tileString() : "")
+                    + "<br><i>Click to use as the current action's target</i></html>";
+            row.setToolTipText(tip);
 
             return row;
         }

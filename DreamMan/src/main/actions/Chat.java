@@ -24,6 +24,10 @@ import static main.menu.MenuHandler.createParameterPanel;
  */
 public class Chat extends Action {
 
+    /** Patch B.17: no entity target - the entity list never writes into this action. */
+    @Override public boolean acceptsEntityTarget() { return false; }
+
+
     private JParamTextField paramMode;
     private JParamTextField paramSequence;
 

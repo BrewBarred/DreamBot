@@ -34,6 +34,23 @@ public class Trigger {
     private long cooldownMs = 3000;
     private transient long lastFiredAt = 0;
 
+    // ── v1.30: whole-check randomness ────────────────────────────────────────
+    /**
+     * Chance (1-100) that this check fires when it otherwise would. 100 = always (default).
+     * At, say, 10%, each eligible moment rolls once; a miss CONSUMES that moment (the
+     * cooldown/timer window restarts), so "bury bones at 10%" really does skip ~9 in 10
+     * full-inventory moments instead of just delaying a few seconds.
+     */
+    private int chancePercent = 100;
+
+    // ── v1.30: run-every timer ───────────────────────────────────────────────
+    /** Minimum interval for the timer to engage at all: 5 seconds. */
+    public static final long MIN_TIMER_MS = 5_000L;
+    /** When true (and the interval is >= {@link #MIN_TIMER_MS}), the check fires at most once per interval. */
+    private boolean timerEnabled = false;
+    /** The "only every h/m/s" interval in ms. Below MIN_TIMER_MS the timer is inert. */
+    private long timerIntervalMs = 0;
+
     // live run state for the response chain (transient)
     private transient boolean running = false;
     private transient int cursor = 0;
@@ -51,6 +68,9 @@ public class Trigger {
         this.enabled = o.enabled;
         this.replacesAction = o.replacesAction;
         this.cooldownMs = o.cooldownMs;
+        this.chancePercent = o.chancePercent;       // v1.30
+        this.timerEnabled = o.timerEnabled;         // v1.30
+        this.timerIntervalMs = o.timerIntervalMs;   // v1.30
         for (Action a : o.response)
             if (a != null) response.add(a.copyDeep());
     }
@@ -68,11 +88,43 @@ public class Trigger {
     public long getCooldownMs() { return cooldownMs; }
     public void setCooldownMs(long ms) { this.cooldownMs = Math.max(0, ms); }
 
-    /** True when the condition currently holds AND the cooldown has elapsed. Never throws. */
+    // ── v1.30 config ──
+    public int getChancePercent() { return chancePercent; }
+    public void setChancePercent(int pct) { this.chancePercent = Math.max(1, Math.min(100, pct)); }
+    public boolean isTimerEnabled() { return timerEnabled; }
+    public long getTimerIntervalMs() { return timerIntervalMs; }
+    public void setTimer(boolean enabled, long intervalMs) {
+        this.timerEnabled = enabled;
+        this.timerIntervalMs = Math.max(0, intervalMs);
+    }
+    /** True only when the timer is on AND long enough (>= 5s) to actually function. */
+    public boolean timerActive() { return timerEnabled && timerIntervalMs >= MIN_TIMER_MS; }
+
+    /**
+     * True when the condition currently holds, the cooldown AND run-every timer (v1.30) have
+     * both elapsed, and the chance roll (v1.30) passes. Never throws.
+     *
+     * <p>Order matters: gates first, the roll LAST - and a failed roll stamps
+     * {@code lastFiredAt}, consuming the whole window. Rolling on every poll instead would let
+     * a "10%" check fire within a few seconds anyway (10% per poll compounds); consuming the
+     * window is what makes 10% mean "about 1 in 10 opportunities".
+     */
     public boolean shouldFire() {
         if (!enabled || condition == null) return false;
-        if (System.currentTimeMillis() - lastFiredAt < cooldownMs && !running) return false;
-        try { return condition.test(arg); } catch (Throwable t) { return false; }
+        long now = System.currentTimeMillis();
+        if (!running) {
+            if (now - lastFiredAt < cooldownMs) return false;
+            if (timerActive() && now - lastFiredAt < timerIntervalMs) return false;
+        }
+        boolean holds;
+        try { holds = condition.test(arg); } catch (Throwable t) { return false; }
+        if (!holds) return false;
+        if (!running && chancePercent < 100
+                && java.util.concurrent.ThreadLocalRandom.current().nextInt(100) >= chancePercent) {
+            lastFiredAt = now;   // roll missed: this opportunity is spent, wait out the window
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -132,6 +184,20 @@ public class Trigger {
         String when = condition == null ? "(no condition)" : condition.describe(arg);
         String then = response.isEmpty() ? "(no response)"
                 : response.size() + (response.size() == 1 ? " action" : " actions");
-        return (replacesAction ? "instead: " : "") + "if " + when + " → " + then;
+        String prefix = "";
+        if (chancePercent < 100) prefix += "~" + chancePercent + "% ";           // v1.30
+        if (timerActive()) prefix += "every " + formatInterval(timerIntervalMs) + " ";  // v1.30
+        return prefix + (replacesAction ? "instead: " : "") + "if " + when + " -> " + then;
+    }
+
+    /** "1h 05m 30s"-style compact interval, dropping zero parts (v1.30). */
+    public static String formatInterval(long ms) {
+        long total = Math.max(0, ms / 1000);
+        long h = total / 3600, m = (total % 3600) / 60, s = total % 60;
+        StringBuilder sb = new StringBuilder();
+        if (h > 0) sb.append(h).append("h ");
+        if (m > 0) sb.append(m).append("m ");
+        if (s > 0 || sb.length() == 0) sb.append(s).append("s");
+        return sb.toString().trim();
     }
 }

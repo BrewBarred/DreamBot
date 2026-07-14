@@ -26,6 +26,10 @@ import static main.menu.MenuHandler.createParameterPanel;
  */
 public class FindBank extends Action {
 
+    /** Patch B.17: no entity target - the entity list never writes into this action. */
+    @Override public boolean acceptsEntityTarget() { return false; }
+
+
     private transient Tile bankTile;
     private transient long lastStepAt;
     private transient boolean reflectionFailed;

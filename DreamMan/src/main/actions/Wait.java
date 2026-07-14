@@ -26,6 +26,10 @@ import static main.menu.MenuHandler.createParameterPanel;
  */
 public class Wait extends Action {
 
+    /** Patch B.17: no entity target - the entity list never writes into this action. */
+    @Override public boolean acceptsEntityTarget() { return false; }
+
+
     /** Mode keys as serialised; order matches {@link #MODE_LABELS}. */
     static final String[] MODE_KEYS   = { "fixed", "quick", "realistic", "afk" };
     static final String[] MODE_LABELS = { "Fixed range", "Quick (~60-220ms)", "Realistic (~0.3-3s)", "Semi-AFK xN" };

@@ -17,6 +17,10 @@ import java.util.Set;
 import static main.menu.MenuHandler.*;
 
 public class Walk extends Action {
+
+    /** Patch B.17: Walk targets a PLACE - the entity list auto-fills "X, Y, Z" for it. */
+    @Override public boolean prefersTileTarget() { return true; }
+
     private final String DEFAULT_TARGET = "3217, 3238, 0"; // Default target: Lumbridge magic tutor
     private Runnable variation;
 
