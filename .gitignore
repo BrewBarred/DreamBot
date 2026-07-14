@@ -2,3 +2,12 @@
 /.idea/
 *.iml
 *.class
+/references/notes/
+/references/patch notes/PATCH_NOTES_B16.md
+/icons/
+/references/patches/
+/pass
+
+backups/
+*.zip
+*.pkg
