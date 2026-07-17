@@ -1,12 +1,12 @@
-/DreamMan/out/
-/.idea/
 *.iml
 *.class
-/icons/
-/references/patches/
-/references/patch notes/
-/references/notes/
-/pass
-backups/
 *.zip
 *.pkg
+/.idea/
+/icons/
+/references/
+/pass
+/past revisions/
+/DreamMan/server.js
+/DreamMan/out/
+/DreamMan/src/resources/
