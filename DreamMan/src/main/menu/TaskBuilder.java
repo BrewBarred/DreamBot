@@ -370,9 +370,28 @@ public class TaskBuilder extends JPanel {
         if (action == null) return;
         main.menu.components.TriggerEditor editor = new main.menu.components.TriggerEditor(
                 action.getTriggers(), true, botMenu::pickResponseActionPublic);
-        editor.setPreferredSize(new Dimension(460, 380));
-        JOptionPane.showMessageDialog(this, editor,
-                "Triggers for " + action.getName(), JOptionPane.PLAIN_MESSAGE);
+        // v1.33: the old 460x380 JOptionPane squeezed the detail column to ~150px, so every
+        // combo/field wrapped under its label and clipped to a sliver. Give it a real, resizable
+        // dialog with room for the fields.
+        editor.setPreferredSize(new Dimension(780, 560));
+        JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(this),
+                "Triggers for " + action.getName(), java.awt.Dialog.ModalityType.APPLICATION_MODAL);
+        dlg.setAlwaysOnTop(true);
+        JPanel wrap = new JPanel(new BorderLayout());
+        wrap.setBorder(new EmptyBorder(10, 10, 10, 10));
+        wrap.add(editor, BorderLayout.CENTER);
+        JButton ok = createButton("OK", new Color(30, 60, 40), null);
+        ok.addActionListener(e -> dlg.dispose());
+        JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        south.add(ok);
+        wrap.add(south, BorderLayout.SOUTH);
+        dlg.setContentPane(wrap);
+        dlg.setResizable(true);
+        dlg.pack();
+        dlg.setMinimumSize(new Dimension(680, 480));
+        dlg.setLocationRelativeTo(this);
+        dlg.toFront();
+        dlg.setVisible(true);
         refreshList();   // build-string previews may now show attached-watcher counts
     }
 
