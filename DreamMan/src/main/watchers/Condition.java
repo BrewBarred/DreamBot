@@ -78,6 +78,24 @@ public enum Condition {
         @Override public String argHint() { return "counts: \"Copper ore x14, Tin ore x14\" or \"Coal\""; }
     },
 
+    // v1.33: the positive counterpart - fires when the inventory HOLDS every listed item at (or
+    // above) its count. "Lobster x3, Shark" fires once you have 3 lobsters AND a shark; a bare
+    // name means x1. Use it to trigger a bank/deposit the moment a target set is gathered.
+    INVENTORY_HAS_COUNTS("Inventory has (set/amount)") {
+        @Override public boolean test(String arg) {
+            java.util.Map<String, Integer> want = main.actions.ActionUtil.parseItemList(arg);
+            if (want.isEmpty()) return false;
+            for (java.util.Map.Entry<String, Integer> e : want.entrySet()) {
+                int have = 0;
+                try { have = Inventory.count(e.getKey()); } catch (Throwable ignored) {}
+                if (have < e.getValue()) return false;   // ALL must be present at their counts
+            }
+            return true;
+        }
+        @Override public String describe(String arg) { return "have all [" + arg + "]"; }
+        @Override public String argHint() { return "set + counts: \"Lobster x3, Shark\" (bare = x1)"; }
+    },
+
     HP_BELOW("HP below (value or %)") {
         @Override public boolean test(String arg) {
             Integer v = current(Skill.HITPOINTS);
@@ -176,6 +194,24 @@ public enum Condition {
         }
         @Override public String describe(String arg) { return "not wearing \"" + arg + "\""; }
         @Override public String argHint() { return "exact item name - fetch a pickaxe on start"; }
+    },
+
+    // v1.33: multi-item equipped check - fires only when EVERY listed item is worn. Comma list,
+    // counts ignored (you either wear it or you don't): "Bronze pickaxe, Bronze full helm".
+    EQUIPMENT_SET("Wearing all of (set)") {
+        @Override public boolean test(String arg) {
+            java.util.Map<String, Integer> want = main.actions.ActionUtil.parseItemList(arg);
+            if (want.isEmpty()) return false;
+            for (String name : want.keySet()) {
+                try {
+                    if (!org.dreambot.api.methods.container.impl.equipment.Equipment.contains(name))
+                        return false;
+                } catch (Throwable t) { return false; }
+            }
+            return true;
+        }
+        @Override public String describe(String arg) { return "wearing all [" + arg + "]"; }
+        @Override public String argHint() { return "set: \"Bronze pickaxe, Bronze full helm\""; }
     };
 
     private final String label;
