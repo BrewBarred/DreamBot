@@ -108,6 +108,11 @@ public final class ProfileCodec {
         d.createdAt = task.getCreatedAt();
         d.origin = task.getOrigin();
         d.vipOnly = task.isVipOnly();
+        d.version = task.getVersion();          // v1.49
+        d.exported = task.isExported();
+        d.marketReady = task.isMarketReady();
+        d.published = task.isPublished();
+        d.downloaded = task.isDownloaded();
         d.timed = task.isTimed();
         d.timerMinutes = task.getTimerMinutes();
         d.timerJitterPct = task.getTimerJitterPct();
@@ -131,6 +136,11 @@ public final class ProfileCodec {
         t.restoreCreatedAt(d.createdAt);
         t.setOrigin(d.origin);
         t.setVipOnly(d.vipOnly);
+        t.setVersion(d.version);                // v1.49
+        t.setExported(d.exported);
+        t.setMarketReady(d.marketReady);
+        t.setPublished(d.published);
+        t.setDownloaded(d.downloaded);
         t.setTimed(d.timed);
         if (d.timerMinutes > 0) t.setTimerMinutes(d.timerMinutes);
         t.setTimerJitterPct(d.timerJitterPct);

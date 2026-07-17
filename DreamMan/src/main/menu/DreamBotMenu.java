@@ -206,6 +206,11 @@ public class DreamBotMenu extends JFrame {
     private final DefaultListModel<main.market.ScriptListing> modelMarket = new DefaultListModel<>();
     private final JList<main.market.ScriptListing> listMarket = new JList<>(modelMarket);
     private JButton btnMyUploads;   // v1.32b: hidden unless the server market is active
+    // v1.49: inline comments panel (folded in from the old pop-up)
+    private JTextArea inlineCommentFeed;
+    private JTextField inlineCommentInput;
+    private JButton inlineCommentPost;
+    private main.market.ScriptListing inlineCommentTarget;
     private final List<main.market.ScriptListing> marketAll = new ArrayList<>();
     private JTextField marketSearchField;
     private JComboBox<String> marketSortCombo;
@@ -249,6 +254,14 @@ public class DreamBotMenu extends JFrame {
                 Task copy = new Task(updated);
                 copy.setRepeat(t.getRepeat());
                 copy.setOrigin(t.getOrigin());   // editing doesn't change where it came from
+                // v1.49: an edit produces a new version, and the lifecycle tags carry across so
+                // you can still see this task was exported/published (just at an earlier version).
+                copy.setVersion(t.getVersion());
+                copy.bumpVersion();
+                copy.setExported(t.isExported());
+                copy.setMarketReady(t.isMarketReady());
+                copy.setPublished(t.isPublished());
+                copy.setDownloaded(t.isDownloaded());
                 libraryAll.set(i, copy);
                 touched++;
             }
@@ -1944,8 +1957,7 @@ public class DreamBotMenu extends JFrame {
                 // click). A queue entry is a deep copy so editing/running it never mutates the
                 // library original.
                 if (SwingUtilities.isLeftMouseButton(me) && me.getClickCount() == 2) {
-                    modelTaskList.addElement(new Task(t));
-                    int pos = modelTaskList.size() - 1;
+                    int pos = insertIntoQueue(t);
                     selectMainTab("Task List");
                     listTaskList.setSelectedIndex(pos);
                     listTaskList.ensureIndexIsVisible(pos);
@@ -1983,7 +1995,8 @@ public class DreamBotMenu extends JFrame {
             public void removeUpdate(javax.swing.event.DocumentEvent e) { refilterLibrary(); }
             public void changedUpdate(javax.swing.event.DocumentEvent e) { refilterLibrary(); }
         });
-        libraryFilterCombo = new JComboBox<>(new String[]{"All", "Built by me", "Imported", "Default"});
+        libraryFilterCombo = new JComboBox<>(new String[]{
+                "All", "Local", "Exported", "Market-Ready", "Published", "Downloaded"});
         libraryFilterCombo.setToolTipText("Filter by where tasks came from");
         libraryFilterCombo.addActionListener(e -> refilterLibrary());
 
@@ -2006,10 +2019,27 @@ public class DreamBotMenu extends JFrame {
         searchRow.setOpaque(false);
         searchRow.add(lblSearch, BorderLayout.WEST);
         searchRow.add(librarySearchField, BorderLayout.CENTER);
+        // v1.49: sort as single-select toggle buttons (only one active) instead of a dropdown.
+        // The hidden librarySortCombo stays as the state the filter reads; the buttons drive it.
+        JPanel sortBtns = new JPanel(new GridLayout(1, 3, 3, 0));
+        sortBtns.setOpaque(false);
+        String[] sorts = {"A-Z", "Newest", "Most used"};
+        ButtonGroup sortGroup = new ButtonGroup();
+        for (String s : sorts) {
+            JToggleButton b = new JToggleButton(s);
+            b.setFocusPainted(false);
+            b.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+            b.setToolTipText("Sort by " + s);
+            b.setSelected("A-Z".equals(s));
+            b.addActionListener(e -> librarySortCombo.setSelectedItem(s));   // fires refilterLibrary
+            sortGroup.add(b);
+            sortBtns.add(b);
+        }
+
         JPanel comboRow = new JPanel(new GridLayout(1, 2, 6, 0));
         comboRow.setOpaque(false);
         comboRow.add(libraryFilterCombo);
-        comboRow.add(librarySortCombo);
+        comboRow.add(sortBtns);
         JPanel filterRow = new JPanel(new BorderLayout());
         filterRow.setOpaque(false);
         filterRow.add(comboRow, BorderLayout.CENTER);
@@ -2033,9 +2063,18 @@ public class DreamBotMenu extends JFrame {
         btnTaskLibraryAdd.addActionListener(e -> {
             if(listTaskLibrary.getSelectedValue() != null) {
                 // deep-copy so editing/executing the queued task never mutates the library original
-                modelTaskList.addElement(new Task(listTaskLibrary.getSelectedValue()));
-                this.showToast("Added to position " + modelTaskList.size() + " of the queue", btnTaskLibraryAdd, true);
+                int pos = insertIntoQueue(listTaskLibrary.getSelectedValue());
+                listTaskList.setSelectedIndex(pos);
+                this.showToast("Added to position " + (pos + 1) + " of the queue", btnTaskLibraryAdd, true);
             }
+        });
+
+        // v1.33: toggle where library adds land - end of the queue, or after the selected item.
+        JButton btnInsertPos = createButton("Insert: End", new Color(45, 45, 55), null);
+        btnInsertPos.setToolTipText("Where added tasks go in the queue - click to toggle");
+        btnInsertPos.addActionListener(e -> {
+            insertAfterSelected = !insertAfterSelected;
+            btnInsertPos.setText(insertAfterSelected ? "Insert: After selected" : "Insert: End");
         });
 
         ///  Create Task Library delete button
@@ -2085,8 +2124,14 @@ public class DreamBotMenu extends JFrame {
         btnMarketReady.addActionListener(e ->
                 makeMarketReady(listTaskLibrary.getSelectedValue(), btnMarketReady));
 
+        JButton btnQuickAdd = createButton("Quick add\u2026", new Color(35, 55, 70), null);
+        btnQuickAdd.setToolTipText("Search the library and add several tasks fast without leaving");
+        btnQuickAdd.addActionListener(e -> openLibraryQuickAdd());
+
         btnSection.add(btnTaskLibrarySave);
         btnSection.add(btnTaskLibraryAdd);
+        btnSection.add(btnQuickAdd);
+        btnSection.add(btnInsertPos);
         btnSection.add(btnTaskLibraryDelete);
         btnSection.add(btnTaskLibraryEdit);
         btnSection.add(btnTaskLibraryExport);
@@ -2144,7 +2189,123 @@ public class DreamBotMenu extends JFrame {
         refreshTaskListTab(-1);
     }
 
+    /**
+     * v1.33: where library adds land in the queue - false = end, true = right after the currently
+     * selected queue item. Toggled by the "Insert" button in the library.
+     */
+    private boolean insertAfterSelected = false;
+
+    /** Deep-copies {@code t} into the queue at the chosen position; returns the landed index. */
+    private int insertIntoQueue(Task t) {
+        Task copy = new Task(t);
+        int pos;
+        if (insertAfterSelected) {
+            int sel = listTaskList.getSelectedIndex();
+            pos = (sel >= 0 && sel < modelTaskList.size()) ? sel + 1 : modelTaskList.size();
+        } else {
+            pos = modelTaskList.size();
+        }
+        modelTaskList.add(pos, copy);
+        return pos;
+    }
+
+    /**
+     * v1.33: a sleek pop-up for fast queue-building - a search box over the whole library where
+     * double-clicking a task adds it to the queue WITHOUT closing, so you can rattle off a preset
+     * quickly. A live label shows the queue size and how many you've added this session.
+     */
+    private void openLibraryQuickAdd() {
+        JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(this),
+                "Quick add from library", java.awt.Dialog.ModalityType.APPLICATION_MODAL);
+        dlg.setAlwaysOnTop(true);
+
+        JTextField search = new JTextField();
+        DefaultListModel<Task> qModel = new DefaultListModel<>();
+        JList<Task> qList = new JList<>(qModel);
+        qList.setCellRenderer(new LibraryCardRenderer());
+        qList.setFixedCellHeight(-1);
+
+        JLabel count = new JLabel();
+        count.setForeground(Theme.ACCENT);
+        count.setBorder(new EmptyBorder(6, 4, 6, 4));
+        final int[] added = {0};
+        Runnable updateCount = () -> count.setText("Queue: " + modelTaskList.size()
+                + " tasks   \u00b7   added this session: " + added[0]);
+        updateCount.run();
+
+        Runnable refill = () -> {
+            String q = search.getText().trim().toLowerCase();
+            qModel.clear();
+            for (Task t : libraryAll) {
+                if (t == null) continue;
+                if (t.isVipOnly() && libraryHideVipCheck != null && libraryHideVipCheck.isSelected())
+                    continue;
+                if (!q.isEmpty()) {
+                    String hay = (t.getName() + " "
+                            + (t.getDescription() == null ? "" : t.getDescription())).toLowerCase();
+                    if (!hay.contains(q)) continue;
+                }
+                qModel.addElement(t);
+            }
+        };
+        refill.run();
+        search.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { refill.run(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { refill.run(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { refill.run(); }
+        });
+
+        qList.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent me) {
+                if (me.getClickCount() != 2) return;
+                Task t = qList.getSelectedValue();
+                if (t == null) return;
+                int pos = insertIntoQueue(t);
+                added[0]++;
+                updateCount.run();
+                showToast("Added \"" + t.getName() + "\" (pos " + (pos + 1) + ")", count, true);
+            }
+        });
+
+        JPanel top = new JPanel(new BorderLayout(6, 0));
+        top.setOpaque(false);
+        top.setBorder(new EmptyBorder(8, 8, 4, 8));
+        top.add(new JLabel("Search:"), BorderLayout.WEST);
+        top.add(search, BorderLayout.CENTER);
+
+        JButton close = createButton("Done", new Color(30, 60, 40), null);
+        close.addActionListener(e -> dlg.dispose());
+        JPanel bottom = new JPanel(new BorderLayout());
+        bottom.setOpaque(false);
+        bottom.setBorder(new EmptyBorder(4, 8, 8, 8));
+        bottom.add(count, BorderLayout.WEST);
+        JPanel closeWrap = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        closeWrap.setOpaque(false);
+        closeWrap.add(close);
+        bottom.add(closeWrap, BorderLayout.EAST);
+
+        JPanel root = new JPanel(new BorderLayout());
+        root.setBackground(BG_BASE);
+        root.add(top, BorderLayout.NORTH);
+        root.add(Theme.thinScrollbars(new JScrollPane(qList)), BorderLayout.CENTER);
+        root.add(bottom, BorderLayout.SOUTH);
+        JLabel hint = new JLabel("  Double-click a task to add it - the window stays open so you can add several.");
+        hint.setForeground(Theme.TEXT_DIM);
+        hint.setBorder(new EmptyBorder(0, 8, 6, 8));
+        root.add(hint, BorderLayout.PAGE_END);
+
+        dlg.setContentPane(root);
+        dlg.setSize(560, 560);
+        dlg.setLocationRelativeTo(this);
+        dlg.toFront();
+        SwingUtilities.invokeLater(search::requestFocusInWindow);
+        dlg.setVisible(true);
+        refreshTaskListTab();
+    }
+
     private void refreshTaskLibrary() {
+        // Patch B.3: keep usage counts, the dropdown's library entries and the inspector live
+        computeLibraryUseCounts();
         // Patch B.3: keep usage counts, the dropdown's library entries and the inspector live
         computeLibraryUseCounts();
         syncSelectorLibraryEntries();
@@ -2261,7 +2422,8 @@ public class DreamBotMenu extends JFrame {
                     ? (isDefault ? "Default task - ships to every user. Click to remove."
                                  : "Click to make this a default task for every user.")
                     : (isDefault ? "Default task - included with DreamMan." : null));
-            name.setText(t.getName());
+            // v1.49: show the version beside the name, and the strongest lifecycle tag on the date row
+            name.setText(t.getName() + "  v" + String.format("%.1f", t.getVersion()));
             StringBuilder sb = new StringBuilder();
             if (t.getActions() != null) {
                 int shown = 0;
@@ -2276,10 +2438,15 @@ public class DreamBotMenu extends JFrame {
             int useCount = libraryUseCounts.getOrDefault(t.getId(), 0);
             uses.setText(useCount > 0 ? "×" + useCount + " uses" : " ");
             uses.setForeground(useCount > 0 ? Theme.ACCENT : TEXT_DIM);
-            date.setText(t.getCreatedAt() > 0
+            String tag = t.isPublished() ? "published"
+                    : t.isMarketReady() ? "market-ready"
+                    : t.isDownloaded() ? "downloaded"
+                    : t.isExported() ? "exported" : null;
+            String dateStr = t.getCreatedAt() > 0
                     ? new java.text.SimpleDateFormat("yyyy-MM-dd").format(new Date(t.getCreatedAt()))
-                    : " ");
-            date.setForeground(TEXT_DIM);
+                    : "";
+            date.setText(tag != null ? tag + "  ·  " + dateStr : (dateStr.isEmpty() ? " " : dateStr));
+            date.setForeground(tag != null ? Theme.ACCENT : TEXT_DIM);
             setBackground(selected ? new Color(46, 42, 30) : Theme.SURFACE_1);
             name.setForeground(selected ? Theme.ACCENT : TEXT_MAIN);
             chain.setForeground(TEXT_DIM);
@@ -2506,9 +2673,15 @@ public class DreamBotMenu extends JFrame {
             if (t.isVipOnly() && libraryHideVipCheck != null && libraryHideVipCheck.isSelected())
                 continue;
             String origin = t.getOrigin();
-            if ("Built by me".equals(filter) && !"user".equals(origin)) continue;
-            if ("Imported".equals(filter) && !"imported".equals(origin)) continue;
-            if ("Default".equals(filter) && !"default".equals(origin)) continue;
+            // v1.49 six-filter set
+            if ("Local".equals(filter)
+                    && !("user".equals(origin) || "default".equals(origin)) && !t.isMarketReady())
+                continue;
+            if ("Exported".equals(filter) && !t.isExported()) continue;
+            if ("Market-Ready".equals(filter) && !t.isMarketReady()) continue;
+            if ("Published".equals(filter) && !t.isPublished()) continue;
+            if ("Downloaded".equals(filter)
+                    && !(t.isDownloaded() || "imported".equals(origin))) continue;
             view.add(t);
         }
 
@@ -2570,6 +2743,7 @@ public class DreamBotMenu extends JFrame {
 
         TaskData dto = ProfileCodec.toData(selected);
         boolean ok = LocalStore.exportToFile(dto, file);
+        if (ok) { selected.setExported(true); saveAll(false); refilterLibrary(); }   // v1.49
         showToast(ok ? "Exported " + selected.getName() : "Export failed", anchor, ok);
     }
 
@@ -2853,7 +3027,11 @@ public class DreamBotMenu extends JFrame {
                 + "(rate &amp; comment here).<br><b>My uploads</b> - your scripts that are on the "
                 + "server.<br><b>Local</b> - your local/market-ready staging.<br><b>All</b> - "
                 + "everything.</html>");
-        marketSourceCombo.addActionListener(e -> { refilterMarket(); updateMarketButtons(); });
+        marketSourceCombo.addActionListener(e -> {
+            refilterMarket();
+            updateMarketButtons();
+            refreshMyUploadsQuota();   // v1.49: show per-kind quota inline in My uploads view
+        });
         JButton btnSortIcon = iconButton(main.menu.components.UIIcons.sort(20, ic),
                 "Sort the list", null);
         btnSortIcon.addActionListener(e -> {
@@ -2978,12 +3156,114 @@ public class DreamBotMenu extends JFrame {
         JPanel body = new JPanel(new BorderLayout(0, 8));
         body.setOpaque(false);
         body.add(head, BorderLayout.NORTH);
-        body.add(scroll, BorderLayout.CENTER);
+        // v1.49: list on the left, an inline comments panel on the right - no more pop-up window.
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+                scroll, buildInlineCommentsPanel());
+        split.setResizeWeight(0.68);
+        split.setBorder(null);
+        split.setOpaque(false);
+        body.add(split, BorderLayout.CENTER);
         body.add(bottom, BorderLayout.SOUTH);
         panel.add(body, BorderLayout.CENTER);
 
+        // load the selected script's comments into the inline panel
+        listMarket.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) loadInlineComments(listMarket.getSelectedValue());
+        });
+
         reloadMarket();
         return panel;
+    }
+
+    /** v1.49: the inline comments panel that replaces the old comments pop-up. */
+    private JComponent buildInlineCommentsPanel() {
+        JPanel p = new JPanel(new BorderLayout(0, 6));
+        p.setOpaque(false);
+        p.setBorder(new EmptyBorder(0, 8, 0, 0));
+        JLabel title = new JLabel("Comments");
+        title.setForeground(Theme.ACCENT);
+        title.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        p.add(title, BorderLayout.NORTH);
+
+        inlineCommentFeed = new JTextArea();
+        inlineCommentFeed.setEditable(false);
+        inlineCommentFeed.setLineWrap(true);
+        inlineCommentFeed.setWrapStyleWord(true);
+        inlineCommentFeed.setBackground(new Color(0x1A, 0x1A, 0x1A));
+        inlineCommentFeed.setForeground(TEXT_MAIN);
+        inlineCommentFeed.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        inlineCommentFeed.setText("Select a script to see its comments.");
+        p.add(Theme.thinScrollbars(new JScrollPane(inlineCommentFeed)), BorderLayout.CENTER);
+
+        inlineCommentInput = new JTextField();
+        inlineCommentPost = createButton("Post");
+        inlineCommentPost.addActionListener(e -> postInlineComment());
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setOpaque(false);
+        row.add(inlineCommentInput, BorderLayout.CENTER);
+        row.add(inlineCommentPost, BorderLayout.EAST);
+        p.add(row, BorderLayout.SOUTH);
+        p.setPreferredSize(new Dimension(280, 100));
+        return p;
+    }
+
+    private void loadInlineComments(main.market.ScriptListing l) {
+        inlineCommentTarget = l;
+        if (inlineCommentFeed == null) return;
+        boolean server = marketRepo instanceof main.market.HttpRepository;
+        boolean canPost = server && !"local".equals(l == null ? "" : l.origin)
+                && main.market.ServerAccount.isLoggedIn();
+        if (inlineCommentInput != null) inlineCommentInput.setEnabled(canPost);
+        if (inlineCommentPost != null) inlineCommentPost.setEnabled(canPost);
+        if (l == null) { inlineCommentFeed.setText("Select a script to see its comments."); return; }
+        if (!server || "local".equals(l.origin)) {
+            inlineCommentFeed.setText("Comments are for the live market only.");
+            return;
+        }
+        inlineCommentFeed.setText("Loading comments\u2026");
+        final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
+        final String id = l.id;
+        new Thread(() -> {
+            try {
+                main.market.HttpRepository.CommentPage cp = repo.comments(id, 0, 30);
+                StringBuilder sb = new StringBuilder();
+                if (cp.comments.isEmpty()) sb.append("No comments yet.");
+                java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("d MMM HH:mm");
+                for (main.market.HttpRepository.Comment c : cp.comments)
+                    sb.append(c.author).append("  \u00b7  ")
+                      .append(fmt.format(new java.util.Date(c.at))).append("\n")
+                      .append(c.body).append("\n\n");
+                final String text = sb.toString();
+                SwingUtilities.invokeLater(() -> {
+                    if (inlineCommentTarget != null && id.equals(inlineCommentTarget.id)) {
+                        inlineCommentFeed.setText(text);
+                        inlineCommentFeed.setCaretPosition(0);
+                    }
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> inlineCommentFeed.setText(
+                        "Couldn't load comments: " + ex.getMessage()));
+            }
+        }, "DreamMan-InlineComments").start();
+    }
+
+    private void postInlineComment() {
+        main.market.ScriptListing l = inlineCommentTarget;
+        if (l == null || !(marketRepo instanceof main.market.HttpRepository)) return;
+        String body = inlineCommentInput.getText().trim();
+        if (body.isEmpty()) return;
+        if (!main.market.ServerAccount.isLoggedIn()) { showToast("Log in to comment", inlineCommentPost, false); return; }
+        final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
+        inlineCommentInput.setText("");
+        new Thread(() -> {
+            try {
+                repo.addComment(l.id, body);
+                SwingUtilities.invokeLater(() -> loadInlineComments(l));
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() ->
+                        showToast("Comment failed: " + ex.getMessage(), inlineCommentPost, false));
+            }
+        }, "DreamMan-PostComment").start();
     }
 
     /** v1.32b: the per-row market menu - actions depend on where the row lives and whose it is. */
@@ -3015,9 +3295,7 @@ public class DreamBotMenu extends JFrame {
             });
             menu.add(miDeleteLocal);
         } else {
-            JMenuItem miComments = new JMenuItem("Comments\u2026");
-            miComments.addActionListener(a -> openComments(l));
-            menu.add(miComments);
+            // v1.49: comments are now shown INLINE (right-hand panel) - no pop-up menu item.
             if (isOwnListing(l) || main.market.Tier.isAdmin()) {
                 menu.addSeparator();
                 JMenuItem miRename = new JMenuItem("Rename\u2026");
@@ -3437,6 +3715,26 @@ public class DreamBotMenu extends JFrame {
         if (btnMyUploads != null) btnMyUploads.setVisible(serverMode);
     }
 
+    /** v1.49: shows your per-kind upload quota inline (in the header) when in the My-uploads view. */
+    private void refreshMyUploadsQuota() {
+        if (lblMarketSource == null || marketSourceCombo == null) return;
+        if (!(marketRepo instanceof main.market.HttpRepository)) return;
+        if (!"My uploads".equals(marketSourceCombo.getSelectedItem())) return;
+        if (!main.market.ServerAccount.isLoggedIn()) return;
+        final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
+        new Thread(() -> {
+            try {
+                main.market.HttpRepository.MyUploads mine = repo.myScripts();
+                final String q = (mine.usage != null && mine.usage.task != null)
+                        ? "Your uploads \u2014 Tasks: " + mine.usage.task.used + "/" + mine.usage.task.cap
+                          + "  \u00b7  Scripts: " + mine.usage.script.used + "/" + mine.usage.script.cap
+                          + "   (" + mine.tier + " tier)"
+                        : "Your uploads: " + mine.used + " / " + mine.cap + "  (" + mine.tier + " tier)";
+                SwingUtilities.invokeLater(() -> lblMarketSource.setText(q));
+            } catch (Exception ignored) { /* leave the existing label */ }
+        }, "DreamMan-Quota").start();
+    }
+
     private JTextArea privacyStatusArea;   // legacy (unused after the v1.32b checkbox redesign)
     private JPanel privacyContent;         // v1.32b: checkbox toggles + info, rebuilt on refresh
 
@@ -3847,14 +4145,15 @@ public class DreamBotMenu extends JFrame {
 
             // v1.32b: the per-row download button. Disabled (dim) for your own uploads and for
             // listings with no bundle to import; active (green) otherwise.
+            // v1.49: you can now download your own uploads too (collision-checked on import).
             boolean own = isOwnListing(l);
-            boolean canDownload = !own && l.bundle != null
+            boolean canDownload = l.bundle != null
                     && l.bundle.tasks != null && !l.bundle.tasks.isEmpty();
             dlButton.setIcon(main.menu.components.UIIcons.importIcon(17,
                     canDownload ? new Color(0x6F, 0xC2, 0x76) : new Color(0x55, 0x55, 0x55)));
-            dlButton.setToolTipText(own ? "Your own upload"
-                    : canDownload ? "Download / import into your library"
-                    : (l.vipOnly ? "VIP only" : "No tasks to download"));
+            dlButton.setToolTipText(!canDownload ? (l.vipOnly ? "VIP only" : "No tasks to download")
+                    : own ? "Download your own upload (e.g. to another device)"
+                    : "Download / import into your library");
 
             setBackground(selected ? new Color(46, 42, 30) : Theme.SURFACE_1);
             name.setForeground(selected ? Theme.ACCENT : TEXT_MAIN);
@@ -3898,9 +4197,8 @@ public class DreamBotMenu extends JFrame {
     private void importFromMarket(JComponent anchor) {
         main.market.ScriptListing l = listMarket.getSelectedValue();
         if (l == null) { showToast("Pick a script first", anchor, false); return; }
-        // v1.32b: no need to download your own upload - it's already yours.
-        if (isOwnListing(l)) { showToast("That's your own upload \u2014 it's already in your library",
-                anchor, false); return; }
+        // v1.49: you CAN now download your own uploads (e.g. onto another device). Name-collision
+        // handling below stops it from silently duplicating what you already have.
         if (l.bundle == null || l.bundle.tasks == null || l.bundle.tasks.isEmpty()) {
             showToast("That listing has no tasks", anchor, false);
             return;
@@ -3930,6 +4228,29 @@ public class DreamBotMenu extends JFrame {
         // honouring each step's xN repeat - into a single task named after the listing.
         Task merged = mergeBundleIntoOneTask(l);
         if (merged == null) { showToast("Couldn't rebuild that script's actions", anchor, false); return; }
+        merged.setVersion(l.version <= 0 ? 1.0 : l.version);   // v1.49: carry the market version
+
+        // v1.49: name-collision handling. If a library task already has this name, don't silently
+        // duplicate - offer to overwrite yours, keep both (rename the download), or cancel. The
+        // version numbers are shown so you can tell which copy is which.
+        Task existing = null;
+        for (Task t : libraryAll)
+            if (t != null && merged.getName().equalsIgnoreCase(t.getName())) { existing = t; break; }
+        if (existing != null) {
+            Object[] opts = {"Overwrite mine", "Keep both (rename)", "Cancel"};
+            int choice = JOptionPane.showOptionDialog(this,
+                    "<html>You already have a task named <b>" + merged.getName() + "</b> (v"
+                    + String.format("%.1f", existing.getVersion()) + ").<br>"
+                    + "This download is <b>v" + String.format("%.1f", merged.getVersion())
+                    + "</b>.<br><br>Overwrite your copy, keep both (the download is renamed), or "
+                    + "cancel?</html>",
+                    "You already have \"" + merged.getName() + "\"",
+                    JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE, null, opts, opts[0]);
+            if (choice == 2 || choice == JOptionPane.CLOSED_OPTION) return;
+            if (choice == 0) libraryAll.remove(existing);                 // overwrite
+            else merged.setName(uniqueLibraryName(merged.getName()));     // keep both
+        }
+
         libraryAdd(merged);
         refreshTaskLibrary();
         marketRepo.noteDownload(l.id);
@@ -3989,6 +4310,7 @@ public class DreamBotMenu extends JFrame {
         }
         merged.regenerateId();          // a fresh identity so it can't collide with your own tasks
         merged.setOrigin("imported");
+        merged.setDownloaded(true);     // v1.49: drives the Downloaded filter
         return merged;
     }
 
@@ -4086,6 +4408,9 @@ public class DreamBotMenu extends JFrame {
 
         try {
             localMarketRepo.publish(listing);
+            t.setMarketReady(true);   // v1.49: drives the Market-Ready filter
+            saveAll(false);
+            refilterLibrary();
             showToast("\"" + t.getName() + "\" is market-ready \u2014 see the market's Local view",
                     anchor, true);
             reloadMarket();
@@ -4189,11 +4514,39 @@ public class DreamBotMenu extends JFrame {
                 return;
             }
             marketRepo.publish(listing);
+            markLibraryPublished(listing.name);   // v1.49: drives the Published filter/tag
             reloadMarket();
             showToast("Published \"" + listing.name + "\"", anchor, true);
         } catch (Exception ex) {
             showToast("Publish failed: " + ex.getMessage(), anchor, false);
         }
+    }
+
+    /** v1.49: a library name not already in use - appends " (2)", " (3)"… until unique. */
+    private String uniqueLibraryName(String base) {
+        String name = base;
+        int n = 2;
+        outer:
+        while (true) {
+            for (Task t : libraryAll)
+                if (t != null && name.equalsIgnoreCase(t.getName())) {
+                    name = base + " (" + (n++) + ")";
+                    continue outer;
+                }
+            return name;
+        }
+    }
+
+    /** v1.49: flag any library task with this name as published (best-effort name match). */
+    private void markLibraryPublished(String name) {
+        if (name == null || name.isBlank()) return;
+        boolean any = false;
+        for (Task t : libraryAll)
+            if (t != null && name.equalsIgnoreCase(t.getName()) && !t.isPublished()) {
+                t.setPublished(true);
+                any = true;
+            }
+        if (any) { saveAll(false); refilterLibrary(); }
     }
 
     /** Remove a listing (a shared folder has no ownership - hence the warning). */
@@ -5012,6 +5365,13 @@ public class DreamBotMenu extends JFrame {
         private long createdAt = System.currentTimeMillis();
         /** Where this task came from (Patch B.5): "user" (built here), "imported", "default". */
         private String origin = "user";
+        /** v1.49: version number, shown in lists and bumped when a task is saved over. */
+        private double version = 1.0;
+        /** v1.49: lifecycle flags that drive the library filters. */
+        private boolean exported = false;     // saved to disk explicitly
+        private boolean marketReady = false;  // staged to the local market
+        private boolean published = false;    // uploaded to the server market
+        private boolean downloaded = false;   // pulled down from the market
         /** Patch B.14: VIP-gated task. Admins tick this; the library hides it from free users. */
         private boolean vipOnly = false;
         private String name;
@@ -5052,6 +5412,11 @@ public class DreamBotMenu extends JFrame {
             this.createdAt = o.createdAt;
             this.origin = o.origin;
             this.vipOnly = o.vipOnly;
+            this.version = o.version;           // v1.49
+            this.exported = o.exported;
+            this.marketReady = o.marketReady;
+            this.published = o.published;
+            this.downloaded = o.downloaded;
             this.name = o.name;
             this.description = o.description;
             this.status = o.status;
@@ -5092,6 +5457,17 @@ public class DreamBotMenu extends JFrame {
         /** "user" | "imported" | "default" (Patch B.5) - drives the library filter. */
         public String getOrigin() { return origin == null || origin.isEmpty() ? "user" : origin; }
         public void setOrigin(String o) { if (o != null && !o.isEmpty()) this.origin = o; }
+        public double getVersion() { return version <= 0 ? 1.0 : version; }
+        public void setVersion(double v) { this.version = v <= 0 ? 1.0 : v; }
+        public void bumpVersion() { this.version = Math.round((getVersion() + 0.1) * 10.0) / 10.0; }
+        public boolean isExported() { return exported; }
+        public void setExported(boolean b) { this.exported = b; }
+        public boolean isMarketReady() { return marketReady; }
+        public void setMarketReady(boolean b) { this.marketReady = b; }
+        public boolean isPublished() { return published; }
+        public void setPublished(boolean b) { this.published = b; }
+        public boolean isDownloaded() { return downloaded; }
+        public void setDownloaded(boolean b) { this.downloaded = b; }
 
         /** Patch B.14: whether this is a VIP-only task. */
         public boolean isVipOnly() { return vipOnly; }

@@ -25,6 +25,12 @@ public class TaskData {
 
     /** Patch B.14: VIP-only task flag. */
     public boolean vipOnly = false;
+    /** v1.49: version + lifecycle flags. Absent in old saves (default 1.0 / false). */
+    public double version = 1.0;
+    public boolean exported = false;
+    public boolean marketReady = false;
+    public boolean published = false;
+    public boolean downloaded = false;
     public String name;
     public String description;
     public String status;

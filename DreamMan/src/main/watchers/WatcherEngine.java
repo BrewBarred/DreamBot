@@ -32,7 +32,12 @@ public final class WatcherEngine {
         /** One or more responses are mid-run; the queue action was NOT run this loop. */
         RUNNING,
         /** A replacesAction check finished; skip the current queue action for this pass. */
-        REPLACED
+        REPLACED,
+        /** v1.33 control signals emitted when a finished trigger carries a Control. */
+        SKIP_NEXT,
+        RESTART_LAST,
+        RESTART_TASK,
+        RESTART_QUEUE
     }
 
     /** All responses currently mid-run (each Trigger holds its own chain cursor). */
@@ -68,6 +73,7 @@ public final class WatcherEngine {
         //    condition may no longer hold, so the loser simply won't fire - which is exactly the
         //    "bank OR bury on full, not both" behaviour, decided by the order you arrange checks.
         boolean replacedFinished = false;
+        Trigger.Control pendingControl = Trigger.Control.NONE;   // v1.33: strongest wins
         java.util.Set<String> claimedGroups = new java.util.HashSet<>();
         Iterator<Trigger> it = active.iterator();
         while (it.hasNext()) {
@@ -87,12 +93,35 @@ public final class WatcherEngine {
             if (done) {
                 it.remove();
                 if (t.replacesAction()) replacedFinished = true;
+                pendingControl = stronger(pendingControl, t.getControl());   // v1.33
             }
         }
 
+        // v1.33: a finished trigger's Control reshapes the queue - takes precedence over REPLACED.
+        switch (pendingControl) {
+            case RESTART_QUEUE: return Outcome.RESTART_QUEUE;
+            case RESTART_TASK:  return Outcome.RESTART_TASK;
+            case SKIP_NEXT:     return Outcome.SKIP_NEXT;
+            case RESTART_LAST:  return Outcome.RESTART_LAST;
+            default: break;
+        }
         if (replacedFinished)
             return Outcome.REPLACED;   // consume the queue action for this pass
         return active.isEmpty() ? Outcome.IDLE : Outcome.RUNNING;
+    }
+
+    /** Precedence when several finish the same cycle: restarting the queue is the most drastic. */
+    private static Trigger.Control stronger(Trigger.Control a, Trigger.Control b) {
+        return rank(b) > rank(a) ? b : a;
+    }
+    private static int rank(Trigger.Control c) {
+        switch (c) {
+            case RESTART_QUEUE: return 4;
+            case RESTART_TASK:  return 3;
+            case SKIP_NEXT:     return 2;
+            case RESTART_LAST:  return 1;
+            default:            return 0;
+        }
     }
 
     /** True while any response chain is mid-run. */

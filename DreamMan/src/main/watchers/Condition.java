@@ -196,6 +196,28 @@ public enum Condition {
         @Override public String argHint() { return "exact item name - fetch a pickaxe on start"; }
     },
 
+    // v1.33: task-position conditions - fire based on WHERE the queue is, not world state. Set
+    // these on a GLOBAL trigger; the arg is the task's name. "Before" fires just before the named
+    // task's first action runs; "After" fires just after it completes. Pair with a response (buff,
+    // world-hop, restock) or a control (restart queue) to sequence around a specific task.
+    BEFORE_TASK("Just before task (name)") {
+        @Override public boolean test(String arg) {
+            try { return main.watchers.TaskEventBus.isStarting(arg); }
+            catch (Throwable t) { return false; }
+        }
+        @Override public String describe(String arg) { return "before \"" + arg + "\""; }
+        @Override public String argHint() { return "exact task name, e.g. Bank platebodies"; }
+    },
+
+    AFTER_TASK("Just after task (name)") {
+        @Override public boolean test(String arg) {
+            try { return main.watchers.TaskEventBus.isFinished(arg); }
+            catch (Throwable t) { return false; }
+        }
+        @Override public String describe(String arg) { return "after \"" + arg + "\""; }
+        @Override public String argHint() { return "exact task name, e.g. Mine copper"; }
+    },
+
     // v1.33: multi-item equipped check - fires only when EVERY listed item is worn. Comma list,
     // counts ignored (you either wear it or you don't): "Bronze pickaxe, Bronze full helm".
     EQUIPMENT_SET("Wearing all of (set)") {

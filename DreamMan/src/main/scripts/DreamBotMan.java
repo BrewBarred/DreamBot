@@ -278,7 +278,8 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
 
             // If the index changed since we last ran (e.g. the user pressed Skip or
             // Run-from-here), restart cleanly at the first action of the new task.
-            if (index != lastServedIndex) {
+            boolean switchedTask = (index != lastServedIndex);   // v1.33
+            if (switchedTask) {
                 actionCursor = 0;
                 taskRunsDone = 0;
                 lastServedIndex = index;
@@ -295,6 +296,11 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
                 menu.setCurrentExecutionIndex(0);
                 return Rand.nextInt(263, 983);
             }
+
+            // v1.33: announce a task is about to start so BEFORE_TASK triggers can fire before its
+            // first action. Only on a genuine switch, and only at the very first action.
+            if (switchedTask && currentTask != null && actionCursor == 0)
+                main.watchers.TaskEventBus.taskStarting(currentTask.getName());
 
             List<Action> actions = currentTask != null ? currentTask.getActions() : null;
             if (currentTask == null || actions == null || actions.isEmpty()) {
@@ -338,6 +344,40 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
                     actionCursor = 0;
                     onTaskRunComplete(menu, currentTask);
                 }
+                return Rand.nextInt(180, 420);
+            }
+            // ── v1.33: control-flow outcomes from a finished trigger ──
+            if (wo == main.watchers.WatcherEngine.Outcome.SKIP_NEXT) {
+                // skip the upcoming action, count it satisfied so the task moves on
+                if (action != null) action.resetAttempts();
+                lastPolledAction = null;
+                actionCursor++;
+                if (actionCursor >= actions.size()) {
+                    actionCursor = 0;
+                    onTaskRunComplete(menu, currentTask);
+                }
+                return Rand.nextInt(180, 420);
+            }
+            if (wo == main.watchers.WatcherEngine.Outcome.RESTART_LAST) {
+                // re-run the action the queue is on (reset its progress; do NOT advance)
+                if (action != null) action.resetAttempts();
+                lastPolledAction = null;
+                return Rand.nextInt(180, 420);
+            }
+            if (wo == main.watchers.WatcherEngine.Outcome.RESTART_TASK) {
+                // restart the current task from its first action
+                actionCursor = 0;
+                lastPolledAction = null;
+                watchers.reset();
+                return Rand.nextInt(180, 420);
+            }
+            if (wo == main.watchers.WatcherEngine.Outcome.RESTART_QUEUE) {
+                // jump the whole queue back to the first task
+                actionCursor = 0;
+                taskRunsDone = 0;
+                lastPolledAction = null;
+                watchers.reset();
+                menu.setCurrentExecutionIndex(0);
                 return Rand.nextInt(180, 420);
             }
 
@@ -544,6 +584,26 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             timedCursor++;
             return Rand.nextInt(180, 420);
         }
+        // v1.33: control outcomes inside a timed task. RESTART_TASK/QUEUE restart the timed
+        // task's action cursor (a timed task is one task, so both mean "back to its start");
+        // SKIP_NEXT advances; RESTART_LAST re-runs the current action.
+        if (wo == main.watchers.WatcherEngine.Outcome.SKIP_NEXT) {
+            if (action != null) action.resetAttempts();
+            timedCursor++;
+            return Rand.nextInt(180, 420);
+        }
+        if (wo == main.watchers.WatcherEngine.Outcome.RESTART_LAST) {
+            if (action != null) action.resetAttempts();
+            lastPolledAction = null;
+            return Rand.nextInt(180, 420);
+        }
+        if (wo == main.watchers.WatcherEngine.Outcome.RESTART_TASK
+                || wo == main.watchers.WatcherEngine.Outcome.RESTART_QUEUE) {
+            timedCursor = 0;
+            lastPolledAction = null;
+            watchers.reset();
+            return Rand.nextInt(180, 420);
+        }
 
         if (action == null) { timedCursor++; return Rand.nextInt(120, 300); }
 
@@ -625,6 +685,8 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
 
     private void onTaskRunComplete(DreamBotMenu menu, DreamBotMenu.Task task) {
         taskRunsDone++;
+        // v1.33: announce completion so AFTER_TASK triggers can fire before the next task runs.
+        if (task != null) main.watchers.TaskEventBus.taskFinished(task.getName());
 
         // Patch B.2: the Task List's "auto-wait between tasks" - a humanised random pause after
         // every completed task pass (you basically always wait a beat between tasks anyway).

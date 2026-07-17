@@ -364,12 +364,38 @@ public class TriggerEditor extends JPanel {
         detail.add(whenRow);
         detail.add(Box.createVerticalStrut(4));
         detail.add(argRow);
-        detail.add(Box.createVerticalStrut(4));
+        detail.add(Box.createVerticalStrut(6));
+        // v1.33: ANDed extra conditions (with NOT). All must hold for the trigger to fire.
+        JLabel andLbl = new JLabel("AND also (all must be true):");
+        andLbl.setForeground(Theme.ACCENT);
+        andLbl.setFont(andLbl.getFont().deriveFont(Font.BOLD, 11f));
+        andLbl.setAlignmentX(LEFT_ALIGNMENT);
+        detail.add(andLbl);
+        detail.add(buildClausesPanel(t));
+        detail.add(Box.createVerticalStrut(6));
         detail.add(optRow);
         detail.add(Box.createVerticalStrut(4));
         detail.add(chanceRow);                      // v1.30
         detail.add(Box.createVerticalStrut(4));
         detail.add(timerRow);                       // v1.30
+        detail.add(Box.createVerticalStrut(4));
+        // v1.33: what the QUEUE does after this trigger's response finishes
+        JComboBox<Trigger.Control> ctrl = new JComboBox<>(Trigger.Control.values());
+        ctrl.setSelectedItem(t.getControl());
+        ctrl.setMaximumSize(new Dimension(300, 30));
+        ctrl.setRenderer(new DefaultListCellRenderer() {
+            @Override public Component getListCellRendererComponent(JList<?> l, Object v, int i,
+                    boolean s, boolean f) {
+                super.getListCellRendererComponent(l, v, i, s, f);
+                if (v instanceof Trigger.Control) setText(controlLabel((Trigger.Control) v));
+                return this;
+            }
+        });
+        ctrl.addActionListener(e -> {
+            t.setControl((Trigger.Control) ctrl.getSelectedItem());
+            list.repaint();
+        });
+        detail.add(row("After run:", ctrl));
         detail.add(Box.createVerticalStrut(10));
         detail.add(thenLbl);
         detail.add(Box.createVerticalStrut(4));
@@ -396,6 +422,99 @@ public class TriggerEditor extends JPanel {
         JLabel l = new JLabel(text);
         l.setForeground(Theme.TEXT_MUTED);
         return l;
+    }
+
+    // ── v1.33: ANDed extra-condition rows ────────────────────────────────────
+    private JComponent buildClausesPanel(Trigger t) {
+        JPanel wrap = new JPanel();
+        wrap.setLayout(new BoxLayout(wrap, BoxLayout.Y_AXIS));
+        wrap.setOpaque(false);
+        wrap.setAlignmentX(LEFT_ALIGNMENT);
+        rebuildClauses(t, wrap);
+        return wrap;
+    }
+
+    private void rebuildClauses(Trigger t, JPanel wrap) {
+        wrap.removeAll();
+        for (Trigger.Clause cl : t.getExtraClauses())
+            wrap.add(clauseRow(t, wrap, cl));
+        JButton addC = new JButton("+ AND condition");
+        addC.setAlignmentX(LEFT_ALIGNMENT);
+        addC.addActionListener(e -> {
+            t.getExtraClauses().add(new Trigger.Clause(Condition.INVENTORY_FULL, "", false));
+            rebuildClauses(t, wrap);
+            wrap.revalidate();
+            wrap.repaint();
+        });
+        wrap.add(addC);
+    }
+
+    private JComponent clauseRow(Trigger t, JPanel wrap, Trigger.Clause cl) {
+        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+        p.setOpaque(false);
+        p.setAlignmentX(LEFT_ALIGNMENT);
+        p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+
+        JCheckBox not = new JCheckBox("NOT", cl.negate);
+        not.setOpaque(false);
+        not.setForeground(Theme.TEXT);
+        not.setToolTipText("Require this condition to be FALSE");
+        not.addActionListener(e -> { cl.negate = not.isSelected(); list.repaint(); });
+
+        JComboBox<Condition> cb = new JComboBox<>(Condition.values());
+        cb.setSelectedItem(cl.condition);
+        cb.setMaximumSize(new Dimension(230, 28));
+        cb.setRenderer(conditionRenderer());
+
+        JTextField arg = new JTextField(cl.arg, 9);
+        arg.setMaximumSize(new Dimension(150, 28));
+        arg.addCaretListener(e -> { cl.arg = arg.getText(); list.repaint(); });
+
+        cb.addActionListener(e -> {
+            cl.condition = (Condition) cb.getSelectedItem();
+            arg.setVisible(cl.condition != null && cl.condition.needsArg());
+            list.repaint();
+        });
+        arg.setVisible(cl.condition != null && cl.condition.needsArg());
+
+        JButton rm = new JButton("\u2715");
+        rm.setMargin(new Insets(0, 6, 0, 6));
+        rm.setToolTipText("Remove this condition");
+        rm.addActionListener(e -> {
+            t.getExtraClauses().remove(cl);
+            rebuildClauses(t, wrap);
+            wrap.revalidate();
+            wrap.repaint();
+        });
+
+        p.add(not);
+        p.add(cb);
+        p.add(arg);
+        p.add(rm);
+        return p;
+    }
+
+    /** Shared renderer that shows a Condition's friendly label. */
+    private DefaultListCellRenderer conditionRenderer() {
+        return new DefaultListCellRenderer() {
+            @Override public Component getListCellRendererComponent(JList<?> l, Object v, int i,
+                    boolean s, boolean f) {
+                super.getListCellRendererComponent(l, v, i, s, f);
+                if (v instanceof Condition) setText(((Condition) v).label());
+                return this;
+            }
+        };
+    }
+
+    /** Friendly label for the post-run control dropdown (v1.33). */
+    private static String controlLabel(Trigger.Control c) {
+        switch (c) {
+            case SKIP_NEXT:     return "then skip the next action";
+            case RESTART_LAST:  return "then restart the last action";
+            case RESTART_TASK:  return "then restart this task";
+            case RESTART_QUEUE: return "then restart the whole queue";
+            default:            return "nothing extra (just run the response)";
+        }
     }
 
     private JPanel row(String label, JComponent... comps) {

@@ -30,6 +30,45 @@ public class Trigger {
     private boolean enabled = true;
     private boolean replacesAction = false;
 
+    /**
+     * v1.33: what the QUEUE should do after this trigger's response finishes (on top of running
+     * the response actions). Lets a trigger reshape execution flow, not just do a side-task.
+     */
+    public enum Control {
+        NONE,           // just run the response, carry on
+        SKIP_NEXT,      // skip the next queued action
+        RESTART_LAST,   // re-run the action the queue was on
+        RESTART_TASK,   // restart the current task from its first action
+        RESTART_QUEUE   // jump the whole queue back to the first task
+    }
+    private Control control = Control.NONE;
+
+    /**
+     * v1.33: additional ANDed conditions. The trigger fires only when the primary condition AND
+     * every extra clause hold. Each clause can be negated (the "NOT" you wanted), so you can
+     * express "low HP AND NOT holding food -> bank" as primary=HP_BELOW plus a negated
+     * INVENTORY_CONTAINS clause. Empty by default, so existing single-condition triggers are
+     * unchanged.
+     */
+    public static final class Clause {
+        public Condition condition;
+        public String arg = "";
+        public boolean negate = false;   // true = the condition must be FALSE
+        public Clause() {}
+        public Clause(Condition c, String a, boolean n) {
+            condition = c; arg = a == null ? "" : a; negate = n;
+        }
+        /** Whether this clause is currently satisfied (negation applied). Never throws. */
+        public boolean holds() {
+            if (condition == null) return true;   // a blank clause doesn't block
+            boolean r;
+            try { r = condition.test(arg); } catch (Throwable t) { r = false; }
+            return negate != r;   // XOR: negate flips the result
+        }
+    }
+    private final List<Clause> extraClauses = new ArrayList<>();
+    public List<Clause> getExtraClauses() { return extraClauses; }
+
     /** Minimum gap between fires (ms) so a still-true condition doesn't spam its chain. */
     private long cooldownMs = 3000;
     private transient long lastFiredAt = 0;
@@ -85,6 +124,8 @@ public class Trigger {
     public void setEnabled(boolean e) { this.enabled = e; }
     public boolean replacesAction() { return replacesAction; }
     public void setReplacesAction(boolean r) { this.replacesAction = r; }
+    public Control getControl() { return control == null ? Control.NONE : control; }
+    public void setControl(Control c) { this.control = c == null ? Control.NONE : c; }
     public long getCooldownMs() { return cooldownMs; }
     public void setCooldownMs(long ms) { this.cooldownMs = Math.max(0, ms); }
 
@@ -119,6 +160,9 @@ public class Trigger {
         boolean holds;
         try { holds = condition.test(arg); } catch (Throwable t) { return false; }
         if (!holds) return false;
+        // v1.33: every ANDed extra clause must also hold (with its NOT applied)
+        for (Clause c : extraClauses)
+            if (c != null && !c.holds()) return false;
         if (!running && chancePercent < 100
                 && java.util.concurrent.ThreadLocalRandom.current().nextInt(100) >= chancePercent) {
             lastFiredAt = now;   // roll missed: this opportunity is spent, wait out the window
