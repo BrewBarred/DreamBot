@@ -59,6 +59,25 @@ public enum Condition {
         @Override public String argHint() { return "exact item name, e.g. Prayer potion(4)"; }
     },
 
+    // v1.32: count-aware "missing" - fires when the inventory holds FEWER than any listed
+    // count. Accepts a comma list with per-item counts: "Copper ore x14, Tin ore x14" fires
+    // the moment either drops below 14; "Lobster x5" fires below 5; a bare "Coal" means x1.
+    // Use it to trigger a restock (walk to bank, fetch more) before you run dry.
+    INVENTORY_MISSING_COUNTS("Inventory below counts (set/amount)") {
+        @Override public boolean test(String arg) {
+            java.util.Map<String, Integer> want = main.actions.ActionUtil.parseItemList(arg);
+            if (want.isEmpty()) return false;
+            for (java.util.Map.Entry<String, Integer> e : want.entrySet()) {
+                int have = 0;
+                try { have = Inventory.count(e.getKey()); } catch (Throwable ignored) {}
+                if (have < e.getValue()) return true;   // any shortfall triggers
+            }
+            return false;
+        }
+        @Override public String describe(String arg) { return "below [" + arg + "]"; }
+        @Override public String argHint() { return "counts: \"Copper ore x14, Tin ore x14\" or \"Coal\""; }
+    },
+
     HP_BELOW("HP below (value or %)") {
         @Override public boolean test(String arg) {
             Integer v = current(Skill.HITPOINTS);
@@ -121,6 +140,42 @@ public enum Condition {
         }
         @Override public String describe(String arg) { return "at " + arg; }
         @Override public String argHint() { return "x,y or x,y,z"; }
+    },
+
+    // ── v1.31 ──
+    CHAT_CONTAINS("Nearby chat contains phrase(s)") {
+        @Override public boolean test(String arg) {
+            // matches recent public/private/clan lines from OTHER players; a match is consumed
+            // so the same message can't re-fire this check after its cooldown
+            try { return main.tools.ChatLog.matchAndConsume(arg, 10_000); }
+            catch (Throwable t) { return false; }
+        }
+        @Override public String describe(String arg) { return "chat has \"" + arg + "\""; }
+        @Override public String argHint() { return "phrase, or several: \"hi|hello|selling\""; }
+    },
+
+    ITEM_EQUIPPED("Item is equipped") {
+        @Override public boolean test(String arg) {
+            if (arg == null || arg.isBlank()) return false;
+            try {
+                return org.dreambot.api.methods.container.impl.equipment.Equipment
+                        .contains(arg.trim());
+            } catch (Throwable t) { return false; }
+        }
+        @Override public String describe(String arg) { return "wearing \"" + arg + "\""; }
+        @Override public String argHint() { return "exact item name, e.g. Bronze pickaxe"; }
+    },
+
+    ITEM_NOT_EQUIPPED("Item is NOT equipped") {
+        @Override public boolean test(String arg) {
+            if (arg == null || arg.isBlank()) return false;
+            try {
+                return !org.dreambot.api.methods.container.impl.equipment.Equipment
+                        .contains(arg.trim());
+            } catch (Throwable t) { return false; }
+        }
+        @Override public String describe(String arg) { return "not wearing \"" + arg + "\""; }
+        @Override public String argHint() { return "exact item name - fetch a pickaxe on start"; }
     };
 
     private final String label;

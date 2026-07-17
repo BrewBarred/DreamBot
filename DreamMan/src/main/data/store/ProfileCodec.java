@@ -41,6 +41,8 @@ public final class ProfileCodec {
         if (params != null && action.getChancePercent() < 100) {
             params = new java.util.LinkedHashMap<>(params);
             params.put(Action.CHANCE_KEY, String.valueOf(action.getChancePercent()));
+        if (action.isOnStartOnly())   // v1.31: only written when set - old saves stay byte-identical
+            params.put(Action.ONSTART_KEY, "true");
         }
         d.setParams(params);
         return d;
@@ -67,6 +69,8 @@ public final class ProfileCodec {
                 action.getTriggers().addAll(main.watchers.TriggerCodec.fromJson(tj));
             }
             // Patch B.7: restore the chance-to-run (absent -> stays 100%)
+            String oj = data.getParams().get(Action.ONSTART_KEY);   // v1.31
+            if (oj != null) action.setOnStartOnly(Boolean.parseBoolean(oj));
             String cj = data.getParams().get(Action.CHANCE_KEY);
             if (cj != null && !cj.isBlank()) {
                 try { action.setChancePercent(Integer.parseInt(cj.trim())); }

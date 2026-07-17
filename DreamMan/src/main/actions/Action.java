@@ -30,7 +30,8 @@ public abstract class Action {
     /** @return true when this action has used up its tries (and doesn't retry forever). */
     public final boolean attemptsExhausted() { return maxAttempts > 0 && attempts >= maxAttempts; }
     /** Called by the engine when the action completes or is (re-)entered. */
-    public final void resetAttempts() { attempts = 0; }
+    /** Overridable (v1.31 hotfix): Interact clears its expect-gains baseline here. */
+    public void resetAttempts() { attempts = 0; }
     /** @return the configured try budget (<=0 = infinite). */
     public final int getMaxAttempts() { return maxAttempts; }
 
@@ -108,6 +109,18 @@ public abstract class Action {
     /** Reserved key under which the chance-to-run rides inside serialize()/deserialize(). */
     public static final String CHANCE_KEY = "__chance";
 
+    // ── v1.31: run-on-start-only ─────────────────────────────────────────────
+    /** Reserved key under which the on-start flag rides inside serialize()/deserialize(). */
+    public static final String ONSTART_KEY = "__onstart";
+    /**
+     * When true this action is SETUP: it runs on the task's very first pass of the session
+     * (first queue loop, first repetition) and is skipped on every later loop - fetch the
+     * pickaxe once, don't re-fetch it every lap.
+     */
+    private boolean onStartOnly = false;
+    public boolean isOnStartOnly() { return onStartOnly; }
+    public void setOnStartOnly(boolean b) { this.onStartOnly = b; }
+
     /**
      * Patch B.5: set while this action runs as a CHECK response. Emergency actions may act even
      * when the player isn't idle (e.g. eat while running away) - the whole point of a check like
@@ -153,6 +166,7 @@ public abstract class Action {
         Action c = copy();
         if (c != null) {
             c.setChancePercent(this.chancePercent);
+            c.setOnStartOnly(this.onStartOnly);   // v1.31
             c.getTriggers().clear();
             for (main.watchers.Trigger t : this.triggers)
                 if (t != null) c.getTriggers().add(new main.watchers.Trigger(t));

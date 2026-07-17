@@ -18,6 +18,14 @@ public final class Tier {
     public static final String VIP = "vip";
     public static final String ADMIN = "admin";
     public static final String MODERATOR = "moderator";
+    /**
+     * v1.32: the OWNER tier, above admin. Owners can open the dev console, search all registered
+     * users, and promote them to admin (and, next patch, demote/ban/restrict). Set this directly
+     * in the database on your own account - there's deliberately no UI to mint the first owner,
+     * so the role can't be escalated into from inside the client. As with every tier, the client
+     * only DISPLAYS it; the server must enforce that owner-only endpoints reject non-owner tokens.
+     */
+    public static final String OWNER = "owner";
 
     /** The current account's tier ("guest" when not logged in). */
     public static String current() {
@@ -27,12 +35,14 @@ public final class Tier {
     public static boolean isGuest() { return GUEST.equals(current()); }
     public static boolean isVip() {
         String t = current();
-        return VIP.equals(t) || ADMIN.equals(t) || MODERATOR.equals(t);
+        return VIP.equals(t) || ADMIN.equals(t) || MODERATOR.equals(t) || OWNER.equals(t);
     }
     public static boolean isAdmin() {
         String t = current();
-        return ADMIN.equals(t) || MODERATOR.equals(t);
+        return ADMIN.equals(t) || MODERATOR.equals(t) || OWNER.equals(t);
     }
+    /** v1.32: owner-only capabilities (the dev console). */
+    public static boolean isOwner() { return OWNER.equals(current()); }
     public static boolean isLoggedIn() { return !isGuest(); }
 
     /** Max queue loops for this account. Guests/free = 50, VIP = 150 (server is the truth). */
@@ -59,6 +69,7 @@ public final class Tier {
     /** A short label for the Status card, e.g. "Free", "VIP", "Admin". */
     public static String label() {
         switch (current()) {
+            case OWNER: return "Owner";
             case VIP: return "VIP";
             case ADMIN: return "Admin";
             case MODERATOR: return "Moderator";

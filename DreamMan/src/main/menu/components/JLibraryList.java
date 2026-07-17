@@ -71,6 +71,7 @@ public class JLibraryList extends JPanel {
     private static final Color COLOR_OBJECT = new Color( 80, 170, 120);  // sage-green
     private static final Color COLOR_GROUND = new Color(180, 140,  60);  // gold
     private static final Color COLOR_PLAYER = new Color(100, 150, 230);  // sky-blue
+    private static final Color COLOR_LOCATION = new Color(160, 110, 210); // violet (v1.31)
     private static final Color COLOR_INV    = new Color(160, 100, 210);  // violet
 
     // =========================================================================
@@ -101,6 +102,11 @@ public class JLibraryList extends JPanel {
         /** Ground-item stack size (1 for everything else). */
         public int quantity = 1;
 
+        /** v1.31: a human area label ("Lumbridge", "Varrock") when the library knows one. */
+        public String area;
+        /** v1.31: set for LOCATION entries - carries the bounds for the nearby check. */
+        public Library.Locations locationRef;
+
         public EntityEntry(String name, Library.TargetType type, String source) {
             this.name   = name;
             this.type   = type;
@@ -119,6 +125,12 @@ public class JLibraryList extends JPanel {
         /** The tile as the "X, Y, Z" string every location parameter in DreamMan accepts. */
         public String tileString() {
             return hasTile() ? x + ", " + y + ", " + (z == null ? 0 : z) : null;
+        }
+
+        /** v1.31: remembers the area label. @return this, for chaining. */
+        public EntityEntry withArea(String a) {
+            if (a != null && !a.isBlank()) this.area = a.trim();
+            return this;
         }
 
         /** Compact row text for the coords, e.g. "3258,3271" (z shown only when non-zero). */
@@ -175,12 +187,20 @@ public class JLibraryList extends JPanel {
     private JTextField searchField;
     private JList<EntityEntry> entityList;
     private JLabel    statusLabel;
+    /** v1.31: captured on every background scan - drives the nearby-library merge. */
+    private volatile org.dreambot.api.methods.map.Tile lastKnownPlayerTile;
+    /** v1.31: where clicked chips (name/position/area/my-position) write their value. */
+    private java.util.function.Consumer<String> targetSink;
+    // the selected-entity detail strip
+    private JPanel stripPanel;
+    private JButton chipName, chipPos, chipArea, chipMyPos;
     private JButton   refreshBtn;
 
     private JCheckBox cbNPC;
     private JCheckBox cbObject;
     private JCheckBox cbGround;
     private JCheckBox cbPlayer;
+    private JCheckBox cbLocation;   // v1.31
     private JCheckBox cbInventory;
 
     // =========================================================================
@@ -316,6 +336,7 @@ public class JLibraryList extends JPanel {
         cbObject    = buildCheckbox("Game Object", COLOR_OBJECT, true);
         cbGround    = buildCheckbox("Ground Item", COLOR_GROUND, true);
         cbPlayer    = buildCheckbox("Player",      COLOR_PLAYER, false);
+        cbLocation  = buildCheckbox("Location",    COLOR_LOCATION, true);   // v1.31
         cbInventory = buildCheckbox("Inventory",   COLOR_INV,    false);
 
         ActionListener filterListener = e -> applyFilter();
@@ -324,6 +345,7 @@ public class JLibraryList extends JPanel {
         cbGround.addActionListener(filterListener);
         cbPlayer.addActionListener(filterListener);
         cbInventory.addActionListener(filterListener);
+        cbLocation.addActionListener(filterListener);   // v1.31
 
         // Two-column grid for checkboxes
         JPanel cbGrid = new JPanel(new GridLayout(3, 2, 4, 0));
@@ -333,11 +355,42 @@ public class JLibraryList extends JPanel {
         cbGrid.add(cbGround);
         cbGrid.add(cbPlayer);
         cbGrid.add(cbInventory);
-        cbGrid.add(new JLabel()); // spacer
+        cbGrid.add(cbLocation);   // v1.31: filled the old spacer slot
 
         cbWrap.add(filterLbl);
         cbWrap.add(Box.createVerticalStrut(3));
         cbWrap.add(cbGrid);
+
+        // ── v1.31: selected-entity strip ─────────────────────────────────────
+        // Clicking a row used to make the builder GUESS what you wanted (name? tile?). Now the
+        // strip shows the selected entry's Name / Position / Area as buttons - click the one
+        // you want in the target - plus "My position", which drops YOUR current tile in
+        // (the "current position button near the target input" ask).
+        stripPanel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 2));
+        stripPanel.setBackground(BG_PANEL);
+        chipName = buildChip("name");
+        chipPos = buildChip("position");
+        chipArea = buildChip("area");
+        chipMyPos = buildChip("My position");
+        chipMyPos.setToolTipText("Insert YOUR current tile into the target field");
+        chipMyPos.addActionListener(e -> {
+            try {
+                var me = Players.getLocal();
+                var t = me == null ? null : me.getTile();
+                if (t != null && targetSink != null)
+                    targetSink.accept(t.getX() + ", " + t.getY() + ", " + t.getZ());
+            } catch (Throwable ignored) {}
+        });
+        stripPanel.add(chipMyPos);
+        stripPanel.add(chipName);
+        stripPanel.add(chipPos);
+        stripPanel.add(chipArea);
+        chipName.setVisible(false);
+        chipPos.setVisible(false);
+        chipArea.setVisible(false);
+        entityList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) refreshStrip(entityList.getSelectedValue());
+        });
 
         // ── Action row: status + refresh ─────────────────────────────────────
         JPanel actionRow = new JPanel(new BorderLayout(4, 0));
@@ -362,9 +415,76 @@ public class JLibraryList extends JPanel {
         actionRow.add(statusLabel, BorderLayout.CENTER);
         actionRow.add(refreshBtn,  BorderLayout.EAST);
 
-        bottom.add(cbWrap,    BorderLayout.CENTER);
-        bottom.add(actionRow, BorderLayout.SOUTH);
+        JPanel southStack = new JPanel(new BorderLayout());
+        southStack.setBackground(BG_PANEL);
+        southStack.add(stripPanel, BorderLayout.NORTH);   // v1.31: clickable target chips
+        southStack.add(actionRow, BorderLayout.SOUTH);
+
+        bottom.add(cbWrap,     BorderLayout.CENTER);
+        bottom.add(southStack, BorderLayout.SOUTH);
         return bottom;
+    }
+
+    // ── v1.31: chip strip plumbing ───────────────────────────────────────────
+
+    /** A small pill button for the strip. */
+    private JButton buildChip(String text) {
+        JButton b = new JButton(text);
+        b.setFont(new Font("Consolas", Font.PLAIN, 10));
+        b.setForeground(TEXT_PRIMARY);
+        b.setBackground(new Color(45, 45, 45));
+        b.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(BORDER_COLOR),
+                new EmptyBorder(2, 7, 2, 7)));
+        b.setFocusPainted(false);
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        return b;
+    }
+
+    /** The Task Builder registers where chip clicks should write their value. */
+    public void setTargetSink(java.util.function.Consumer<String> sink) {
+        this.targetSink = sink;
+    }
+
+    /** Rebinds the chips to the selected entry (hidden when there's nothing to offer). */
+    private void refreshStrip(EntityEntry e) {
+        if (e == null) {
+            chipName.setVisible(false);
+            chipPos.setVisible(false);
+            chipArea.setVisible(false);
+        } else {
+            chipName.setText(trimChip(e.name));
+            chipName.setToolTipText("Use the NAME as the target: " + e.name);
+            for (java.awt.event.ActionListener l : chipName.getActionListeners())
+                chipName.removeActionListener(l);
+            chipName.addActionListener(a -> { if (targetSink != null) targetSink.accept(e.name); });
+            chipName.setVisible(true);
+
+            String tile = e.tileString();
+            chipPos.setVisible(tile != null);
+            if (tile != null) {
+                chipPos.setText(e.coordsLabel());
+                chipPos.setToolTipText("Use the POSITION as the target: " + tile);
+                for (java.awt.event.ActionListener l : chipPos.getActionListeners())
+                    chipPos.removeActionListener(l);
+                chipPos.addActionListener(a -> { if (targetSink != null) targetSink.accept(tile); });
+            }
+
+            chipArea.setVisible(e.area != null);
+            if (e.area != null) {
+                chipArea.setText(trimChip(e.area));
+                chipArea.setToolTipText("Use the AREA name as the target: " + e.area);
+                for (java.awt.event.ActionListener l : chipArea.getActionListeners())
+                    chipArea.removeActionListener(l);
+                chipArea.addActionListener(a -> { if (targetSink != null) targetSink.accept(e.area); });
+            }
+        }
+        stripPanel.revalidate();
+        stripPanel.repaint();
+    }
+
+    private static String trimChip(String s) {
+        return s == null ? "" : (s.length() <= 16 ? s : s.substring(0, 15) + "\u2026");
     }
 
     // =========================================================================
@@ -389,6 +509,10 @@ public class JLibraryList extends JPanel {
      * the background worker (Patch B.1); callers publish the result to the EDT themselves.
      */
     private void scanInto(List<EntityEntry> out) {
+        try {
+            var me0 = Players.getLocal();
+            if (me0 != null && me0.getTile() != null) lastKnownPlayerTile = me0.getTile();
+        } catch (Throwable ignored) {}
         try {
             // ── NPCs ──────────────────────────────────────────────────────────
             List<NPC> liveNpcs = NPCs.all(n -> n != null
@@ -467,7 +591,8 @@ public class JLibraryList extends JPanel {
 
         for (Library.Npcs n : Library.Npcs.values()) {
             libraryFull.add(new EntityEntry(n.npcName, Library.TargetType.NPC, "LIBRARY")
-                    .withTile(n.approxTile));   // B.17: known spawn coords on the row
+                    .withTile(n.approxTile)     // B.17: known spawn coords on the row
+                    .withArea(n.approxArea));   // v1.31: area label for the detail strip
         }
         for (Library.GameObjects o : Library.GameObjects.values()) {
             // objects are resolved live (no stored tile) - the row just shows the name
@@ -476,6 +601,14 @@ public class JLibraryList extends JPanel {
         for (Library.GroundItems i : Library.GroundItems.values()) {
             libraryFull.add(new EntityEntry(i.itemName, Library.TargetType.GROUND_ITEM, "LIBRARY")
                     .withTile(i.spawnTile));
+        }
+        // v1.31: named Locations - Lumbridge Castle and friends
+        for (Library.Locations loc : Library.Locations.values()) {
+            EntityEntry e = new EntityEntry(loc.locationName, Library.TargetType.LOCATION, "LIBRARY")
+                    .withTile(loc.center)
+                    .withArea(loc.region);
+            e.locationRef = loc;
+            libraryFull.add(e);
         }
 
         setStatus("Library: " + libraryFull.size() + " entries");
@@ -510,8 +643,31 @@ public class JLibraryList extends JPanel {
         if (cbGround.isSelected())    allowed.add(Library.TargetType.GROUND_ITEM);
         if (cbPlayer.isSelected())    allowed.add(Library.TargetType.PLAYER);
         if (cbInventory.isSelected()) allowed.add(Library.TargetType.INVENTORY_ITEM);
+        if (cbLocation.isSelected())  allowed.add(Library.TargetType.LOCATION);   // v1.31
 
-        List<EntityEntry> source = currentMode == ViewMode.NEARBY ? nearbyFull : libraryFull;
+        // v1.31: Nearby also surfaces LIBRARY entries you're standing near - known spawns,
+        // objects with tiles, and Locations whose area you're inside ("you're at Lumbridge
+        // Castle"). The live scan captures where YOU are; the library adds what we KNOW is
+        // there. Tagged "lib" so the source stays obvious.
+        List<EntityEntry> source;
+        if (currentMode == ViewMode.NEARBY) {
+            source = new ArrayList<>(nearbyFull);
+            org.dreambot.api.methods.map.Tile me = lastKnownPlayerTile;
+            if (me != null) {
+                for (EntityEntry lib : libraryFull) {
+                    if (lib == null) continue;
+                    boolean near = false;
+                    if (lib.type == Library.TargetType.LOCATION && lib.locationRef != null)
+                        near = lib.locationRef.isNear(me, NEARBY_RADIUS);
+                    else if (lib.hasTile())
+                        near = new org.dreambot.api.methods.map.Tile(lib.x, lib.y,
+                                lib.z == null ? 0 : lib.z).distance(me) <= NEARBY_RADIUS;
+                    if (near) source.add(lib);
+                }
+            }
+        } else {
+            source = libraryFull;
+        }
 
         List<EntityEntry> filtered = source.stream()
                 .filter(e -> allowed.contains(e.type))
@@ -798,6 +954,7 @@ public class JLibraryList extends JPanel {
             switch (type) {
                 case NPC:            text = "NPC"; color = COLOR_NPC;    break;
                 case GAME_OBJECT:    text = "OBJ"; color = COLOR_OBJECT; break;
+                case LOCATION:       text = "LOC"; color = COLOR_LOCATION; break;
                 case GROUND_ITEM:    text = "GND"; color = COLOR_GROUND; break;
                 case PLAYER:         text = "PLY"; color = COLOR_PLAYER; break;
                 case INVENTORY_ITEM: text = "INV"; color = COLOR_INV;    break;

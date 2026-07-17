@@ -43,6 +43,21 @@ public class Interact extends Action {
     private transient String latchedName;          // name of the latched NPC (drop-table learning)
     private transient long lastIssueAt;            // last time we sent the interaction
     private transient long lastNoCandidateNoteAt;  // rate-limits "nothing in range" attempts
+    // v1.32b: gather-mode completion tracking (mining/woodcutting/fishing). We finish ONE
+    // resource by watching the player animate then stop, or the node deplete - not by waiting
+    // for an inventory slot to fill (which deadlocks on a full bag and false-succeeds on theft).
+    private transient boolean gatherAnimating;     // have we seen the gathering animation start?
+    private transient int gatherStartCount;        // inventory size when this node was latched
+    private transient long gatherIssuedAt;         // when we last issued a gather interact
+
+    /** v1.31: inventory requirements gating completion ("" = off). */
+    private JParamTextField paramExpect;
+    /** v1.31 hotfix: count GAINS since the step started instead of absolute totals. */
+    private JCheckBox chkExpectGains;
+    /** Baseline counts snapshotted when the step starts (gains mode only). */
+    private transient java.util.Map<String, Integer> expectStart;
+    /** Running total at the last gate check - PROGRESS makes completions free (hotfix2). */
+    private transient int lastExpectHave = -1;
 
     public Interact() {
         super();
@@ -51,6 +66,14 @@ public class Interact extends Action {
         paramRadius  = new JParamTextField("12");
         paramUntil   = new JParamTextField("auto");
         paramRetries = new JParamTextField("12");
+        paramExpect  = new JParamTextField("");
+        chkExpectGains = new JCheckBox("Count gains since this step started (not totals)");
+        chkExpectGains.setOpaque(false);
+        chkExpectGains.setToolTipText("<html>OFF (totals): complete when the inventory HOLDS the"
+                + " listed counts; already holding them skips the step.<br>ON (gains): complete"
+                + " when this step has GAINED the listed counts - use this for alternating"
+                + " loops (mine 1 copper, then 1 tin, repeat) where leftovers from the last"
+                + " lap must not skip the step.</html>");
     }
 
     public Interact(Interact o) {
@@ -60,6 +83,8 @@ public class Interact extends Action {
         paramRadius.setParam(o.paramRadius.getParam());
         paramUntil.setParam(o.paramUntil.getParam());
         paramRetries.setParam(o.paramRetries.getParam());
+        paramExpect.setParam(o.paramExpect.getParam());
+        chkExpectGains.setSelected(o.chkExpectGains.isSelected());
     }
 
     private boolean isCombatVerb() {
@@ -70,7 +95,9 @@ public class Interact extends Action {
     private String resolveMode() {
         String m = paramUntil.getParam() == null ? "auto" : paramUntil.getParam().trim().toLowerCase();
         if (m.equals("auto"))
-            return isCombatVerb() ? "gone" : "once";
+            // v1.32b: non-combat auto is now "gather" (animation/depletion aware) rather than
+            // "once" (fire-and-forget). Gathering waits for the resource to actually be worked.
+            return isCombatVerb() ? "gone" : "gather";
         return m;
     }
 
@@ -112,6 +139,16 @@ public class Interact extends Action {
         return false;
     }
 
+    /** v1.32b: is the local player mid-animation (mining/chopping/fishing swing)? */
+    private static boolean isPlayerAnimating() {
+        try {
+            var p = org.dreambot.api.methods.interactive.Players.getLocal();
+            return p != null && p.getAnimation() != -1;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private boolean issueInteract(String verb) {
         lastIssueAt = System.currentTimeMillis();
         try {
@@ -123,6 +160,96 @@ public class Interact extends Action {
 
     @Override
     public boolean execute() {
+        // ── v1.31: expected-items gate (reworked in the hotfix) ──────────────
+        // Two interpretations of "Expect: Copper ore x1":
+        //   TOTALS (checkbox off) - complete when the inventory HOLDS the counts; already
+        //     holding them skips the step. Right for "gather until I have N" flows where the
+        //     items get banked/used before the next lap.
+        //   GAINS (checkbox on) - complete when this step has GAINED the counts since it
+        //     started. Right for alternating loops (mine 1 copper, then 1 tin, repeat) where
+        //     last lap's leftovers must NOT skip the step or starve one rock. The baseline is
+        //     snapshotted each time the step begins.
+        java.util.Map<String, Integer> expect = ActionUtil.parseItemList(paramExpect.getParam());
+        boolean gains = chkExpectGains.isSelected();
+        if (!expect.isEmpty()) {
+            if (gains && expectStart == null) {
+                expectStart = new java.util.HashMap<>();
+                for (String item : expect.keySet())
+                    expectStart.put(item, invCount(item));
+            }
+            if (lastExpectHave < 0)
+                lastExpectHave = expectHaveTotal(expect, gains);   // baseline for progress
+            if (expectSatisfied(expect, gains)) {
+                unlatch();
+                expectStart = null;
+                lastExpectHave = -1;
+                return true;   // totals: pre-satisfied skip · gains: target reached mid-step
+            }
+            // v1.32b: a FULL inventory ends the step even if the count isn't met - you can't
+            // collect any more, so spinning retries is pointless. Whatever you gathered is the
+            // result; the next task (bank / drop) takes over. This is the core "gets stuck on
+            // a full bag" fix - gathering completion no longer depends on a free slot.
+            if (Inventory.isFull()) {
+                unlatch();
+                expectStart = null;
+                lastExpectHave = -1;
+                return true;
+            }
+        }
+        boolean done = executeCore();
+        if (done && !expect.isEmpty() && !expectSatisfied(expect, gains)) {
+            // The interaction finished (target gone / inv full) but the goal isn't met yet.
+            // hotfix2: completions that PROGRESSED the counts are FREE - mining 26 rocks
+            // toward "Copper ore x13, Tin ore x13" must not eat 26 retries. Only fruitless
+            // completions (sniped rock, missed swing, wrong drop) burn the budget, so
+            // "Retries: 12" means twelve consecutive failures, not twelve rocks.
+            int haveNow = expectHaveTotal(expect, gains);
+            boolean progressed = haveNow > lastExpectHave;
+            lastExpectHave = haveNow;
+            unlatch();
+            if (!progressed) noteAttempt();
+            return false;
+        }
+        if (done) { expectStart = null; lastExpectHave = -1; }
+        return done;
+    }
+
+    /** Sum of (gains-adjusted) counts across the expected items - the progress meter. */
+    private int expectHaveTotal(java.util.Map<String, Integer> expect, boolean gains) {
+        int total = 0;
+        for (String item : expect.keySet()) {
+            int have = invCount(item);
+            if (gains && expectStart != null) have -= expectStart.getOrDefault(item, 0);
+            total += Math.max(0, have);
+        }
+        return total;
+    }
+
+    private static int invCount(String item) {
+        try { return org.dreambot.api.methods.container.impl.Inventory.count(item); }
+        catch (Throwable t) { return 0; }
+    }
+
+    private boolean expectSatisfied(java.util.Map<String, Integer> expect, boolean gains) {
+        for (java.util.Map.Entry<String, Integer> e : expect.entrySet()) {
+            int have = invCount(e.getKey());
+            if (gains && expectStart != null)
+                have -= expectStart.getOrDefault(e.getKey(), 0);
+            if (have < e.getValue()) return false;
+        }
+        return true;
+    }
+
+    @Override
+    public void resetAttempts() {
+        super.resetAttempts();
+        // v1.31 hotfix: the engine calls this when the step (re)starts - a fresh gains
+        // baseline belongs to each entry, so "mine 1 more" means one more THIS lap.
+        expectStart = null;
+        lastExpectHave = -1;
+    }
+
+    private boolean executeCore() {
         String name = paramTarget.getParam();
         String verb = paramAction.getParam();
         int radius = ActionUtil.parseInt(paramRadius.getParam(), 12);
@@ -130,7 +257,8 @@ public class Interact extends Action {
         boolean combat = isCombatVerb();
         syncRetryBudget();
 
-        if (mode.equals("inv-full") && Inventory.isFull()) {
+        if ((mode.equals("inv-full") || mode.equals("gather")) && Inventory.isFull()) {
+            // v1.32b: a full bag ends gathering (move on to banking) rather than spinning.
             unlatch();
             return true;
         }
@@ -143,10 +271,18 @@ public class Interact extends Action {
                 if (combat && latchedTile != null)
                     LootTracker.recordKill(latchedTile, latchedName);
                 Tile done = latchedTile;
+                boolean minedItOurselves = gatherAnimating;   // v1.32b
                 unlatch();
                 resetAttempts();
                 if (mode.equals("gone"))
                     return true;
+                if (mode.equals("gather")) {
+                    // v1.32b: the node depleted. If WE were animating it, that's a finished
+                    // gather - complete this cycle. If we never animated (someone else mined it,
+                    // or we were still walking up), just re-target: no false success.
+                    if (minedItOurselves) return true;
+                    // else fall through to pick another node (costs no attempts)
+                }
                 // inv-full keeps harvesting: fall through to pick the next one
             } else {
                 // keep the last-known tile fresh for kill recording
@@ -166,6 +302,24 @@ public class Interact extends Action {
                         // retry - other candidates exist, so this costs no attempts).
                         if (!issueInteract(verb))
                             unlatch();
+                    }
+                } else if (mode.equals("gather")) {
+                    // v1.32b: gather completion by ANIMATION, not inventory gain. While the
+                    // pickaxe/axe/rod is working we wait; when it STOPS and we've gone idle this
+                    // resource is done - complete the cycle (the Expect gate, if set, decides
+                    // whether to gather another). Issued but never animated = the click missed,
+                    // so re-issue. This is what makes a full bag or a stolen node not deadlock
+                    // or false-succeed: completion tracks the actual gathering action.
+                    long sinceIssue = System.currentTimeMillis() - gatherIssuedAt;
+                    if (isPlayerAnimating()) {
+                        gatherAnimating = true;
+                    } else if (gatherAnimating && ActionUtil.isIdle() && sinceIssue > 600) {
+                        unlatch();
+                        resetAttempts();
+                        return true;                       // animated then stopped = one gather
+                    } else if (!gatherAnimating && ActionUtil.isIdle() && sinceIssue > 2500) {
+                        if (!issueInteract(verb)) unlatch();
+                        gatherIssuedAt = System.currentTimeMillis();
                     }
                 } else if (!combat && ActionUtil.isIdle()
                         && System.currentTimeMillis() - lastIssueAt > 2500) {
@@ -192,6 +346,18 @@ public class Interact extends Action {
         }
 
         boolean sent = issueInteract(verb);
+        if (mode.equals("gather")) {
+            // v1.32b: node latched and interact issued - start a gather cycle and wait for the
+            // animation to run and stop (handled on subsequent polls above).
+            if (sent) {
+                gatherAnimating = false;
+                gatherIssuedAt = System.currentTimeMillis();
+                return false;
+            }
+            noteAttempt();
+            unlatch();
+            return false;
+        }
         if (mode.equals("once")) {
             if (sent) { resetAttempts(); unlatch(); return true; }
             noteAttempt();
@@ -220,8 +386,10 @@ public class Interact extends Action {
                 paramRadius, "  e.g. \"12\"");
 
         JPanel until = createParameterPanel("Wait until:",
-                "When this step is finished: auto / once / gone / inv-full. \"gone\" tracks the"
-                        + " exact target you engaged - other same-name NPCs nearby don't matter.",
+                "When this step is finished: auto / once / gone / inv-full. For gathering (mine,"
+                        + " chop, fish) auto watches the animation + node depletion - a full bag"
+                        + " or a stolen rock won't stall it. \"gone\" tracks the exact target you"
+                        + " engaged - other same-name NPCs nearby don't matter.",
                 paramUntil, "  auto = smart · gone = YOUR target dead/despawned · inv-full = bag full");
 
         JPanel retries = createParameterPanel("Retries:",
@@ -229,7 +397,17 @@ public class Interact extends Action {
                         + " A busy target never costs a retry - another one is picked instead.",
                 paramRetries, "  e.g. \"12\" or \"inf\" to never give up");
 
-        return ActionUtil.stack(target, action, radius, until, retries);
+        JPanel expect = createParameterPanel("Expect items:",
+                "The step only completes once these counts are met - \"mine until the ore is"
+                        + " actually in your bag\". The checkbox below picks HOW they're"
+                        + " counted. Blank = off. Tip: the Target field takes comma lists"
+                        + " (\"Copper rocks, Tin rocks\") and works whichever is closest.",
+                paramExpect, "  e.g. \"Copper ore x1, Tin ore x1\"  or  \"Coal x8\"");
+        JPanel gainsRow = new JPanel(new java.awt.BorderLayout());
+        gainsRow.setOpaque(false);
+        gainsRow.add(chkExpectGains, java.awt.BorderLayout.WEST);
+
+        return ActionUtil.stack(target, action, radius, until, retries, expect, gainsRow);
     }
 
     @Override
@@ -256,6 +434,8 @@ public class Interact extends Action {
         m.put("Radius", paramRadius.getParam());
         m.put("Until", paramUntil.getParam());
         m.put("Retries", paramRetries.getParam());
+        m.put("Expect", paramExpect.getParam());
+        m.put("ExpectMode", chkExpectGains.isSelected() ? "gains" : "total");
         return m;
     }
 
@@ -267,5 +447,8 @@ public class Interact extends Action {
         if (data.get("Radius") != null) paramRadius.setParam(data.get("Radius"));
         if (data.get("Until")  != null) paramUntil.setParam(data.get("Until"));
         if (data.get("Retries") != null) paramRetries.setParam(data.get("Retries"));
+        if (data.get("Expect") != null) paramExpect.setParam(data.get("Expect"));
+        if (data.get("ExpectMode") != null)
+            chkExpectGains.setSelected("gains".equalsIgnoreCase(data.get("ExpectMode").trim()));
     }
 }

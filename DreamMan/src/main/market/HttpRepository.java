@@ -115,6 +115,88 @@ public class HttpRepository implements ScriptRepository {
         request("DELETE", "/scripts/" + enc(scriptId), null);
     }
 
+    // ── v1.32b: forum/my-uploads extras (server only) ──
+
+    /** Your own uploads plus how much of your quota is used. */
+    public static final class MyUploads {
+        public int used;
+        public int cap;
+        public String tier = "free";
+        public List<ScriptListing> scripts = new ArrayList<>();
+        /** v1.33: per-kind usage - {task:{used,cap}, script:{used,cap}}. */
+        public Usage usage;
+    }
+
+    /** v1.33: per-kind quota usage. */
+    public static final class Usage {
+        public KindUsage task;
+        public KindUsage script;
+    }
+    public static final class KindUsage {
+        public int used;
+        public int cap;
+    }
+
+    /** One forum comment on a listing. */
+    public static final class Comment {
+        public String author = "";
+        public String body = "";
+        public long at;
+    }
+
+    /** GET /me/scripts — the signed-in user's uploads + quota. */
+    public MyUploads myScripts() throws Exception {
+        requireConsent(main.privacy.Consent.MARKET_BROWSE);
+        String json = request("GET", "/me/scripts", null);
+        MyUploads m = GSON.fromJson(json, MyUploads.class);
+        return m == null ? new MyUploads() : m;
+    }
+
+    /** PUT /scripts/{id} — rename (author/admin only, enforced server-side). */
+    public void rename(String scriptId, String newName) throws Exception {
+        requireConsent(main.privacy.Consent.MARKET_PUBLISH);
+        request("PUT", "/scripts/" + enc(scriptId),
+                "{\"name\":" + GSON.toJson(newName) + "}");
+    }
+
+    /** One PAGE of comments (v1.32b - kept light: the client never loads a whole thread). */
+    public static final class CommentPage {
+        public List<Comment> comments = new ArrayList<>();
+        public int page;
+        public int size = 20;
+        public int total;
+        public boolean hasMore;
+    }
+
+    /**
+     * GET /scripts/{id}/comments?page=&size= - one page, newest first. Tolerates an older
+     * server that still returns a bare array (treated as a single page).
+     */
+    public CommentPage comments(String scriptId, int page, int size) throws Exception {
+        requireConsent(main.privacy.Consent.MARKET_BROWSE);
+        String json = request("GET", "/scripts/" + enc(scriptId)
+                + "/comments?page=" + Math.max(0, page) + "&size=" + Math.max(1, size), null);
+        String trimmed = json == null ? "" : json.trim();
+        if (trimmed.startsWith("[")) {                       // pre-pagination server
+            CommentPage p = new CommentPage();
+            List<Comment> all = GSON.fromJson(trimmed, new TypeToken<List<Comment>>() {}.getType());
+            p.comments = all == null ? new ArrayList<>() : all;
+            p.total = p.comments.size();
+            return p;
+        }
+        CommentPage p = GSON.fromJson(trimmed, CommentPage.class);
+        if (p == null) p = new CommentPage();
+        if (p.comments == null) p.comments = new ArrayList<>();
+        return p;
+    }
+
+    /** POST /scripts/{id}/comments. */
+    public void addComment(String scriptId, String body) throws Exception {
+        requireConsent(main.privacy.Consent.MARKET_BROWSE);
+        request("POST", "/scripts/" + enc(scriptId) + "/comments",
+                "{\"body\":" + GSON.toJson(body) + "}");
+    }
+
     // ── plumbing ──
 
     /**

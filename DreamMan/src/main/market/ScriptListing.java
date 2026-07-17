@@ -44,6 +44,15 @@ public class ScriptListing {
 
     /** Patch B.16: VIP-gated listing. The server sends the bundle as null to non-VIP callers. */
     public boolean vipOnly = false;
+    /** v1.33: "task" (reusable building block) or "script" (full single-purpose routine). The
+     *  server caps these separately (free: 5 + 5). Defaults to task; the staging UI will set it. */
+    public String kind = "task";
+    /**
+     * v1.32b: where this row came from - "server" (uploaded; has live stats) or "local" (a
+     * script in your local market folder that hasn't been uploaded yet). Transient: it's a view
+     * concern, never part of a bundle or a publish payload.
+     */
+    public transient String origin = "server";
     public boolean locked = false;
 
     /** A one-line summary of what the script actually does - shown before you import it. */

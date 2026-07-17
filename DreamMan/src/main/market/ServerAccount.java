@@ -111,6 +111,12 @@ public class ServerAccount {
         } catch (Throwable ignored) {}
         s.token = "";
         s.username = "";
+        // v1.32b: the tier must reset too - it's a property of the signed-in account, and
+        // leaving it as "owner" after logout kept owner UI (dev console, admin buttons) alive
+        // for whoever used the client next.
+        s.tier = "guest";
+        s.maxLoops = 50;           // back to the guest/free default, not zero
+        s.canPublishVip = false;
         saveSession();
         Logger.log("[Account] Logged out (the token was revoked on the server too).");
     }
@@ -294,6 +300,42 @@ public class ServerAccount {
         Logger.log("[Account] Account and all server data deleted.");
     }
 
+    // ═══ v1.32: owner-only admin API ═══
+    // These call owner-gated endpoints. The client shows them only to owners, but the SERVER is
+    // the real gate: every /admin/* route must verify the caller's token belongs to an owner and
+    // reject everyone else with 403, exactly like the tier limits. The client's checks are UI.
+
+    /**
+     * Searches registered users by username/email fragment. @return a list of rows, each a map
+     * with at least {@code username} and {@code tier} (the server decides the full shape).
+     *
+     * <p>Endpoint: {@code GET /admin/users?q=<fragment>} \u2192 {@code [{username, tier, ...}]}.
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> adminSearchUsers(String query) throws Exception {
+        requireLoggedIn();
+        String json = request("GET", "/admin/users?q=" + enc(query == null ? "" : query),
+                null, session().token);
+        List<Map<String, Object>> rows = GSON.fromJson(json,
+                new TypeToken<List<Map<String, Object>>>() {}.getType());
+        return rows == null ? new ArrayList<>() : rows;
+    }
+
+    /**
+     * Sets a user's tier (the promote/demote action). @return the server's response.
+     *
+     * <p>Endpoint: {@code POST /admin/users/<username>/role} with body {@code {"tier":"admin"}}.
+     * The server must refuse to let anyone create another owner through this route.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> adminSetRole(String username, String tier) throws Exception {
+        requireLoggedIn();
+        if (username == null || username.trim().isEmpty()) throw new IOException("No user given.");
+        String body = GSON.toJson(Map.of("tier", tier));
+        String json = request("POST", "/admin/users/" + enc(username) + "/role", body, session().token);
+        return GSON.fromJson(json, new TypeToken<Map<String, Object>>() {}.getType());
+    }
+
     // ── guards ──
 
     private void requireCloud() throws IOException {
@@ -327,6 +369,9 @@ public class ServerAccount {
         c.setConnectTimeout(8000);
         c.setReadTimeout(8000);
         c.setRequestProperty("Accept", "application/json");
+        // v1.31: a descriptive UA - Java's default ("Java/21") is exactly the fingerprint
+        // Cloudflare's bot rules love to challenge, and a challenge page breaks the client.
+        c.setRequestProperty("User-Agent", "DreamMan/1.33 (DreamBot script)");
         c.setRequestProperty("X-Install-Id", MarketIdentity.installId());
         if (token != null && !token.isEmpty())
             c.setRequestProperty("Authorization", "Bearer " + token);

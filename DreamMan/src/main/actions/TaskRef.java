@@ -123,9 +123,7 @@ public class TaskRef extends Action {
         }
 
         steps = new ArrayList<>();
-        if (task.getActions() != null)
-            for (Action a : task.getActions())
-                if (a != null) steps.add(a.copy());
+        copyStepsOnEdt(task);   // v1.33: action.copy() builds Swing fields - must be on the EDT
         cursor = 0;
         passesDone = 0;
         passesWanted = Math.max(1, task.getRepeat());
@@ -137,6 +135,26 @@ public class TaskRef extends Action {
             return true;   // an empty task is trivially complete
         }
         return true;
+    }
+
+    /** v1.33: build the step copies on the EDT - Action constructors create Swing fields, which
+     *  Substance forbids off the EDT (that's why every TaskRef used to throw and fail). */
+    private void copyStepsOnEdt(DreamBotMenu.Task task) {
+        Runnable copy = () -> {
+            if (task.getActions() != null)
+                for (Action a : task.getActions())
+                    if (a != null) steps.add(a.copy());
+        };
+        if (javax.swing.SwingUtilities.isEventDispatchThread()) {
+            copy.run();
+        } else {
+            try {
+                javax.swing.SwingUtilities.invokeAndWait(copy);
+            } catch (Throwable t) {
+                steps.clear();
+                copy.run();   // last-resort direct copy; a warning beats a dead TaskRef
+            }
+        }
     }
 
     @Override

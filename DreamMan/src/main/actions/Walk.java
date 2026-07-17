@@ -25,6 +25,8 @@ public class Walk extends Action {
     private Runnable variation;
 
     private JParamTextField paramArrive;
+    /** v1.31: explicit "skip when already close" toggle - unticked disables the field. */
+    private JCheckBox chkArrive;
     private transient long lastWalkIssueAt;
 
     // Existing empty constructor for initial UI setup
@@ -32,6 +34,11 @@ public class Walk extends Action {
         super();
         paramTarget = new JParamTextField(DEFAULT_TARGET);
         paramArrive = new JParamTextField("3");
+        chkArrive = new JCheckBox("Skip if already within (tiles):", true);
+        chkArrive.setOpaque(false);
+        chkArrive.setToolTipText("v1.31: when ticked, the walk is skipped entirely if you're"
+                + " already this close to the destination. Untick to always walk.");
+        chkArrive.addActionListener(e -> paramArrive.setEnabled(chkArrive.isSelected()));
     }
 
     // New constructor for the actual functional action
@@ -44,6 +51,8 @@ public class Walk extends Action {
         this(w.getParamTarget());
         this.variation = w.variation;
         this.paramArrive.setParam(w.paramArrive.getParam());
+        this.chkArrive.setSelected(w.chkArrive.isSelected());
+        this.paramArrive.setEnabled(this.chkArrive.isSelected());
     }
 
     private void load(String target) {
@@ -110,7 +119,9 @@ public class Walk extends Action {
         // Patch B.2: adjustable arrive radius. Already within N tiles of the destination (or
         // of the resolved target's tile for named targets)? The step is skipped outright -
         // no pointless walk click, moving or not.
-        int arrive = ActionUtil.parseInt(paramArrive.getParam(), 3);
+        // v1.31: checkbox off = never skip; the walk always issues (arrive gate 0)
+        int arrive = chkArrive != null && !chkArrive.isSelected()
+                ? 0 : ActionUtil.parseInt(paramArrive.getParam(), 3);
         return Players.getLocal().getTile().distance(tile) <= Math.max(0, arrive);
     }
 
@@ -152,10 +163,19 @@ public class Walk extends Action {
 
         JPanel target = createParameterPanel(subtitle, description, paramTarget, example);
 
-        JPanel arrive = createParameterPanel("Arrive within (tiles):",
-                "Skip this step when the player is already this close to the destination"
-                        + " (or the target's approximate tile for named targets).",
-                paramArrive, "  e.g. \"3\"");
+        // v1.31: the arrive gate is now an explicit checkbox (clarity ask) - the field greys
+        // out when it's off, and off means "always walk, never skip".
+        JPanel arrive = new JPanel();
+        arrive.setLayout(new BoxLayout(arrive, BoxLayout.Y_AXIS));
+        arrive.setOpaque(false);
+        chkArrive.setAlignmentX(0f);
+        paramArrive.setAlignmentX(0f);
+        paramArrive.setMaximumSize(new java.awt.Dimension(120, 28));
+        paramArrive.setEnabled(chkArrive.isSelected());
+        arrive.add(chkArrive);
+        arrive.add(Box.createVerticalStrut(4));
+        arrive.add(paramArrive);
+        arrive.add(Box.createVerticalStrut(10));
 
         return main.actions.ActionUtil.stack(target, arrive);
     }
@@ -205,7 +225,8 @@ public class Walk extends Action {
     public Map<String, String> serialize() {
         return Map.of(
                 "Target", paramTarget.getParam(),
-                "Arrive", paramArrive.getParam()
+                // v1.31: "off" = the checkbox is unticked (always walk)
+                "Arrive", chkArrive.isSelected() ? paramArrive.getParam() : "off"
         );
     }
 
@@ -216,7 +237,15 @@ public class Walk extends Action {
         if (target != null) {
             paramTarget.setParam(target);   // restore UI field
         }
-        if (data.get("Arrive") != null)
-            paramArrive.setParam(data.get("Arrive"));
+        if (data.get("Arrive") != null) {
+            String a = data.get("Arrive").trim();
+            if (a.equalsIgnoreCase("off") || a.isEmpty()) {          // v1.31: checkbox off
+                chkArrive.setSelected(false);
+            } else {
+                chkArrive.setSelected(true);
+                paramArrive.setParam(a);
+            }
+            paramArrive.setEnabled(chkArrive.isSelected());
+        }
     }
 }

@@ -37,6 +37,52 @@ public final class ActionUtil {
     }
 
     /** Splits a comma-separated field into trimmed, non-empty names. */
+    /**
+     * v1.31: parses an item-requirement list like "Copper ore x1, Tin ore x14" (also accepts
+     * "Copper ore*1" or a bare name meaning x1) into name -> required count.
+     */
+    public static java.util.LinkedHashMap<String, Integer> parseItemList(String raw) {
+        java.util.LinkedHashMap<String, Integer> out = new java.util.LinkedHashMap<>();
+        if (raw == null || raw.isBlank()) return out;
+        for (String part : raw.split(",")) {
+            String p = part.trim();
+            if (p.isEmpty()) continue;
+            int qty = 1;
+            String name = p;
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("(.+?)\\s*[x*]\\s*(\\d+)$", java.util.regex.Pattern.CASE_INSENSITIVE)
+                    .matcher(p);
+            if (m.matches()) {
+                name = m.group(1).trim();
+                qty = Math.max(1, parseInt(m.group(2), 1));
+            }
+            if (!name.isEmpty()) out.merge(name, qty, Integer::sum);
+        }
+        return out;
+    }
+
+    /** v1.31: true when the inventory holds at least the given count of EVERY listed item. */
+    public static boolean inventoryHasAll(java.util.Map<String, Integer> wanted) {
+        if (wanted == null || wanted.isEmpty()) return true;
+        for (java.util.Map.Entry<String, Integer> e : wanted.entrySet()) {
+            int have = 0;
+            try { have = org.dreambot.api.methods.container.impl.Inventory.count(e.getKey()); }
+            catch (Throwable ignored) {}
+            if (have < e.getValue()) return false;
+        }
+        return true;
+    }
+
+    /** v1.31: picks one phrase at random from a "|"-separated set ("hi|hello|yo"). */
+    public static String pickPhrase(String raw) {
+        if (raw == null) return "";
+        String[] parts = raw.split("\\|");
+        java.util.List<String> ok = new java.util.ArrayList<>();
+        for (String p : parts) if (p != null && !p.trim().isEmpty()) ok.add(p.trim());
+        if (ok.isEmpty()) return "";
+        return ok.get(java.util.concurrent.ThreadLocalRandom.current().nextInt(ok.size()));
+    }
+
     public static String[] names(String raw) {
         if (raw == null || raw.trim().isEmpty())
             return new String[0];
@@ -62,9 +108,20 @@ public final class ActionUtil {
      * skipped - you can't attack a cow that's in someone else's combat, so a busy target is
      * never a valid candidate; the caller soft-retries with the next one instead of failing.
      */
+    /**
+     * v1.31 hotfix: every "nearest X by name" helper now accepts a COMMA LIST and picks the
+     * closest match across all of them - "Copper rocks, Tin rocks" mines whichever is closer.
+     */
+    public static boolean matchesAny(String entityName, String rawNames) {
+        if (entityName == null || rawNames == null) return false;
+        for (String n : names(rawNames))
+            if (n != null && entityName.equalsIgnoreCase(n.trim())) return true;
+        return false;
+    }
+
     public static NPC nearestNpc(String name, int radius, boolean skipBusy) {
         return org.dreambot.api.methods.interactive.NPCs.closest(n -> {
-            if (n == null || n.getName() == null || !n.getName().equalsIgnoreCase(name)) return false;
+            if (n == null || n.getName() == null || !matchesAny(n.getName(), name)) return false;
             if (!within(n.getTile(), radius)) return false;
             if (skipBusy) {
                 try { if (n.isInCombat()) return false; } catch (Throwable ignored) {}
@@ -75,22 +132,34 @@ public final class ActionUtil {
 
     public static NPC nearestNpc(String name, int radius) {
         if (name == null || name.isEmpty()) return null;
-        NPC npc = NPCs.closest(n -> n != null && n.getName() != null && n.getName().equalsIgnoreCase(name));
+        NPC npc = NPCs.closest(n -> n != null && n.getName() != null && matchesAny(n.getName(), name));
         return (npc != null && within(npc.getTile(), radius)) ? npc : null;
     }
 
-    /** Nearest game object with the given name within {@code radius} tiles, or null. */
+    /** Nearest game object matching any of the comma-separated names, within radius. */
     public static GameObject nearestObject(String name, int radius) {
         if (name == null || name.isEmpty()) return null;
-        GameObject obj = GameObjects.closest(o -> o != null && o.getName() != null && o.getName().equalsIgnoreCase(name));
+        GameObject obj = GameObjects.closest(o -> o != null && o.getName() != null && matchesAny(o.getName(), name));
         return (obj != null && within(obj.getTile(), radius)) ? obj : null;
     }
 
-    /** Nearest ground item with the given name within {@code radius} tiles, or null. */
+    /** Nearest ground item matching any of the comma-separated names, within radius. */
     public static GroundItem nearestGroundItem(String name, int radius) {
         if (name == null || name.isEmpty()) return null;
-        GroundItem gi = GroundItems.closest(g -> g != null && g.getName() != null && g.getName().equalsIgnoreCase(name));
+        GroundItem gi = GroundItems.closest(g -> g != null && g.getName() != null && matchesAny(g.getName(), name));
         return (gi != null && within(gi.getTile(), radius)) ? gi : null;
+    }
+
+    /** v1.31 hotfix: inventory count SUMMED across a comma list of names. */
+    public static int countAny(String rawNames) {
+        int total = 0;
+        if (rawNames == null) return 0;
+        for (String n : names(rawNames)) {
+            if (n == null || n.isBlank()) continue;
+            try { total += org.dreambot.api.methods.container.impl.Inventory.count(n.trim()); }
+            catch (Throwable ignored) {}
+        }
+        return total;
     }
 
     /**

@@ -149,6 +149,48 @@ public final class UIIcons {
         };
     }
 
+    /** v1.31: copy icon (two overlapping pages) for the Logs tab. */
+    public static Icon copy(int s, Color c) {
+        return new Icon() {
+            public int getIconWidth() { return s; }
+            public int getIconHeight() { return s; }
+            public void paintIcon(Component comp, Graphics g, int x, int y) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(c);
+                g2.setStroke(new BasicStroke(Math.max(1f, s / 9f)));
+                int w = (int) (s * 0.55), h = (int) (s * 0.65);
+                g2.drawRoundRect(x + s - w - 1, y + 1, w, h, 3, 3);           // back page
+                g2.setColor(new Color(0x26, 0x26, 0x26));
+                g2.fillRoundRect(x + 1, y + s - h - 1, w, h, 3, 3);
+                g2.setColor(c);
+                g2.drawRoundRect(x + 1, y + s - h - 1, w, h, 3, 3);           // front page
+                g2.dispose();
+            }
+        };
+    }
+
+    /** v1.31: save icon (floppy) for the Logs tab. */
+    public static Icon save(int s, Color c) {
+        return new Icon() {
+            public int getIconWidth() { return s; }
+            public int getIconHeight() { return s; }
+            public void paintIcon(Component comp, Graphics g, int x, int y) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(c);
+                g2.setStroke(new BasicStroke(Math.max(1f, s / 9f)));
+                int p = Math.max(1, s / 8);
+                g2.drawRoundRect(x + p, y + p, s - 2 * p, s - 2 * p, 3, 3);   // body
+                int lw = (s - 2 * p) / 2;
+                g2.drawRect(x + p + (s - 2 * p - lw) / 2, y + p, lw, (s - 2 * p) / 3);   // label
+                g2.drawRect(x + p + 2, y + p + (s - 2 * p) / 2, s - 2 * p - 4,
+                        (s - 2 * p) / 2 - 1);                                  // shutter
+                g2.dispose();
+            }
+        };
+    }
+
     /** A small filled (on) or hollow (off) status dot - replaces the \u25cf/\u25cb glyphs. */
     public static Icon dot(int s, Color c, boolean filled) {
         return new Icon() {

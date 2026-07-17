@@ -43,18 +43,112 @@ public final class LocalStore {
 
     private static final String PROFILE_FILE = "profile.json";
 
-    /** Root DreamMan data directory: {@code <user.home>/DreamMan}. */
+    /**
+     * Root DreamMan data directory: {@code <scripts.path>/DreamMan}.
+     *
+     * <p>v1.32 (SDN compliance): the DreamBot Scripter Guidelines require that scripts only write
+     * inside a subdirectory of {@code System.getProperty("scripts.path")} - not {@code user.home}
+     * or any other location. This roots everything DreamMan persists (profiles, session, presets,
+     * the asset cache) under the sanctioned path. Fallbacks keep unit tests / non-client runs
+     * working: {@code scripts.path} → {@code user.home/DreamBot/Scripts} → the working dir.
+     */
     public static File getRoot() {
-        String home = System.getProperty("user.home");
-        if (home == null || home.isEmpty())
-            home = ".";
-        return new File(home, "DreamMan");
+        String scripts = System.getProperty("scripts.path");
+        File base;
+        if (scripts != null && !scripts.trim().isEmpty()) {
+            base = new File(scripts.trim());
+        } else {
+            // Not running inside the DreamBot client (tests, tooling). Mirror the client's
+            // conventional Scripts folder so a later real run finds the same data.
+            String home = System.getProperty("user.home");
+            base = (home == null || home.isEmpty())
+                    ? new File(".")
+                    : new File(home, "DreamBot" + File.separator + "Scripts");
+        }
+        File root = new File(base, "DreamMan");
+        migrateFromLegacy(root);
+        return root;
+    }
+
+    /** Set once we've checked/performed the legacy migration, so it only runs a single time. */
+    private static volatile boolean migrationChecked = false;
+
+    /**
+     * v1.32b: recover data saved by pre-v1.32 builds. Before the SDN storage move, everything
+     * lived at {@code <user.home>/DreamMan}; v1.32 moved it to {@code <scripts.path>/DreamMan}.
+     * That silently "lost" every task/profile/library a user had built (they were still on disk,
+     * just at the old path the new build no longer reads). This copies the old tree into the new
+     * location ONCE, but only when the new location has no profile of its own yet - so it can
+     * never clobber newer data, and it's a no-op on fresh installs and on every run after the
+     * first successful migration.
+     */
+    private static void migrateFromLegacy(File newRoot) {
+        if (migrationChecked) return;
+        migrationChecked = true;
+        try {
+            String home = System.getProperty("user.home");
+            if (home == null || home.isEmpty()) return;
+            File legacy = new File(home, "DreamMan");
+            if (!legacy.isDirectory()) return;                 // nothing to migrate
+            if (legacy.getCanonicalPath().equals(newRoot.getCanonicalPath())) return;
+
+            // Run exactly once, tracked by a marker in the new root. IMPORTANT: this now runs
+            // even when the new folder already has (empty) profiles from a v1.32/v1.32b launch -
+            // the earlier "only if empty" guard is why the first recovery attempt did nothing.
+            File marker = new File(newRoot, ".legacy-migrated");
+            if (marker.exists()) return;
+
+            newRoot.mkdirs();
+            // Back up whatever the new folder currently holds, then copy the legacy tree over
+            // it. The copy OVERWRITES, so a real old profile.json replaces the empty one the new
+            // build created - which is what actually brings your tasks/library/presets back.
+            File backup = new File(newRoot, ".pre-migrate-backup");
+            try {
+                File curProfile = new File(newRoot, "profile.json");
+                if (curProfile.isFile()) {
+                    backup.mkdirs();
+                    java.nio.file.Files.copy(curProfile.toPath(),
+                            new File(backup, "profile.json").toPath(),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (Throwable ignored) {}
+
+            copyTree(legacy, newRoot);
+            try { marker.createNewFile(); } catch (Throwable ignored) {}
+            org.dreambot.api.utilities.Logger.log(
+                    "[DreamMan] Recovered your earlier tasks from " + legacy.getAbsolutePath()
+                    + " into " + newRoot.getAbsolutePath());
+        } catch (Throwable ignored) {
+            // migration is best-effort; a failure must never stop the script from starting
+        }
+    }
+
+    /** Recursively copies {@code src} into {@code dst}, OVERWRITING existing files. */
+    private static void copyTree(File src, File dst) throws java.io.IOException {
+        if (src.isDirectory()) {
+            dst.mkdirs();
+            String[] kids = src.list();
+            if (kids == null) return;
+            for (String k : kids) copyTree(new File(src, k), new File(dst, k));
+        } else if (src.isFile()) {
+            java.nio.file.Files.copy(src.toPath(), dst.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     /** Directory holding all per-character profiles. */
     public static File getProfilesDir() {
         return new File(getRoot(), "profiles");
     }
+
+    /**
+     * v1.32b: logical, predictable folders for the file dialogs - both under the script data
+     * root so import/export always open somewhere sensible instead of a random last-used path.
+     * Pointing the choosers at a small local folder also sidesteps the multi-second freeze the
+     * default chooser hits while enumerating Windows shell/network locations.
+     */
+    public static File getExportsDir() { File d = new File(getRoot(), "exports"); d.mkdirs(); return d; }
+    public static File getImportsDir() { File d = new File(getRoot(), "imports"); d.mkdirs(); return d; }
 
     /** Directory for a single character's data (created on demand). */
     public static File getProfileDir(String character) {

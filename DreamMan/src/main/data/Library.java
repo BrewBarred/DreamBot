@@ -2,6 +2,7 @@ package main.data;
 
 import org.dreambot.api.methods.interactive.NPCs;
 import org.dreambot.api.methods.interactive.Players;
+import org.dreambot.api.methods.map.Area;
 import org.dreambot.api.methods.map.Map;
 import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.walking.impl.Walking;
@@ -17,7 +18,7 @@ import static main.actions.Action.parseStringIntoTile;
 
 public final class Library {
 
-    public enum TargetType { COORDINATE, PLAYER, GAME_OBJECT, NPC, INVENTORY_ITEM, GROUND_ITEM, UNKNOWN }
+    public enum TargetType { COORDINATE, PLAYER, GAME_OBJECT, NPC, INVENTORY_ITEM, GROUND_ITEM, LOCATION, UNKNOWN }
 
     private Library() {}
 
@@ -294,10 +295,54 @@ public final class Library {
         }
     }
 
-    //    // =========================================================================
-//    // LOCATIONS — cities and named points of interest within them
-//    // Named exactly as they appear on the in-game map where possible.
-//    // =========================================================================
+    // =========================================================================
+    // LOCATIONS - cities and named points of interest (v1.31)
+    // Named as they appear on the in-game map. Each carries a bounding area and a
+    // walkable centre tile; the entity list shows the ones you're standing in/near
+    // under Nearby, and clicking one targets the centre tile.
+    // =========================================================================
+    public enum Locations {
+
+        LUMBRIDGE_CASTLE("Lumbridge Castle",
+                new Area(3199, 3203, 3222, 3229), new Tile(3213, 3218, 0), "Lumbridge"),
+        LUMBRIDGE("Lumbridge",
+                new Area(3190, 3190, 3265, 3247), new Tile(3222, 3218, 0), "Lumbridge"),
+        DRAYNOR_VILLAGE("Draynor Village",
+                new Area(3070, 3240, 3130, 3290), new Tile(3093, 3244, 0), "Draynor"),
+        VARROCK_WEST_BANK("Varrock West Bank",
+                new Area(3180, 3432, 3190, 3446), new Tile(3185, 3437, 0), "Varrock"),
+        GRAND_EXCHANGE("Grand Exchange",
+                new Area(3144, 3468, 3184, 3512), new Tile(3164, 3487, 0), "Varrock"),
+        FALADOR("Falador",
+                new Area(2936, 3310, 3060, 3390), new Tile(2965, 3380, 0), "Falador"),
+        AL_KHARID("Al Kharid",
+                new Area(3265, 3130, 3325, 3200), new Tile(3293, 3180, 0), "Al Kharid");
+
+        public final String locationName;
+        public final Area bounds;
+        public final Tile center;
+        public final String region;
+
+        Locations(String locationName, Area bounds, Tile center, String region) {
+            this.locationName = locationName;
+            this.bounds = bounds;
+            this.center = center;
+            this.region = region;
+        }
+
+        /** True when the tile sits inside the location's bounds (or within pad of its centre). */
+        public boolean isNear(Tile t, int pad) {
+            if (t == null) return false;
+            try { if (bounds != null && bounds.contains(t)) return true; } catch (Throwable ignored) {}
+            try { return center != null && t.distance(center) <= pad; } catch (Throwable ignored) {}
+            return false;
+        }
+
+        public static Locations find(String name) {
+            return Arrays.stream(values())
+                    .filter(l -> l.locationName.equalsIgnoreCase(name)).findFirst().orElse(null);
+        }
+    }
 //
 //    /** Top-level city/region tiles (central reference points). */
 //    public enum Cities {
@@ -642,6 +687,12 @@ public final class Library {
     // UTILITY METHODS
     // =========================================================================
     public static Tile resolveToTile(String target) {
+        // v1.31: named Locations resolve straight to their centre tile ("Lumbridge Castle")
+        if (target != null) {
+            Locations loc = Locations.find(target.trim());
+            if (loc != null) return loc.center;
+        }
+
         Tile coord = parseStringIntoTile(target);
         if (coord != null) return coord;
 

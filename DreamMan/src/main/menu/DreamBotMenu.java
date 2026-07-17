@@ -205,6 +205,7 @@ public class DreamBotMenu extends JFrame {
     private main.market.ScriptRepository marketRepo;
     private final DefaultListModel<main.market.ScriptListing> modelMarket = new DefaultListModel<>();
     private final JList<main.market.ScriptListing> listMarket = new JList<>(modelMarket);
+    private JButton btnMyUploads;   // v1.32b: hidden unless the server market is active
     private final List<main.market.ScriptListing> marketAll = new ArrayList<>();
     private JTextField marketSearchField;
     private JComboBox<String> marketSortCombo;
@@ -285,7 +286,7 @@ public class DreamBotMenu extends JFrame {
     private final List<main.watchers.Trigger> globalTriggers =
             Collections.synchronizedList(new ArrayList<>());
 
-    /** Always-on watchers (the "default background checks"); read by the engine each loop. */
+    /** Always-on watchers (the "default background triggers"); read by the engine each loop. */
     public List<main.watchers.Trigger> getGlobalTriggers() { return globalTriggers; }
 
     private final DefaultListModel<Action> inspActionsModel = new DefaultListModel<>();
@@ -437,19 +438,18 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Task List", loadTabIcon("task_list_tab"), createTaskListTab());
         mainTabs.addTab("Task Library", loadTabIcon("task_library_tab"), createTaskLibraryTab());
         mainTabs.addTab("Task Builder", loadTabIcon("task_builder_tab"), taskBuilder);
+        mainTabs.addTab("Triggers", loadTabIcon("triggers_tab"), createWatchersTab());
         mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
-        mainTabs.addTab("Checks", loadTabIcon("checks_tab"), createWatchersTab());
         mainTabs.addTab("Loot Tracker", loadTabIcon("loot_tracker_tab"), createLootTrackerTab());
+        mainTabs.addTab("Equipment", loadTabIcon("equipment_tab"), createEquipmentTab());   // v1.31
         mainTabs.addTab("Market", loadTabIcon("market_tab"), createMarketTab());
         mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
-        // Patch B.3: the Developers Console is locked to YOU specifically. It unlocks only if
-        // the logged-in character is in DEV_ACCOUNTS, OR <home>/DreamMan/dev.flag contains the
-        // exact DEV_TOKEN. A normal user can't guess the token, and an empty flag file (which
-        // anyone might try) no longer does anything - so a release build shows it to no one.
-        if (isDeveloper())
-            mainTabs.addTab("Developers Console", loadTabIcon("developers_console_tab"),
-                    new DevelopersConsole(libraryPanel));
+        mainTabs.addTab("Logs", loadTabIcon("logs_tab"), createLogsTab());                  // v1.31
+        syncDevConsoleTab();   // v1.32b: owner-only Dev Console tab, if already signed in as owner
+        // Patch B.3 / v1.32: the Developers Console is no longer a top-level tab - it made the
+        // tab strip overflow for developers. It now lives as a developer-only button inside the
+        // Settings tab (see createSettingsTab), opened in its own window. Same isDeveloper() gate.
 
         Logger.log(Logger.LogType.DEBUG, "Setup main tabs...");
 
@@ -723,6 +723,7 @@ public class DreamBotMenu extends JFrame {
             setCurrentExecutionIndex(idx);
             resetLoopProgress();
             listTaskList.repaint();
+            isMenuPaused(false);   // v1.31: "run from here" actually RUNS - no second click
             showToast("Running from task " + (idx + 1), btnRunHere, true);
         });
 
@@ -1057,6 +1058,9 @@ public class DreamBotMenu extends JFrame {
     private JComboBox<String> accountSwitcher;
     private JButton btnAddAccount;
     private JButton btnLoginRow;
+    private JLabel lblServerDot;                 // v1.32b: live server status (green/red)
+    private javax.swing.Timer connPollTimer;     // v1.32b: 30s health poll driving the dot
+    private JButton btnAccountLogout;    // v1.32b: DreamMan-account logout (separate from game)
     private boolean suppressAccountEvents = false;
 
     /** Builds the sign-in / account-switcher row for the Player card (Patch B.15). */
@@ -1074,7 +1078,7 @@ public class DreamBotMenu extends JFrame {
         });
 
         btnAddAccount = createButton("+");
-        btnAddAccount.setToolTipText("Add another Jagex account");
+        btnAddAccount.setToolTipText("Multiple accounts (DreamBot VIP) - coming soon");
         btnAddAccount.setPreferredSize(new Dimension(34, 26));
         btnAddAccount.addActionListener(e -> addAnotherAccount());
 
@@ -1090,6 +1094,12 @@ public class DreamBotMenu extends JFrame {
             main.menu.components.LoginDialog.open(this, url, this::onAccountChanged);
         });
 
+        // v1.32b: the Test-connection BUTTON moved into the Dev Console; here it's replaced by
+        // a small live dot - green when /health answers, red when it doesn't, grey while unknown.
+        lblServerDot = new JLabel(dotIcon(new Color(0x77, 0x77, 0x77)));
+        lblServerDot.setToolTipText("Server status (checked every 30s)");
+        startServerPolling();
+
         JPanel right = new JPanel(new BorderLayout(4, 0));
         right.setOpaque(false);
         right.add(accountSwitcher, BorderLayout.CENTER);
@@ -1099,10 +1109,69 @@ public class DreamBotMenu extends JFrame {
         lbl.setForeground(TEXT_DIM);
         row.add(lbl, BorderLayout.WEST);
         row.add(right, BorderLayout.CENTER);
-        row.add(btnLoginRow, BorderLayout.EAST);
+        JPanel loginBtns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        loginBtns.setOpaque(false);
+        loginBtns.add(lblServerDot);
+        loginBtns.add(btnLoginRow);
+        row.add(loginBtns, BorderLayout.EAST);
 
         refreshAccountSwitcher();
         return row;
+    }
+
+    /** v1.32b: a solid status dot (used by the live server indicator). */
+    private static Icon dotIcon(Color color) {
+        final int s = 10;
+        return new Icon() {
+            public int getIconWidth() { return s; }
+            public int getIconHeight() { return s; }
+            public void paintIcon(Component c, Graphics g, int x, int y) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(color);
+                g2.fillOval(x, y, s - 1, s - 1);
+                g2.setColor(color.darker());
+                g2.drawOval(x, y, s - 1, s - 1);
+                g2.dispose();
+            }
+        };
+    }
+
+    /**
+     * v1.32b: lightweight background health poll driving the status dot - one GET to
+     * {@code <server>/health} every 30 seconds (plus one immediately). The network call never
+     * touches the EDT and never opens dialogs; the full classified diagnostic (the old Test
+     * connection button) now lives in the Dev Console.
+     */
+    private void startServerPolling() {
+        if (connPollTimer != null) return;
+        Runnable check = () -> new Thread(() -> {
+            boolean ok = false;
+            try {
+                String base = marketServerUrl == null || marketServerUrl.isEmpty()
+                        ? DEFAULT_MARKET_SERVER_URL : marketServerUrl;
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection)
+                        new java.net.URL(base + "/health").openConnection();
+                c.setConnectTimeout(4000);
+                c.setReadTimeout(4000);
+                c.setRequestProperty("User-Agent", "DreamMan/1.32 (DreamBot script)");
+                ok = c.getResponseCode() >= 200 && c.getResponseCode() < 300;
+                c.disconnect();
+            } catch (Throwable ignored) {}
+            final boolean up = ok;
+            SwingUtilities.invokeLater(() -> {
+                if (lblServerDot == null) return;
+                lblServerDot.setIcon(dotIcon(up ? new Color(0x3F, 0xB9, 0x50)
+                                                : new Color(0xCC, 0x45, 0x45)));
+                lblServerDot.setToolTipText(up
+                        ? "Server online (checked every 30s)"
+                        : "Server unreachable - details: Dev Console \u2192 Test connection");
+            });
+        }, "DreamMan-HealthPoll").start();
+        connPollTimer = new javax.swing.Timer(30_000, e -> check.run());
+        connPollTimer.setRepeats(true);
+        connPollTimer.start();
+        check.run();   // first reading immediately
     }
 
     /** Shows either the account dropdown (logged in) or a Log in button (guest). */
@@ -1127,27 +1196,41 @@ public class DreamBotMenu extends JFrame {
 
     /** Adds another Jagex account to the vault (respecting the tier cap). */
     private void addAnotherAccount() {
-        if (!main.market.AccountVault.isUnlocked()) { showToast("Log in first", btnAddAccount, false); return; }
-        JTextField name = new JTextField(16);
-        JTextField label = new JTextField(16);
-        JPasswordField pin = new JPasswordField(16);
-        JPanel form = new JPanel(new GridLayout(3, 2, 4, 4));
-        form.add(new JLabel("Account name:")); form.add(name);
-        form.add(new JLabel("Label (e.g. Ironman):")); form.add(label);
-        form.add(new JLabel("Bank PIN (optional):")); form.add(pin);
-        if (JOptionPane.showConfirmDialog(this, form, "Add account",
-                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) return;
-
-        main.market.AccountVault.Account a = new main.market.AccountVault.Account(
-                name.getText().trim(), label.getText().trim());
-        a.pin = new String(pin.getPassword());
-        String err = main.market.AccountVault.addAccount(a);
-        if (err != null) { showToast(err, btnAddAccount, false); return; }
-        if (marketRepo instanceof main.market.HttpRepository)
-            main.market.AccountVault.sync(new main.market.ServerAccount(
-                    ((main.market.HttpRepository) marketRepo).baseUrl()));
-        refreshAccountSwitcher();
-        showToast("Added " + a.name, btnAddAccount, true);
+        // v1.32b: multi-account switching relies on DreamBot's AccountManager, which is a
+        // DreamBot VIP feature (and may need extra API access on our side). It isn't wired up
+        // yet, so instead of a half-working form we show a teaser that points at DreamBot VIP.
+        JEditorPane pane = new JEditorPane("text/html",
+                "<html><body style='width:340px;font-family:sans-serif;font-size:11px;color:#DDD'>"
+                + "<h3 style='color:#E0B341;margin:2px 0'>Multiple accounts &mdash; coming soon</h3>"
+                + "<p>Running DreamMan across several accounts is a <b>future release</b>. It builds"
+                + " on DreamBot's account manager, which is part of <b>DreamBot VIP</b>, so you'll"
+                + " need VIP to use it once it's ready.</p>"
+                + "<p>You can get VIP here:<br>"
+                + "<a href='https://dreambot.org/forums/index.php?/store/product/6-vip/'>"
+                + "dreambot.org &rsaquo; store &rsaquo; VIP</a></p>"
+                + "<p style='color:#9A9A9A'><i>Note: this isn't available in DreamMan yet &mdash;"
+                + " we may also need to arrange extra API access before enabling it. The link is"
+                + " just so you know what it'll require.</i></p>"
+                + "</body></html>");
+        pane.setEditable(false);
+        pane.setOpaque(false);
+        pane.addHyperlinkListener(ev -> {
+            if (ev.getEventType() == javax.swing.event.HyperlinkEvent.EventType.ACTIVATED) {
+                String u = ev.getURL() != null ? ev.getURL().toString()
+                        : "https://dreambot.org/forums/index.php?/store/product/6-vip/";
+                try {
+                    java.awt.Desktop.getDesktop().browse(java.net.URI.create(u));
+                } catch (Throwable t) {
+                    try {
+                        java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                                .setContents(new java.awt.datatransfer.StringSelection(u), null);
+                        showToast("Link copied to clipboard", btnAddAccount, true);
+                    } catch (Throwable ignored) {}
+                }
+            }
+        });
+        JOptionPane.showMessageDialog(this, pane, "Multiple accounts (VIP)",
+                JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void switchToAccount(String name) {
@@ -1162,6 +1245,7 @@ public class DreamBotMenu extends JFrame {
         applyTierLimits();
         refreshAccountSwitcher();
         refreshTierStatusLabel();
+        refreshAccountLogoutVisibility();   // v1.32b: show/hide the account Log out button
         refilterLibrary();   // VIP tasks may now be visible
         maybeAutoConnectMarket();   // Patch B.17: logging in grants consent -> market goes live
     }
@@ -1174,8 +1258,12 @@ public class DreamBotMenu extends JFrame {
      */
     private void maybeAutoConnectMarket() {
         if (marketServerUrl == null || marketServerUrl.isEmpty()) return;
-        if (marketRepo instanceof main.market.HttpRepository) { reloadMarket(); return; }
         if (!main.privacy.Consent.has(main.privacy.Consent.MARKET_BROWSE)) return;
+        // v1.32b: ALWAYS rebuild the repo with the CURRENT token here. The old code early-returned
+        // when the repo was already an HttpRepository - but at startup that repo was created with
+        // an EMPTY token (not logged in yet), so after login it kept sending unauthenticated
+        // requests and every publish/rate/remove failed with 401. Recreating it with the fresh
+        // session token is the fix for "I published but the server has nothing".
         marketRepo = new main.market.HttpRepository(marketServerUrl,
                 main.market.ServerAccount.session().token);
         if (btnServerSource != null) btnServerSource.setSelected(true);
@@ -1189,6 +1277,31 @@ public class DreamBotMenu extends JFrame {
             lblAccountTier.setForeground(main.market.Tier.isVip()
                     ? new Color(230, 190, 90) : TEXT_MAIN);
         }
+        // v1.32b: the Dev Console is a hidden tab again (owner-only), added/removed as the
+        // account tier changes - not a right-click context menu, which was the wrong home.
+        syncDevConsoleTab();
+        refreshAccountLogoutVisibility();
+    }
+
+    /** Adds the owner-only Dev Console tab when signed in as owner; removes it otherwise. */
+    private void syncDevConsoleTab() {
+        if (mainTabs == null) return;
+        int idx = indexOfTab("Dev Console");
+        boolean shouldShow = main.market.Tier.isOwner();
+        if (shouldShow && idx < 0) {
+            mainTabs.addTab("Dev Console", loadTabIcon("settings_tab"),
+                    main.menu.components.DevConsole.buildPanel());
+        } else if (!shouldShow && idx >= 0) {
+            mainTabs.removeTabAt(idx);
+        }
+    }
+
+    /** Index of a main tab by title, or -1. */
+    private int indexOfTab(String title) {
+        if (mainTabs == null) return -1;
+        for (int i = 0; i < mainTabs.getTabCount(); i++)
+            if (title.equals(mainTabs.getTitleAt(i))) return i;
+        return -1;
     }
 
     /**
@@ -1306,8 +1419,18 @@ public class DreamBotMenu extends JFrame {
         }
 
         JTextField txtName = new JTextField("My DreamMan Script", 22);
+        // v1.32: the author is LINKED TO THE ACCOUNT and not editable - one less field, and it
+        // guarantees a script is credited to whoever's signed in (the server sets it from the
+        // token on publish anyway). Falls back to the character name / Anonymous for local
+        // exports when you're not signed in.
+        String acctName = main.market.ServerAccount.isLoggedIn()
+                ? main.market.ServerAccount.username() : null;
         String who = safePlayerName();
-        JTextField txtAuthor = new JTextField(who == null || who.isEmpty() ? "Anonymous" : who, 22);
+        String authorName = (acctName != null && !acctName.isEmpty()) ? acctName
+                : (who == null || who.isEmpty() ? "Anonymous" : who);
+        JTextField txtAuthor = new JTextField(authorName, 22);
+        txtAuthor.setEditable(false);
+        txtAuthor.setToolTipText("Linked to your account - can't be changed here.");
         JSpinner spVersion = new JSpinner(new SpinnerNumberModel(1.0, 0.1, 999.0, 0.1));
         JTextArea txtDesc = new JTextArea(3, 22);
         txtDesc.setLineWrap(true);
@@ -1359,8 +1482,14 @@ public class DreamBotMenu extends JFrame {
         bundle.author = txtAuthor.getText().trim();
         bundle.version = ((Number) spVersion.getValue()).doubleValue();
         bundle.description = txtDesc.getText().trim();
-        bundle.loops = queueLoopTarget;
+        // v1.32: loop counts are RESET on export - both the queue loops and every task's own
+        // repeat. Shared scripts must not carry a baked-in loop count: that was the exploit
+        // (package 50 loops, import it, then loop THAT 50x for 2500). The importer sets their
+        // own loops within their tier cap. Same reset is applied to task + preset export below.
+        bundle.loops = 1;
         bundle.tasks = ProfileCodec.tasksToData(modelTaskList);
+        if (bundle.tasks != null)
+            for (main.data.store.TaskData td : bundle.tasks) if (td != null) td.repeat = 1;
         if (chkChecks.isSelected())
             bundle.globalTriggers = main.watchers.TriggerCodec.toJson(
                     new ArrayList<>(globalTriggers));
@@ -1371,7 +1500,7 @@ public class DreamBotMenu extends JFrame {
             target = new java.io.File(scriptsDir,
                     main.tools.ScriptExporter.safeFileName(bundle.name) + ".jar");
         } else {
-            JFileChooser chooser = new JFileChooser();
+            JFileChooser chooser = new JFileChooser(main.data.store.LocalStore.getExportsDir());
             chooser.setDialogTitle("Save the script jar");
             chooser.setSelectedFile(new java.io.File(
                     main.tools.ScriptExporter.safeFileName(bundle.name) + ".jar"));
@@ -1508,7 +1637,8 @@ public class DreamBotMenu extends JFrame {
         panelTaskList.setBackground(Theme.BG_APP);
 
         /// CENTER: Add the task queue list display to the center of the task list panel
-        listTaskList.setCellRenderer(new TaskCardRenderer());
+        taskCardRenderer = new TaskCardRenderer();
+        listTaskList.setCellRenderer(taskCardRenderer);
 
         // Patch B.2: drag a task card to reorder the queue. Disabled while the queue is
         // executing (indexes are live) - a toast explains instead of silently ignoring.
@@ -1667,30 +1797,46 @@ public class DreamBotMenu extends JFrame {
         });
 
         listTaskList.addMouseListener(new MouseAdapter() {
+            /** v1.31: the context menu waits ~280ms so a double-RIGHT-click can land first. */
+            private javax.swing.Timer popupTimer;
+
             @Override
             public void mouseClicked(MouseEvent e) {
-                // get the index based on the specific mouse coordinates
                 int index = listTaskList.locationToIndex(e.getPoint());
+                if (index == -1 || !listTaskList.getCellBounds(index, index).contains(e.getPoint()))
+                    return;
+                listTaskList.setSelectedIndex(index);
 
-                // ensure the index is valid and the click bounds actually contain that item
-                if (index != -1 && listTaskList.getCellBounds(index, index).contains(e.getPoint())) {
+                // v1.32: a click on the -/+ loop steppers is handled FIRST, for ANY click count,
+                // and consumed - so double-clicking a stepper just adjusts loops twice and can
+                // never be read as a row double-click. This is the "disable double-click while
+                // stepping loops" fix.
+                if (SwingUtilities.isLeftMouseButton(e) && handleRepeatStepperClick(e, index))
+                    return;
 
-                    listTaskList.setSelectedIndex(index);
-                    if (e.getClickCount() == 2 && !e.isShiftDown()) {
-                        loadIntoBuilder(listTaskList.getSelectedValue());
-                        mainTabs.setSelectedIndex(2);
-                    }
+                // v1.32: double-LEFT a TASK LIST row opens it in the builder for editing (this is
+                // the "double-click the task list = editor" behaviour). Duplicating a queue entry
+                // now lives on the right-click menu (Duplicate below / to end).
+                if (SwingUtilities.isLeftMouseButton(e) && e.getClickCount() == 2 && !e.isShiftDown()) {
+                    if (popupTimer != null) popupTimer.stop();
+                    loadIntoBuilder(listTaskList.getSelectedValue());
+                    selectMainTab("Task Builder");
                 }
             }
             @Override public void mousePressed(MouseEvent e)  { maybePopup(e); }
             @Override public void mouseReleased(MouseEvent e) { maybePopup(e); }
             @Override public void mouseExited(MouseEvent e)   { hoveredTaskIndex = -1; listTaskList.repaint(); }
             private void maybePopup(MouseEvent e) {
-                if (!e.isPopupTrigger()) return;
+                if (!e.isPopupTrigger() || e.getClickCount() != 1) return;
                 int index = listTaskList.locationToIndex(e.getPoint());
                 if (index < 0 || !listTaskList.getCellBounds(index, index).contains(e.getPoint())) return;
                 listTaskList.setSelectedIndex(index);
-                showTaskContextMenu(e, index);
+                final int px = e.getX(), py = e.getY();
+                if (popupTimer != null) popupTimer.stop();
+                popupTimer = new javax.swing.Timer(280, ev ->
+                        showTaskContextMenu(px, py, index));
+                popupTimer.setRepeats(false);
+                popupTimer.start();
             }
         });
         // hover highlight
@@ -1786,12 +1932,30 @@ public class DreamBotMenu extends JFrame {
         // clickable zone is exactly the drawn star.
         listTaskLibrary.addMouseListener(new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent me) {
-                if (!main.market.Tier.isAdmin()) return;
                 int idx = listTaskLibrary.locationToIndex(me.getPoint());
                 if (idx < 0) return;
                 Rectangle b = listTaskLibrary.getCellBounds(idx, idx);
                 if (b == null || !b.contains(me.getPoint())) return;
                 Task t = modelTaskLibrary.getElementAt(idx);
+                if (t == null) return;
+
+                // v1.32: double-click a LIBRARY task -> add it to the queue and jump to it there
+                // (previously it opened the builder; the builder is now the TASK LIST's double-
+                // click). A queue entry is a deep copy so editing/running it never mutates the
+                // library original.
+                if (SwingUtilities.isLeftMouseButton(me) && me.getClickCount() == 2) {
+                    modelTaskList.addElement(new Task(t));
+                    int pos = modelTaskList.size() - 1;
+                    selectMainTab("Task List");
+                    listTaskList.setSelectedIndex(pos);
+                    listTaskList.ensureIndexIsVisible(pos);
+                    showToast("Added \"" + t.getName() + "\" at position " + (pos + 1)
+                            + " of the queue", listTaskList, true);
+                    return;
+                }
+
+                // admins: single-click the star to toggle a default task
+                if (!main.market.Tier.isAdmin()) return;
                 libraryCardRenderer.getListCellRendererComponent(listTaskLibrary, t, idx, false, false);
                 libraryCardRenderer.setBounds(0, 0, b.width, b.height);
                 libraryCardRenderer.doLayout();
@@ -1899,22 +2063,9 @@ public class DreamBotMenu extends JFrame {
             populateInspector(listTaskLibrary.getSelectedValue());
         });
 
-        listTaskLibrary.addMouseListener(new MouseAdapter() {
-            public void mouseClicked(MouseEvent e) {
-                int selectedIndex = listTaskLibrary.getSelectedIndex();
-
-                // return early if no task is currently selected in the task library
-                if (selectedIndex == -1)
-                    return;
-
-                if (e.getClickCount() == 2) {
-                    // Patch B.3: double-click opens the task in the BUILDER (same as the queue's
-                    // double-click) ready to Save changes. Adding to the queue is the Add button.
-                    loadIntoBuilder(modelTaskLibrary.getElementAt(selectedIndex));
-                    mainTabs.setSelectedIndex(2);
-                }
-            }
-        });
+        // v1.33: (removed) a second double-click listener used to ALSO open the builder, so a
+        // double-click both added to the queue AND edited. Double-click now only adds to the
+        // queue (handled above); editing is the Edit button.
 
         ///  Add all buttons
         ///  Export the selected library task to a shareable .json file
@@ -1925,12 +2076,22 @@ public class DreamBotMenu extends JFrame {
         JButton btnTaskLibraryImport = createButton("Import...");
         btnTaskLibraryImport.addActionListener(e -> importTaskFromFile(btnTaskLibraryImport));
 
+        // v1.33: stage the selected library task to the LOCAL market (market-ready), without
+        // removing it from the library. From there it shows in the market's Local view and can
+        // be uploaded to the server.
+        JButton btnMarketReady = createButton("\u2191 Market-ready", new Color(25, 60, 75), null);
+        btnMarketReady.setToolTipText("Copy the selected task to your local market so you can "
+                + "publish it (it stays in your library)");
+        btnMarketReady.addActionListener(e ->
+                makeMarketReady(listTaskLibrary.getSelectedValue(), btnMarketReady));
+
         btnSection.add(btnTaskLibrarySave);
         btnSection.add(btnTaskLibraryAdd);
         btnSection.add(btnTaskLibraryDelete);
         btnSection.add(btnTaskLibraryEdit);
         btnSection.add(btnTaskLibraryExport);
         btnSection.add(btnTaskLibraryImport);
+        btnSection.add(btnMarketReady);
 
         panelCenterEastLibraryTab.add(buildLibraryInspector(), BorderLayout.CENTER);
 
@@ -2372,7 +2533,7 @@ public class DreamBotMenu extends JFrame {
     /** Exports the ENTIRE library to one shareable .json file (Patch B.3). */
     private void exportWholeLibrary(JComponent anchor) {
         if (libraryAll.isEmpty()) { showToast("Library is empty", anchor, false); return; }
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new JFileChooser(main.data.store.LocalStore.getExportsDir());
         chooser.setDialogTitle("Export whole library");
         chooser.setSelectedFile(new java.io.File("DreamMan_library.json"));
         if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
@@ -2395,7 +2556,7 @@ public class DreamBotMenu extends JFrame {
             return;
         }
 
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new JFileChooser(main.data.store.LocalStore.getExportsDir());
         chooser.setDialogTitle("Export task");
         String suggested = LocalStore.sanitize(selected.getName()) + ".json";
         chooser.setSelectedFile(new java.io.File(suggested));
@@ -2414,7 +2575,7 @@ public class DreamBotMenu extends JFrame {
 
     /** Imports a task from a user-chosen .json file into the library. */
     private void importTaskFromFile(JComponent anchor) {
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new JFileChooser(main.data.store.LocalStore.getImportsDir());
         chooser.setDialogTitle("Import task (.json)");
         chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("JSON task files", "json"));
 
@@ -2539,16 +2700,16 @@ public class DreamBotMenu extends JFrame {
         // pane you had to drag before anything was visible. Now the tab is full-width (the loot
         // readout moved to its own Loot Tracker tab): a compact LIST of checks on the left, one
         // line each, and a clear DETAIL editor for the selected check on the right. Renamed
-        // user-facing to "Checks".
+        // user-facing to "Triggers".
         JPanel panel = new JPanel(new BorderLayout(12, 12));
         panel.setBorder(new EmptyBorder(15, 15, 15, 15));
         panel.setBackground(BG_BASE);
 
-        JLabel blurb = new JLabel("<html>Checks run automatically between actions - independent "
-                + "ones run together (run away <i>and</i> eat). When two checks want the same "
+        JLabel blurb = new JLabel("<html>Triggers run automatically between actions - independent "
+                + "ones run together (run away <i>and</i> eat). When two triggers want the same "
                 + "thing (both freeing inventory, both walking), the one <b>higher in the list "
                 + "wins</b> that cycle and the other waits - <b>drag to reorder</b> and set that "
-                + "priority. Per-action checks live on the <b>Checks\u2026</b> button in the Task "
+                + "priority. Per-action triggers live on the <b>Triggers\u2026</b> button in the Task "
                 + "Builder.</html>");
         blurb.setForeground(TEXT_DIM);
         blurb.setBorder(new EmptyBorder(0, 0, 8, 0));
@@ -2558,7 +2719,7 @@ public class DreamBotMenu extends JFrame {
         checksEditor.setOrderChangedHook(() -> saveAll(false));   // B.8: persist new priority
         main.menu.components.TriggerEditor editor = checksEditor;
 
-        panel.add(createSubtitle("Checks"), BorderLayout.NORTH);
+        panel.add(createSubtitle("Triggers"), BorderLayout.NORTH);
         JPanel body = new JPanel(new BorderLayout(0, 8));
         body.setOpaque(false);
         body.add(blurb, BorderLayout.NORTH);
@@ -2615,25 +2776,18 @@ public class DreamBotMenu extends JFrame {
     private String marketServerUrl = DEFAULT_MARKET_SERVER_URL;
     /** The local folder the market points at (auto-created, right-click the icon to change). */
     private java.io.File marketFolder;
+    /** v1.32b: the local market folder, ALWAYS loaded alongside the server (merged view). */
+    private main.market.FolderRepository localMarketRepo;
+    /** v1.32b: All / On server / Local only. */
+    private JComboBox<String> marketSourceCombo;
 
     /**
-     * The default local market folder (Patch B.17): lives NEXT TO the running DreamMan build -
-     * the script jar's folder when deployed, the project output folder when run from an IDE -
-     * so it's portable with the project and never depends on a user-home path that may not
-     * exist. Falls back to {@code <home>/DreamMan/market} only if the code location can't be
-     * resolved or isn't writable. Always created, so no file chooser is ever forced on you.
+     * v1.33: the default local market folder lives under the sanctioned script dir
+     * ({@code scripts.path/DreamMan/market}). It used to sit next to the jar, which in DreamBot
+     * resolves to a temp path outside the allowed tree - which SDN forbids. Always created.
      */
     private java.io.File defaultMarketFolder() {
-        try {
-            java.net.URL src = getClass().getProtectionDomain().getCodeSource().getLocation();
-            java.io.File loc = new java.io.File(src.toURI());
-            // a jar -> use its parent dir; a classes dir -> use the dir itself
-            java.io.File base = loc.isFile() ? loc.getParentFile() : loc;
-            if (base != null) {
-                java.io.File f = new java.io.File(base, "DreamMan-market");
-                if (f.isDirectory() || f.mkdirs()) return f;
-            }
-        } catch (Throwable ignored) { /* unusual classloader - fall through */ }
+        // ALWAYS under the script dir. No user.home, no temp dir.
         java.io.File f = new java.io.File(LocalStore.getRoot(), "market");
         f.mkdirs();
         return f;
@@ -2646,6 +2800,7 @@ public class DreamBotMenu extends JFrame {
 
         // default folder location (used when the folder source is picked)
         marketFolder = defaultMarketFolder();
+        localMarketRepo = new main.market.FolderRepository(marketFolder);   // v1.32b: merged view
         // Start on the SERVER automatically when we're allowed to talk to it (a server browse
         // is a network call, so it still needs the one-time privacy consent); otherwise the
         // local folder market loads instantly and the server is one click away.
@@ -2692,6 +2847,13 @@ public class DreamBotMenu extends JFrame {
         // ── filter + sort as icon toggles/menus with tooltips ──
         marketSortCombo = new JComboBox<>(new String[]{"Top rated", "Newest", "Most downloaded", "A-Z"});
         marketSortCombo.addActionListener(e -> refilterMarket());
+        // v1.32b: the three views (replaces the confusing "All/On server/Local only")
+        marketSourceCombo = new JComboBox<>(new String[]{"Live market", "My uploads", "Local", "All"});
+        marketSourceCombo.setToolTipText("<html><b>Live market</b> - other people's public scripts "
+                + "(rate &amp; comment here).<br><b>My uploads</b> - your scripts that are on the "
+                + "server.<br><b>Local</b> - your local/market-ready staging.<br><b>All</b> - "
+                + "everything.</html>");
+        marketSourceCombo.addActionListener(e -> { refilterMarket(); updateMarketButtons(); });
         JButton btnSortIcon = iconButton(main.menu.components.UIIcons.sort(20, ic),
                 "Sort the list", null);
         btnSortIcon.addActionListener(e -> {
@@ -2729,6 +2891,9 @@ public class DreamBotMenu extends JFrame {
         left.add(btnServerSource);
         left.add(Box.createHorizontalStrut(8));
         left.add(btnSortIcon);
+        left.add(Box.createHorizontalStrut(8));
+        marketSourceCombo.setPreferredSize(new Dimension(104, 24));
+        left.add(marketSourceCombo);   // v1.32b: All / On server / Local only
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         right.setOpaque(false);
@@ -2790,15 +2955,24 @@ public class DreamBotMenu extends JFrame {
         scroll.setBorder(BorderFactory.createLineBorder(COLOR_BORDER_DIM));
 
         // ── bottom: a single "publish current item" control (one script/task/preset at a time) ──
-        JButton btnPublish = createButton("Publish selected item\u2026", new Color(25, 60, 75), null);
-        btnPublish.setToolTipText("Publish ONE thing at a time: the selected task, or the whole queue");
+        JButton btnPublish = createButton("Publish\u2026", new Color(25, 60, 75), null);
+        btnPublish.setToolTipText("Publish one of your presets, the current queue, or the selected "
+                + "library task \u2014 pick from the list");
         btnPublish.addActionListener(e -> publishOneItem(btnPublish));
         JButton btnRemove = createButton("Remove mine", COLOR_BUTTON_RED, null);
         btnRemove.addActionListener(e -> removeFromMarket(btnRemove));
         JPanel bottom = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         bottom.setOpaque(false);
         bottom.add(btnPublish);
+        btnMyUploads = createButton("My uploads\u2026", new Color(40, 55, 40), null);
+        btnMyUploads.setToolTipText("View and manage the scripts you've uploaded (rename, delete, quota)");
+        btnMyUploads.addActionListener(e -> openMyUploads());
+        bottom.add(btnMyUploads);
         bottom.add(btnRemove);
+        JLabel dlHint = new JLabel("   double-click a script to download it");
+        dlHint.setForeground(TEXT_DIM);
+        dlHint.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+        bottom.add(dlHint);
 
         panel.add(createSubtitle("Market"), BorderLayout.NORTH);
         JPanel body = new JPanel(new BorderLayout(0, 8));
@@ -2812,10 +2986,344 @@ public class DreamBotMenu extends JFrame {
         return panel;
     }
 
+    /** v1.32b: the per-row market menu - actions depend on where the row lives and whose it is. */
+    private void showMarketRowMenu(main.market.ScriptListing l, MouseEvent me) {
+        if (l == null) return;
+        JPopupMenu menu = new JPopupMenu();
+
+        JMenuItem miImport = new JMenuItem("Download / import into library");
+        miImport.addActionListener(a -> importFromMarket(listMarket));
+        menu.add(miImport);
+
+        if ("local".equals(l.origin)) {
+            JMenuItem miUpload = new JMenuItem("Upload to server\u2026");
+            miUpload.addActionListener(a -> uploadLocalListing(l));
+            menu.add(miUpload);
+            JMenuItem miDeleteLocal = new JMenuItem("Delete local copy");
+            miDeleteLocal.addActionListener(a -> {
+                if (JOptionPane.showConfirmDialog(this,
+                        "Delete the local file for \"" + l.name + "\"?", "Delete local script",
+                        JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION)
+                    return;
+                try {
+                    localMarketRepo.remove(l.id);
+                    reloadMarket();
+                    showToast("Deleted local copy of \"" + l.name + "\"", listMarket, true);
+                } catch (Exception ex) {
+                    showToast("Couldn't delete: " + ex.getMessage(), listMarket, false);
+                }
+            });
+            menu.add(miDeleteLocal);
+        } else {
+            JMenuItem miComments = new JMenuItem("Comments\u2026");
+            miComments.addActionListener(a -> openComments(l));
+            menu.add(miComments);
+            if (isOwnListing(l) || main.market.Tier.isAdmin()) {
+                menu.addSeparator();
+                JMenuItem miRename = new JMenuItem("Rename\u2026");
+                miRename.addActionListener(a -> {
+                    if (!(marketRepo instanceof main.market.HttpRepository)) return;
+                    String name = JOptionPane.showInputDialog(this, "New name:", l.name);
+                    if (name == null || name.trim().isEmpty()) return;
+                    new Thread(() -> {
+                        try {
+                            ((main.market.HttpRepository) marketRepo).rename(l.id, name.trim());
+                            SwingUtilities.invokeLater(this::reloadMarket);
+                        } catch (Exception ex) {
+                            SwingUtilities.invokeLater(() ->
+                                    showToast("Rename failed: " + ex.getMessage(), listMarket, false));
+                        }
+                    }, "DreamMan-Rename").start();
+                });
+                menu.add(miRename);
+                JMenuItem miRemove = new JMenuItem("Remove from server");
+                miRemove.addActionListener(a -> {
+                    if (JOptionPane.showConfirmDialog(this,
+                            "Remove \"" + l.name + "\" from the market permanently?",
+                            "Remove upload", JOptionPane.YES_NO_OPTION,
+                            JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) return;
+                    new Thread(() -> {
+                        try {
+                            marketRepo.remove(l.id);
+                            SwingUtilities.invokeLater(this::reloadMarket);
+                        } catch (Exception ex) {
+                            SwingUtilities.invokeLater(() ->
+                                    showToast("Remove failed: " + ex.getMessage(), listMarket, false));
+                        }
+                    }, "DreamMan-Remove").start();
+                });
+                menu.add(miRemove);
+            }
+        }
+        menu.show(listMarket, me.getX(), me.getY());
+    }
+
+    /** v1.32b: pushes a LOCAL script to the server (quota + auth enforced server-side). */
+    private void uploadLocalListing(main.market.ScriptListing l) {
+        if (!(marketRepo instanceof main.market.HttpRepository)) {
+            showToast("Switch to the server source first (the server icon)", listMarket, false);
+            return;
+        }
+        if (!main.market.ServerAccount.isLoggedIn()) {
+            showToast("Log in to upload scripts", listMarket, false);
+            return;
+        }
+        if (!ensureConsent(main.privacy.Consent.MARKET_PUBLISH)) return;
+        if (l.bundle == null) {
+            showToast("That local file has no bundle to upload", listMarket, false);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                marketRepo.publish(l);
+                SwingUtilities.invokeLater(() -> {
+                    reloadMarket();
+                    showToast("Uploaded \"" + l.name + "\" to the server", listMarket, true);
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() ->
+                        showToast("Upload failed: " + ex.getMessage(), listMarket, false));
+            }
+        }, "DreamMan-Upload").start();
+    }
+
+    /** v1.32b: forum comments on a server listing - read them all, add your own. */
+    private void openComments(main.market.ScriptListing l) {
+        if (!(marketRepo instanceof main.market.HttpRepository)) return;
+        final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
+
+        JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(this),
+                "Comments \u2014 " + l.name, java.awt.Dialog.ModalityType.MODELESS);
+        dlg.setSize(520, 420);
+        dlg.setLocationRelativeTo(this);
+        JPanel root = new JPanel(new BorderLayout(0, 8));
+        root.setBorder(new EmptyBorder(12, 12, 12, 12));
+        root.setBackground(BG_BASE);
+
+        JTextArea feed = new JTextArea();
+        feed.setEditable(false);
+        feed.setLineWrap(true);
+        feed.setWrapStyleWord(true);
+        feed.setBackground(new Color(0x1A, 0x1A, 0x1A));
+        feed.setForeground(TEXT_MAIN);
+        feed.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        feed.setText("Loading comments\u2026");
+
+        JTextField input = new JTextField();
+        JButton btnPost = createButton("Post");
+        boolean canPost = main.market.ServerAccount.isLoggedIn();
+        input.setEnabled(canPost);
+        btnPost.setEnabled(canPost);
+        if (!canPost) input.setText("Log in to comment");
+
+        // v1.32b: PAGED - one page (20) per request keeps the menu light; Newer/Older move
+        // through the thread, newest first.
+        final int[] page = {0};
+        final JButton btnNewer = createButton("\u2190 Newer");
+        final JButton btnOlder = createButton("Older \u2192");
+        final JLabel lblPage = new JLabel(" ", SwingConstants.CENTER);
+        lblPage.setForeground(TEXT_DIM);
+        btnNewer.setEnabled(false);
+        btnOlder.setEnabled(false);
+
+        Runnable load = () -> new Thread(() -> {
+            try {
+                main.market.HttpRepository.CommentPage cp = repo.comments(l.id, page[0], 20);
+                StringBuilder sb = new StringBuilder();
+                if (cp.comments.isEmpty())
+                    sb.append(cp.total == 0 ? "No comments yet - be the first." : "(empty page)");
+                java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("d MMM HH:mm");
+                for (main.market.HttpRepository.Comment c : cp.comments)
+                    sb.append(c.author).append("  \u00b7  ")
+                      .append(fmt.format(new java.util.Date(c.at))).append("\n")
+                      .append(c.body).append("\n\n");
+                final String text = sb.toString();
+                final int totalPages = Math.max(1, (int) Math.ceil(cp.total / 20.0));
+                final boolean more = cp.hasMore;
+                SwingUtilities.invokeLater(() -> {
+                    feed.setText(text);
+                    feed.setCaretPosition(0);
+                    lblPage.setText("page " + (page[0] + 1) + " of " + totalPages
+                            + "  (" + cp.total + " total)");
+                    btnNewer.setEnabled(page[0] > 0);
+                    btnOlder.setEnabled(more);
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> feed.setText("Couldn't load comments: " + ex.getMessage()));
+            }
+        }, "DreamMan-Comments").start();
+        btnNewer.addActionListener(a -> { if (page[0] > 0) { page[0]--; load.run(); } });
+        btnOlder.addActionListener(a -> { page[0]++; load.run(); });
+
+        Runnable post = () -> {
+            String body = input.getText().trim();
+            if (body.isEmpty()) return;
+            btnPost.setEnabled(false);
+            new Thread(() -> {
+                try {
+                    repo.addComment(l.id, body);
+                    SwingUtilities.invokeLater(() -> {
+                        input.setText("");
+                        btnPost.setEnabled(true);
+                        page[0] = 0;   // a new post is on the newest page
+                        load.run();
+                    });
+                } catch (Exception ex) {
+                    SwingUtilities.invokeLater(() -> {
+                        btnPost.setEnabled(true);
+                        showToast("Couldn't post: " + ex.getMessage(), root, false);
+                    });
+                }
+            }, "DreamMan-PostComment").start();
+        };
+        btnPost.addActionListener(a -> post.run());
+        input.addActionListener(a -> post.run());
+
+        JPanel pager = new JPanel(new BorderLayout(6, 0));
+        pager.setOpaque(false);
+        pager.add(btnNewer, BorderLayout.WEST);
+        pager.add(lblPage, BorderLayout.CENTER);
+        pager.add(btnOlder, BorderLayout.EAST);
+
+        JPanel postRow = new JPanel(new BorderLayout(6, 0));
+        postRow.setOpaque(false);
+        postRow.add(input, BorderLayout.CENTER);
+        postRow.add(btnPost, BorderLayout.EAST);
+
+        JPanel bottom = new JPanel(new GridLayout(2, 1, 0, 6));
+        bottom.setOpaque(false);
+        bottom.add(pager);
+        bottom.add(postRow);
+
+        root.add(Theme.thinScrollbars(new JScrollPane(feed)), BorderLayout.CENTER);
+        root.add(bottom, BorderLayout.SOUTH);
+        dlg.setContentPane(root);
+        load.run();
+        dlg.setVisible(true);
+    }
+
+    /**
+     * v1.32b: the "My uploads" manager - your uploaded scripts with their download/rating stats,
+     * how much of your quota you've used, and per-script Rename + Delete. Backed by the server's
+     * GET /me/scripts (owner-scoped) and PUT/DELETE /scripts/{id}.
+     */
+    private void openMyUploads() {
+        if (!(marketRepo instanceof main.market.HttpRepository)) {
+            showToast("My uploads needs the server market (not a local folder)", listMarket, false);
+            return;
+        }
+        if (!main.market.ServerAccount.isLoggedIn()) {
+            showToast("Log in to see your uploads", listMarket, false);
+            return;
+        }
+        final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
+
+        JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(this),
+                "My uploads", java.awt.Dialog.ModalityType.MODELESS);
+        dlg.setSize(560, 420);
+        dlg.setLocationRelativeTo(this);
+        JPanel root = new JPanel(new BorderLayout(0, 8));
+        root.setBorder(new EmptyBorder(12, 12, 12, 12));
+        root.setBackground(BG_BASE);
+
+        JLabel quota = new JLabel("Loading\u2026");
+        quota.setForeground(Theme.ACCENT);
+        String[] cols = {"Name", "Ver", "Downloads", "Rating"};
+        javax.swing.table.DefaultTableModel model =
+                new javax.swing.table.DefaultTableModel(cols, 0) {
+                    @Override public boolean isCellEditable(int r, int c) { return false; }
+                };
+        JTable table = new JTable(model);
+        table.setRowHeight(26);
+        table.setBackground(new Color(0x1A, 0x1A, 0x1A));
+        table.setForeground(TEXT_MAIN);
+        final List<main.market.ScriptListing>[] rows = new List[]{new ArrayList<>()};
+
+        JButton btnRename = createButton("Rename");
+        JButton btnDelete = createButton("Delete", COLOR_BUTTON_RED, null);
+        JButton btnRefresh = createButton("Refresh");
+        btnRename.setEnabled(false);
+        btnDelete.setEnabled(false);
+        table.getSelectionModel().addListSelectionListener(e -> {
+            boolean sel = table.getSelectedRow() >= 0;
+            btnRename.setEnabled(sel);
+            btnDelete.setEnabled(sel);
+        });
+
+        Runnable load = () -> {
+            quota.setText("Loading\u2026");
+            new Thread(() -> {
+                try {
+                    main.market.HttpRepository.MyUploads mine = repo.myScripts();
+                    SwingUtilities.invokeLater(() -> {
+                        rows[0] = mine.scripts;
+                        model.setRowCount(0);
+                        for (main.market.ScriptListing l : mine.scripts)
+                            model.addRow(new Object[]{l.name, "v" + l.version,
+                                    l.downloads, l.ratingCount > 0
+                                        ? String.format("%.1f (%d)", l.avgRating, l.ratingCount) : "\u2014"});
+                        quota.setText(mine.usage != null && mine.usage.task != null
+                                ? "Tasks: " + mine.usage.task.used + " of " + mine.usage.task.cap
+                                    + "   \u00b7   Scripts: " + mine.usage.script.used + " of "
+                                    + mine.usage.script.cap + "   (" + mine.tier + " tier)"
+                                : "Uploads: " + mine.used + " of " + mine.cap
+                                    + "  (" + mine.tier + " tier)");
+                    });
+                } catch (Exception ex) {
+                    SwingUtilities.invokeLater(() -> quota.setText("Couldn't load: " + ex.getMessage()));
+                }
+            }, "DreamMan-MyUploads").start();
+        };
+
+        btnRefresh.addActionListener(e -> load.run());
+        btnRename.addActionListener(e -> {
+            int r = table.getSelectedRow();
+            if (r < 0 || r >= rows[0].size()) return;
+            main.market.ScriptListing l = rows[0].get(r);
+            String name = JOptionPane.showInputDialog(dlg, "New name:", l.name);
+            if (name == null || name.trim().isEmpty()) return;
+            new Thread(() -> {
+                try { repo.rename(l.id, name.trim());
+                    SwingUtilities.invokeLater(() -> { load.run(); reloadMarket(); });
+                } catch (Exception ex) {
+                    SwingUtilities.invokeLater(() -> showToast("Rename failed: " + ex.getMessage(), root, false));
+                }
+            }, "DreamMan-Rename").start();
+        });
+        btnDelete.addActionListener(e -> {
+            int r = table.getSelectedRow();
+            if (r < 0 || r >= rows[0].size()) return;
+            main.market.ScriptListing l = rows[0].get(r);
+            if (JOptionPane.showConfirmDialog(dlg,
+                    "Delete \"" + l.name + "\" from the market permanently?",
+                    "Delete upload", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+                    != JOptionPane.YES_OPTION) return;
+            new Thread(() -> {
+                try { repo.remove(l.id);
+                    SwingUtilities.invokeLater(() -> { load.run(); reloadMarket(); });
+                } catch (Exception ex) {
+                    SwingUtilities.invokeLater(() -> showToast("Delete failed: " + ex.getMessage(), root, false));
+                }
+            }, "DreamMan-DeleteUpload").start();
+        });
+
+        JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        btns.setOpaque(false);
+        btns.add(btnRefresh);
+        btns.add(btnRename);
+        btns.add(btnDelete);
+
+        root.add(quota, BorderLayout.NORTH);
+        root.add(Theme.thinScrollbars(new JScrollPane(table)), BorderLayout.CENTER);
+        root.add(btns, BorderLayout.SOUTH);
+        dlg.setContentPane(root);
+        load.run();
+        dlg.setVisible(true);
+    }
+
     /** Pulls everything from the repository (off the EDT - a shared folder can be slow). */
     private void reloadMarket() {
         if (marketRepo == null) return;
-        // Patch B.12: a folder market is entirely local - nothing is sent, so nothing is asked.
         // A SERVER market is a network call, and that needs consent first.
         if (marketRepo instanceof main.market.HttpRepository
                 && !main.privacy.Consent.has(main.privacy.Consent.MARKET_BROWSE)) {
@@ -2827,22 +3335,51 @@ public class DreamBotMenu extends JFrame {
         final main.market.ScriptRepository repo = marketRepo;
         setStatus("Loading market...");
         new Thread(() -> {
-            List<main.market.ScriptListing> found = repo.list();
+            // ── v1.32b: MERGED view ──────────────────────────────────────────
+            // The market always shows your LOCAL scripts alongside the SERVER's. Server rows are
+            // tagged with an upload badge (live stats, comments); local rows are yours-only until
+            // you right-click -> Upload. A local script that's already on the server (same name,
+            // authored by you) is shown ONCE - as the server copy, since that's the one with
+            // stats - so uploading doesn't duplicate the row.
+            List<main.market.ScriptListing> server = new ArrayList<>();
+            List<main.market.ScriptListing> local = new ArrayList<>();
+            if (repo instanceof main.market.HttpRepository) {
+                server = repo.list();
+                if (localMarketRepo != null) local = localMarketRepo.list();
+            } else {
+                local = repo.list();
+            }
+            for (main.market.ScriptListing l : server) if (l != null) l.origin = "server";
+            String me = main.market.ServerAccount.session().username;
+            List<main.market.ScriptListing> merged = new ArrayList<>(server);
+            for (main.market.ScriptListing l : local) {
+                if (l == null) continue;
+                l.origin = "local";
+                boolean uploadedAlready = false;
+                for (main.market.ScriptListing s : server)
+                    if (s != null && s.name != null && s.name.equalsIgnoreCase(l.name)
+                            && me != null && !me.isEmpty() && me.equalsIgnoreCase(s.author)) {
+                        uploadedAlready = true;
+                        break;
+                    }
+                if (!uploadedAlready) merged.add(l);
+            }
+            final List<main.market.ScriptListing> found = merged;
+            final int nServer = server.size(), nLocal = found.size() - server.size();
+            final boolean serverMode = repo instanceof main.market.HttpRepository;
             SwingUtilities.invokeLater(() -> {
                 marketAll.clear();
                 marketAll.addAll(found);
-                if (found.isEmpty() && repo instanceof main.market.HttpRepository) {
-                    // Patch B.17: an auto-connected server that returns nothing is either empty
-                    // or unreachable - say so instead of a bare count, and point at the offline
-                    // fallback that always works.
-                    lblMarketSource.setText(repo.describe()
-                            + "  \u00b7  nothing loaded (offline or empty server)"
-                            + "  \u00b7  the folder icon switches to the local market");
+                if (serverMode) {
+                    lblMarketSource.setText(repo.describe() + "  \u00b7  " + nServer
+                            + " on server, " + nLocal + " local"
+                            + (nServer == 0 ? "  \u00b7  (server empty or unreachable)" : ""));
                 } else {
                     lblMarketSource.setText(repo.describe() + "  \u00b7  " + found.size()
-                            + (found.size() == 1 ? " script" : " scripts"));
+                            + " local script(s)");
                 }
                 refilterMarket();
+                updateMarketButtons();
                 setStatus(found.isEmpty() ? "Market is empty" : "Market loaded");
             });
         }, "DreamMan-Market").start();
@@ -2853,9 +3390,21 @@ public class DreamBotMenu extends JFrame {
         String q = marketSearchField == null ? "" : marketSearchField.getText().trim().toLowerCase();
         String sort = marketSortCombo == null ? "Top rated" : (String) marketSortCombo.getSelectedItem();
 
+        // v1.32b: three distinct views (your notes) instead of a merged blur:
+        //   Live market - OTHERS' public listings (rate + comment here; never your own)
+        //   My uploads  - YOUR scripts that are on the server
+        //   Local       - YOUR local/market-ready staging (not yet on the server)
+        //   All         - everything, for convenience
+        String src = marketSourceCombo == null ? "Live market"
+                : (String) marketSourceCombo.getSelectedItem();
         List<main.market.ScriptListing> view = new ArrayList<>();
         for (main.market.ScriptListing l : marketAll) {
             if (l == null) continue;
+            boolean onServer = "server".equals(l.origin);
+            boolean own = isOwnListing(l);
+            if ("Live market".equals(src) && !(onServer && !own)) continue;
+            if ("My uploads".equals(src) && !(onServer && own)) continue;
+            if ("Local".equals(src) && !"local".equals(l.origin)) continue;
             if (!q.isEmpty()) {
                 String hay = (l.name + " " + l.author + " " + l.description + " "
                         + String.join(" ", l.tags == null ? List.<String>of() : l.tags))
@@ -2881,7 +3430,15 @@ public class DreamBotMenu extends JFrame {
         for (main.market.ScriptListing l : view) modelMarket.addElement(l);
     }
 
-    private JTextArea privacyStatusArea;
+    /** v1.32b: hide buttons that can't do anything in the current view (your notes). */
+    private void updateMarketButtons() {
+        boolean serverMode = marketRepo instanceof main.market.HttpRepository;
+        // "My uploads" manager only means something against the server.
+        if (btnMyUploads != null) btnMyUploads.setVisible(serverMode);
+    }
+
+    private JTextArea privacyStatusArea;   // legacy (unused after the v1.32b checkbox redesign)
+    private JPanel privacyContent;         // v1.32b: checkbox toggles + info, rebuilt on refresh
 
     /**
      * The Privacy tab (Patch B.12): what DreamMan holds, what you've agreed to, and the buttons to
@@ -2900,15 +3457,10 @@ public class DreamBotMenu extends JFrame {
         blurb.setForeground(TEXT_DIM);
         blurb.setBorder(new EmptyBorder(0, 0, 8, 0));
 
-        privacyStatusArea = new JTextArea();
-        privacyStatusArea.setEditable(false);
-        privacyStatusArea.setFont(new Font("Consolas", Font.PLAIN, 12));
-        privacyStatusArea.setBackground(new Color(15, 15, 15));
-        privacyStatusArea.setForeground(TEXT_MAIN);
-        privacyStatusArea.setBorder(new EmptyBorder(10, 10, 10, 10));
-
-        JButton btnChange = createButton("Change what I've agreed to\u2026");
-        btnChange.addActionListener(e -> { askConsent(null); refreshPrivacy(); });
+        privacyContent = new JPanel();
+        privacyContent.setOpaque(false);
+        privacyContent.setLayout(new BoxLayout(privacyContent, BoxLayout.Y_AXIS));
+        privacyContent.setBorder(new EmptyBorder(4, 2, 4, 8));
 
         JButton btnWithdraw = createButton("Withdraw everything", new Color(90, 55, 20), null);
         btnWithdraw.setToolTipText("DreamMan goes back to being fully offline, immediately");
@@ -2933,9 +3485,8 @@ public class DreamBotMenu extends JFrame {
             showToast("Local character labels cleared", btnWipeLocal, true);
         });
 
-        JPanel btns = new JPanel(new GridLayout(1, 5, 6, 0));
+        JPanel btns = new JPanel(new GridLayout(1, 4, 6, 0));
         btns.setOpaque(false);
-        btns.add(btnChange);
         btns.add(btnWithdraw);
         btns.add(btnExport);
         btns.add(btnWipeLocal);
@@ -2944,7 +3495,7 @@ public class DreamBotMenu extends JFrame {
         JPanel body = new JPanel(new BorderLayout(0, 8));
         body.setOpaque(false);
         body.add(blurb, BorderLayout.NORTH);
-        body.add(Theme.thinScrollbars(new JScrollPane(privacyStatusArea)), BorderLayout.CENTER);
+        body.add(Theme.thinScrollbars(new JScrollPane(privacyContent)), BorderLayout.CENTER);
         body.add(btns, BorderLayout.SOUTH);
 
         panel.add(createSubtitle("Privacy"), BorderLayout.NORTH);
@@ -2954,68 +3505,135 @@ public class DreamBotMenu extends JFrame {
         return panel;
     }
 
-    /** Shows exactly what is (and isn't) being shared. */
+    /** v1.32b: rebuilds the privacy panel as real toggles with a risk blurb under each. */
     private void refreshPrivacy() {
-        if (privacyStatusArea == null) return;
-        StringBuilder sb = new StringBuilder();
+        if (privacyContent == null) return;
+        privacyContent.removeAll();
 
-        sb.append("WHAT YOU'VE AGREED TO\n");
-        sb.append("─────────────────────────────────────────────────────────────\n");
-        String[][] rows = {
-                {main.privacy.Consent.MARKET_BROWSE,        "Browse & download scripts"},
-                {main.privacy.Consent.MARKET_PUBLISH,       "Publish my scripts"},
-                {main.privacy.Consent.CLOUD_SYNC,           "Cloud-sync my setup"},
-                {main.privacy.Consent.LINK_CHARACTER_NAME,  "Send REAL character names"},
-        };
-        for (String[] r : rows) {
-            boolean on = main.privacy.Consent.has(r[0]);
-            sb.append(String.format("  [%s]  %-32s %s%n",
-                    on ? "\u2713" : " ", r[1],
-                    on ? "since " + new java.text.SimpleDateFormat("yyyy-MM-dd")
-                            .format(new Date(main.privacy.Consent.grantedAt(r[0])))
-                       : "off"));
+        privacyContent.add(privacySectionLabel("What you've agreed to"));
+        if (!main.privacy.Consent.anyNetworkConsent()) {
+            JLabel offline = new JLabel("DreamMan is currently OFFLINE \u2014 nothing is sent anywhere.");
+            offline.setForeground(new Color(0x7FBF7F));
+            offline.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+            offline.setAlignmentX(Component.LEFT_ALIGNMENT);
+            offline.setBorder(new EmptyBorder(2, 2, 6, 0));
+            privacyContent.add(offline);
         }
-        if (!main.privacy.Consent.anyNetworkConsent())
-            sb.append("\n  DreamMan is currently OFFLINE. No data is being sent anywhere.\n");
 
-        sb.append("\n\nWHAT NEVER LEAVES THIS PC (regardless of the above)\n");
-        sb.append("─────────────────────────────────────────────────────────────\n");
-        sb.append("  \u2022 Your bank PIN - held in memory only, never written to disk,\n");
-        sb.append("    never part of a profile, never uploaded. Checked before every upload.\n");
-        sb.append("  \u2022 Your OSRS character names - mapped to local labels; only the\n");
-        sb.append("    label is ever sent (unless you explicitly turn that option on).\n");
-        sb.append("  \u2022 status.json (your live position/task) - written locally for your\n");
-        sb.append("    own dashboard. Never uploaded.\n");
+        privacyContent.add(consentToggle(main.privacy.Consent.MARKET_BROWSE,
+                "Browse & download scripts",
+                "Lets DreamMan load the market list and download others' scripts. Sends only your "
+                + "anonymous install id and what you search for \u2014 never your account, character "
+                + "or game data. Turning this off hides the online market (the local folder market "
+                + "still works).", false));
 
-        sb.append("\n\nYOUR CHARACTERS, AS THE SERVER WOULD SEE THEM\n");
-        sb.append("─────────────────────────────────────────────────────────────\n");
+        privacyContent.add(consentToggle(main.privacy.Consent.MARKET_PUBLISH,
+                "Publish my scripts",
+                "Lets you upload your own tasks/presets to the market under your account name. Only "
+                + "what you explicitly choose to publish is sent. Off means you can browse but not "
+                + "publish.", false));
+
+        privacyContent.add(consentToggle(main.privacy.Consent.CLOUD_SYNC,
+                "Cloud-sync my setup",
+                "Backs up your task profiles to the server so you can restore them on another PC. "
+                + "The data is encrypted on THIS machine first \u2014 the server stores only "
+                + "ciphertext it can't read. Off keeps everything on this PC only.", false));
+
+        privacyContent.add(consentToggle(main.privacy.Consent.LINK_CHARACTER_NAME,
+                "Send REAL character names  (not recommended)",
+                "\u26a0 Sends your actual OSRS character names to the server instead of local labels "
+                + "(\"Main\", \"Alt 1\"). This creates a permanent server-side record linking your real "
+                + "game accounts to botting. Leave this OFF unless you have a specific reason \u2014 "
+                + "with it off, your names never leave this PC.", true));
+
+        privacyContent.add(Box.createVerticalStrut(6));
+        privacyContent.add(privacySectionLabel("What never leaves this PC (regardless of the above)"));
+        privacyContent.add(privacyInfoBullet("Your bank PIN \u2014 held in memory only, never written "
+                + "to disk or uploaded. Re-checked before every upload."));
+        privacyContent.add(privacyInfoBullet("Your OSRS character names \u2014 mapped to local labels; "
+                + "only the label is ever sent (unless you turn the option above on)."));
+        privacyContent.add(privacyInfoBullet("status.json (your live position/task) \u2014 written "
+                + "locally for your own dashboard, never uploaded."));
+
+        privacyContent.add(Box.createVerticalStrut(6));
+        privacyContent.add(privacySectionLabel("Your characters, as the server would see them"));
         Map<String, String> map = main.privacy.CharacterMap.all();
         if (map.isEmpty()) {
-            sb.append("  (none yet)\n");
+            privacyContent.add(privacyInfoBullet("(none yet)"));
         } else {
             boolean realNames = main.privacy.Consent.has(main.privacy.Consent.LINK_CHARACTER_NAME);
             for (Map.Entry<String, String> e : map.entrySet())
-                sb.append(String.format("  %-20s \u2192 sent as \"%s\"%n",
-                        e.getKey(), realNames ? e.getKey() : e.getValue()));
-            if (!realNames)
-                sb.append("\n  The names on the left stay on this PC. Only the labels on the\n"
-                        + "  right are ever sent - so even a breached server holds no\n"
-                        + "  record linking a real game account to botting.\n");
-            else
-                sb.append("\n  \u26a0 You have turned ON sending real names. The server will hold a\n"
-                        + "  permanent record tying these accounts to botting. You can turn this\n"
-                        + "  off above, but anything already sent is already there.\n");
+                privacyContent.add(privacyInfoBullet(e.getKey() + "  \u2192  sent as \""
+                        + (realNames ? e.getKey() : e.getValue()) + "\""));
         }
 
-        sb.append("\n\nYOUR ACCOUNT\n");
-        sb.append("─────────────────────────────────────────────────────────────\n");
-        sb.append(main.market.ServerAccount.isLoggedIn()
-                ? "  Signed in as " + main.market.ServerAccount.username() + "\n"
-                : "  Not signed in to any server.\n");
-        sb.append("  Local files: ").append(LocalStore.getRoot().getAbsolutePath()).append("\n");
+        privacyContent.add(Box.createVerticalStrut(6));
+        privacyContent.add(privacySectionLabel("Your account"));
+        privacyContent.add(privacyInfoBullet(main.market.ServerAccount.isLoggedIn()
+                ? "Signed in as " + main.market.ServerAccount.username()
+                : "Not signed in to any server."));
+        privacyContent.add(privacyInfoBullet("Local files: " + LocalStore.getRoot().getAbsolutePath()));
 
-        privacyStatusArea.setText(sb.toString());
-        privacyStatusArea.setCaretPosition(0);
+        privacyContent.revalidate();
+        privacyContent.repaint();
+    }
+
+    /** One consent toggle: a bold checkbox plus a wrapped risk blurb beneath it. */
+    private JComponent consentToggle(String purpose, String title, String blurb, boolean warn) {
+        JPanel row = new JPanel();
+        row.setOpaque(false);
+        row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
+        row.setBorder(new EmptyBorder(6, 0, 6, 0));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JCheckBox cb = new JCheckBox(title, main.privacy.Consent.has(purpose));
+        cb.setOpaque(false);
+        cb.setForeground(warn ? new Color(0xE0, 0x9A, 0x4B) : TEXT_MAIN);
+        cb.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        cb.setAlignmentX(Component.LEFT_ALIGNMENT);
+        cb.addActionListener(e -> {
+            boolean want = cb.isSelected();
+            if (want && warn) {
+                int ok = JOptionPane.showConfirmDialog(this,
+                        "<html><body style='width:360px'><b>" + title + "</b><br><br>"
+                                + blurb + "<br><br>Are you sure you want to turn this on?</body></html>",
+                        "Turn on real character names?", JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE);
+                if (ok != JOptionPane.YES_OPTION) { cb.setSelected(false); return; }
+            }
+            main.privacy.Consent.set(purpose, want);
+            onAccountChanged();   // market-browse consent gates the online market
+            refreshPrivacy();
+        });
+        row.add(cb);
+
+        JLabel b = new JLabel("<html><div style='width:540px'>" + blurb + "</div></html>");
+        b.setForeground(TEXT_DIM);
+        b.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        b.setBorder(new EmptyBorder(1, 22, 0, 0));
+        b.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.add(b);
+        return row;
+    }
+
+    private JComponent privacySectionLabel(String text) {
+        JLabel l = new JLabel(text.toUpperCase());
+        l.setForeground(Theme.ACCENT);
+        l.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        l.setAlignmentX(Component.LEFT_ALIGNMENT);
+        l.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, COLOR_BORDER_DIM),
+                new EmptyBorder(8, 0, 3, 0)));
+        return l;
+    }
+
+    private JComponent privacyInfoBullet(String text) {
+        JLabel l = new JLabel("<html><div style='width:540px'>\u2022 " + text + "</div></html>");
+        l.setForeground(TEXT_DIM);
+        l.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        l.setAlignmentX(Component.LEFT_ALIGNMENT);
+        l.setBorder(new EmptyBorder(2, 6, 0, 0));
+        return l;
     }
 
     /** Downloads everything the server holds about you. */
@@ -3158,6 +3776,8 @@ public class DreamBotMenu extends JFrame {
         final main.menu.components.StarRating stars = new main.menu.components.StarRating(15, false);
         private final JLabel starText = new JLabel();
         private final JLabel dl = new JLabel("", SwingConstants.RIGHT);
+        /** v1.32b: per-row download button (import into library) - no select-then-click dance. */
+        private final JLabel dlButton = new JLabel();
         /** The row the mouse is over and the star it's over, driven by the list's listeners. */
         int hoverRow = -1, hoverStar = -1;
 
@@ -3179,10 +3799,15 @@ public class DreamBotMenu extends JFrame {
             starRow.setOpaque(false);
             starRow.add(stars);
             starRow.add(starText);
+            // bottom-right: downloads count + the per-row download button
+            JPanel dlRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+            dlRow.setOpaque(false);
+            dlRow.add(dl);
+            dlRow.add(dlButton);
             JPanel right = new JPanel(new GridLayout(2, 1));
             right.setOpaque(false);
             right.add(starRow);
-            right.add(dl);
+            right.add(dlRow);
             add(left, BorderLayout.CENTER);
             add(right, BorderLayout.EAST);
         }
@@ -3194,6 +3819,14 @@ public class DreamBotMenu extends JFrame {
             // Patch B.16: VIP-gated listings show a marker and no bundle preview for non-VIP.
             // (Plain text, not the padlock emoji - that also fell back to a missing-glyph box.)
             boolean locked = l.vipOnly && (l.bundle == null);
+            // v1.32b: origin badge - server rows get the upload icon, local ones the folder.
+            boolean onServer = !"local".equals(l.origin);
+            name.setIcon(onServer
+                    ? main.menu.components.UIIcons.server(13, new Color(0x5F, 0xB4, 0x66))
+                    : main.menu.components.UIIcons.folder(13, new Color(0xB9, 0xA0, 0x55)));
+            name.setIconTextGap(7);
+            name.setToolTipText(onServer ? "Uploaded - on the server (rate, comment, download)"
+                                         : "Local only - right-click to upload it to the server");
             name.setText((l.vipOnly ? "[VIP] " : "") + l.name + "  v" + l.version);
             String tags = (l.tags == null || l.tags.isEmpty()) ? "" : "  \u00b7  " + String.join(", ", l.tags);
             meta.setText("by " + l.author + "  \u00b7  "
@@ -3211,6 +3844,17 @@ public class DreamBotMenu extends JFrame {
             dl.setText(l.downloads + (l.downloads == 1 ? " download" : " downloads")
                     + (l.myRating > 0 ? "   \u00b7 you: " + l.myRating + "/5" : ""));
             dl.setForeground(TEXT_DIM);
+
+            // v1.32b: the per-row download button. Disabled (dim) for your own uploads and for
+            // listings with no bundle to import; active (green) otherwise.
+            boolean own = isOwnListing(l);
+            boolean canDownload = !own && l.bundle != null
+                    && l.bundle.tasks != null && !l.bundle.tasks.isEmpty();
+            dlButton.setIcon(main.menu.components.UIIcons.importIcon(17,
+                    canDownload ? new Color(0x6F, 0xC2, 0x76) : new Color(0x55, 0x55, 0x55)));
+            dlButton.setToolTipText(own ? "Your own upload"
+                    : canDownload ? "Download / import into your library"
+                    : (l.vipOnly ? "VIP only" : "No tasks to download"));
 
             setBackground(selected ? new Color(46, 42, 30) : Theme.SURFACE_1);
             name.setForeground(selected ? Theme.ACCENT : TEXT_MAIN);
@@ -3236,6 +3880,13 @@ public class DreamBotMenu extends JFrame {
             return stars.starIndexAt(sp.x);
         }
 
+        /** v1.32b: true when the point is on the per-row download button (cell coordinates). */
+        boolean downloadAt(Point p, Rectangle cellBounds) {
+            setBounds(0, 0, cellBounds.width, cellBounds.height);
+            layoutTree(this);
+            return SwingUtilities.getDeepestComponentAt(this, p.x, p.y) == dlButton;
+        }
+
         private void layoutTree(Component c) {
             c.doLayout();
             if (c instanceof Container)
@@ -3247,6 +3898,9 @@ public class DreamBotMenu extends JFrame {
     private void importFromMarket(JComponent anchor) {
         main.market.ScriptListing l = listMarket.getSelectedValue();
         if (l == null) { showToast("Pick a script first", anchor, false); return; }
+        // v1.32b: no need to download your own upload - it's already yours.
+        if (isOwnListing(l)) { showToast("That's your own upload \u2014 it's already in your library",
+                anchor, false); return; }
         if (l.bundle == null || l.bundle.tasks == null || l.bundle.tasks.isEmpty()) {
             showToast("That listing has no tasks", anchor, false);
             return;
@@ -3261,7 +3915,7 @@ public class DreamBotMenu extends JFrame {
         sb.append(l.summarise()).append("<br><br><b>It will add these kinds of action:</b><br>");
         for (String t : l.actionTypes()) sb.append("&nbsp;&nbsp;\u2022 ").append(t).append("<br>");
         if (l.bundle.globalTriggers != null && !l.bundle.globalTriggers.isBlank())
-            sb.append("<br>It also brings the author's always-on <b>checks</b>.<br>");
+            sb.append("<br>It also brings the author's always-on <b>triggers</b>.<br>");
         sb.append("<br>It arrives as <b>one</b> library task: \u201c").append(l.name).append("\u201d.");
         sb.append("<br><br>Import into your Task Library?</html>");
 
@@ -3372,9 +4026,77 @@ public class DreamBotMenu extends JFrame {
      * always self-contained.
      */
     private void publishItem(Task single, JComponent anchor) {
-        boolean queueMode = (single == null);
-        if (queueMode && modelTaskList.isEmpty()) {
-            showToast("Your queue is empty - build something first", anchor, false);
+        // thin wrapper kept for the older call sites
+        List<Task> tasks = new ArrayList<>();
+        if (single == null) {
+            for (int i = 0; i < modelTaskList.size(); i++) tasks.add(modelTaskList.get(i));
+        } else tasks.add(single);
+        publishTasks(single == null ? "My Script" : single.getName(), tasks, anchor);
+    }
+
+    /**
+     * v1.32b: the general publish core - any named set of tasks (a preset, the queue, one
+     * library task). The form's name defaults to what you're publishing (preset/first-task
+     * name), the author is the signed-in account, loops are reset to 1 as always.
+     */
+    /**
+     * v1.33: stage a library task into the LOCAL market (your notes' "make market-ready").
+     * Copies the task into local staging - it stays in the library - and lets you tag it as a
+     * task (reusable building block) or a script (full single-purpose routine), which the server
+     * caps separately. From the market's Local view you can then upload it to the server.
+     */
+    private void makeMarketReady(Task t, JComponent anchor) {
+        if (t == null) { showToast("Select a library task first", anchor, false); return; }
+        Object[] kinds = {"Task (building block)", "Script (full routine)", "Cancel"};
+        int k = JOptionPane.showOptionDialog(this,
+                "<html>Stage <b>" + t.getName() + "</b> to your local market so you can publish it."
+                + "<br><br><b>Task</b> = a reusable building block (banking, a walk, a skill loop)."
+                + "<br><b>Script</b> = a complete single-purpose routine."
+                + "<br><br>It stays in your Task Library either way.</html>",
+                "Make market-ready", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE,
+                null, kinds, kinds[0]);
+        if (k != 0 && k != 1) return;
+        String kind = (k == 1) ? "script" : "task";
+
+        String acctName = main.market.ServerAccount.isLoggedIn()
+                ? main.market.ServerAccount.username() : null;
+        String who = safePlayerName();
+        String author = (acctName != null && !acctName.isEmpty()) ? acctName
+                : (who == null || who.isEmpty() ? "Anonymous" : who);
+
+        main.market.ScriptListing listing = new main.market.ScriptListing();
+        listing.name = t.getName();
+        listing.author = author;
+        listing.description = t.getDescription() == null ? "" : t.getDescription();
+        listing.kind = kind;
+        listing.origin = "local";
+
+        main.data.store.ScriptBundle b = new main.data.store.ScriptBundle();
+        b.name = listing.name;
+        b.author = author;
+        b.version = 1.0;
+        b.description = listing.description;
+        b.loops = 1;
+        List<Task> one = new ArrayList<>();
+        one.add(t);
+        b.tasks = ProfileCodec.tasksToData(one);
+        if (b.tasks != null)
+            for (main.data.store.TaskData td : b.tasks) if (td != null) td.repeat = 1;
+        listing.bundle = b;
+
+        try {
+            localMarketRepo.publish(listing);
+            showToast("\"" + t.getName() + "\" is market-ready \u2014 see the market's Local view",
+                    anchor, true);
+            reloadMarket();
+        } catch (Exception ex) {
+            showToast("Couldn't stage: " + ex.getMessage(), anchor, false);
+        }
+    }
+
+    private void publishTasks(String defaultName, List<Task> tasks, JComponent anchor) {
+        if (tasks == null || tasks.isEmpty()) {
+            showToast("Nothing to publish - it's empty", anchor, false);
             return;
         }
         if (marketRepo instanceof main.market.HttpRepository
@@ -3383,9 +4105,18 @@ public class DreamBotMenu extends JFrame {
             return;
         }
 
-        JTextField txtName = new JTextField(queueMode ? "My Script" : single.getName(), 22);
+        JTextField txtName = new JTextField(
+                defaultName == null || defaultName.isBlank() ? "My Script" : defaultName, 22);
+        // v1.32: author is linked to the signed-in account and read-only (publishing requires
+        // login, and the server authors it from the token regardless).
+        String acctName = main.market.ServerAccount.isLoggedIn()
+                ? main.market.ServerAccount.username() : null;
         String who = safePlayerName();
-        JTextField txtAuthor = new JTextField(who == null || who.isEmpty() ? "Anonymous" : who, 22);
+        String authorName = (acctName != null && !acctName.isEmpty()) ? acctName
+                : (who == null || who.isEmpty() ? "Anonymous" : who);
+        JTextField txtAuthor = new JTextField(authorName, 22);
+        txtAuthor.setEditable(false);
+        txtAuthor.setToolTipText("Linked to your account - can't be changed here.");
         JSpinner spVersion = new JSpinner(new SpinnerNumberModel(1.0, 0.1, 999.0, 0.1));
         JTextField txtTags = new JTextField("", 22);
         txtTags.setToolTipText("Comma-separated, e.g. combat, ironman, f2p");
@@ -3437,19 +4168,26 @@ public class DreamBotMenu extends JFrame {
         b.author = listing.author;
         b.version = listing.version;
         b.description = listing.description;
-        b.loops = queueMode ? queueLoopTarget : 1;
-        if (queueMode) {
-            b.tasks = ProfileCodec.tasksToData(modelTaskList);
-        } else {
-            List<Task> one = new ArrayList<>();
-            one.add(single);
-            b.tasks = ProfileCodec.tasksToData(one);
-        }
+        // v1.32: same loop reset as export - published scripts never carry a loop count, so
+        // they can't be used to multiply past the free cap. Reset the queue loops AND every
+        // task's repeat to 1; the importer chooses their own within their tier limit.
+        b.loops = 1;
+        b.tasks = ProfileCodec.tasksToData(tasks);
+        if (b.tasks != null)
+            for (main.data.store.TaskData td : b.tasks) if (td != null) td.repeat = 1;
         if (chkChecks.isSelected())
             b.globalTriggers = main.watchers.TriggerCodec.toJson(new ArrayList<>(globalTriggers));
         listing.bundle = b;
 
         try {
+            // v1.32b: publishing sends your script to the server - make sure that consent is
+            // granted (prompt inline if not) instead of failing deep in the repo. Logging in
+            // grants browse + sync but NOT publish, which is why publishes were rejected.
+            if (marketRepo instanceof main.market.HttpRepository
+                    && !ensureConsent(main.privacy.Consent.MARKET_PUBLISH)) {
+                showToast("Publishing needs your permission - not published", anchor, false);
+                return;
+            }
             marketRepo.publish(listing);
             reloadMarket();
             showToast("Published \"" + listing.name + "\"", anchor, true);
@@ -3546,6 +4284,8 @@ public class DreamBotMenu extends JFrame {
     private MarketCardRenderer marketCardRenderer;
     /** The one renderer instance for the task library - hosts the default-task star (v1.30). */
     private LibraryCardRenderer libraryCardRenderer;
+    /** The one renderer instance for the queue - hosts the -/+ loop steppers (v1.31). */
+    private TaskCardRenderer taskCardRenderer;
 
     /** Updates the renderer's hover row/star and repaints only when it actually changed. */
     private void setMarketHover(int row, int star) {
@@ -3569,16 +4309,36 @@ public class DreamBotMenu extends JFrame {
         listMarket.setSelectedIndex(idx);
         if (marketCardRenderer == null) return;
         main.market.ScriptListing l = modelMarket.getElementAt(idx);
+        // v1.32b: right-click = the row's action menu (upload / rename / remove / comments).
+        if (SwingUtilities.isRightMouseButton(me)) { showMarketRowMenu(l, me); return; }
+        // v1.32b: double-click a row to download/import it (per-row download, no select-then-
+        // click-a-button dance).
+        if (me.getClickCount() == 2) { importFromMarket(listMarket); return; }
         // configure the renderer for THIS row, then hit-test in cell coordinates
         marketCardRenderer.getListCellRendererComponent(listMarket, l, idx, false, false);
-        int star = marketCardRenderer.starAt(
-                new Point(me.getX() - bounds.x, me.getY() - bounds.y), bounds);
+        Point cell = new Point(me.getX() - bounds.x, me.getY() - bounds.y);
+        // v1.32b: per-row download button
+        if (marketCardRenderer.downloadAt(cell, bounds)) { importFromMarket(listMarket); return; }
+        int star = marketCardRenderer.starAt(cell, bounds);
         if (star >= 1 && star <= 5) rateListing(l, star);
+    }
+
+    /** True when this listing was uploaded by the signed-in user (can't rate/needs owner tools). */
+    private boolean isOwnListing(main.market.ScriptListing l) {
+        if (l == null || l.author == null) return false;
+        String me = main.market.ServerAccount.session().username;
+        return me != null && !me.isEmpty() && me.equalsIgnoreCase(l.author);
     }
 
     /** Submit a rating for a listing (Patch B.16 - inline on the row). */
     private void rateListing(main.market.ScriptListing l, int stars) {
         if (l == null) return;
+        // v1.32b: rating + comments are for the LIVE MARKET only - not local staging, not your own.
+        if ("local".equals(l.origin)) {
+            showToast("Rating is for the live market only (not local staging)", listMarket, false);
+            return;
+        }
+        if (isOwnListing(l)) { showToast("You can't rate your own script", listMarket, false); return; }
         if (marketRepo instanceof main.market.HttpRepository
                 && !ensureConsent(main.privacy.Consent.MARKET_BROWSE)) return;
         new Thread(() -> {
@@ -3592,21 +4352,97 @@ public class DreamBotMenu extends JFrame {
     }
 
     /** Publish ONE item at a time (Patch B.16): the selected library task, or the whole queue. */
+    /**
+     * v1.32b: the publish chooser is now a LIST of your publishable items - every non-empty
+     * preset, the current queue, and the selected library task - each with a one-click publish
+     * (up-arrow) button. Items already on the server under your name show a server badge and a
+     * disabled button instead, so what's published is visible at a glance.
+     */
     private void publishOneItem(JComponent anchor) {
-        // offer the choice: selected task, or the current queue
-        Task selectedTask = listTaskLibrary != null ? listTaskLibrary.getSelectedValue() : null;
-        List<String> opts = new ArrayList<>();
-        if (selectedTask != null) opts.add("Selected task: " + selectedTask.getName());
-        if (!modelTaskList.isEmpty()) opts.add("The current queue (" + modelTaskList.size() + " task(s))");
-        if (opts.isEmpty()) { showToast("Select a library task or build a queue first", anchor, false); return; }
+        // what's already mine on the server? (from the last market load - no extra request)
+        java.util.Set<String> published = new java.util.HashSet<>();
+        String me = main.market.ServerAccount.session().username;
+        if (me != null && !me.isEmpty())
+            for (main.market.ScriptListing l : marketAll)
+                if (l != null && "server".equals(l.origin) && me.equalsIgnoreCase(l.author)
+                        && l.name != null)
+                    published.add(l.name.toLowerCase());
 
-        String choice = (String) JOptionPane.showInputDialog(this,
-                "Publish which item? (one at a time)", "Publish",
-                JOptionPane.PLAIN_MESSAGE, null, opts.toArray(), opts.get(0));
-        if (choice == null) return;
+        // rows: [name, count, tasks-supplier]
+        List<Object[]> rows = new ArrayList<>();
+        for (int i = 0; i < modelPresets.size(); i++) {
+            Preset pr = modelPresets.get(i);
+            if (pr == null || pr.getTasks() == null || pr.getTasks().isEmpty()) continue;
+            rows.add(new Object[]{pr.getName(), pr.getTasks().size(),
+                    new ArrayList<Task>(pr.getTasks())});
+        }
+        if (!modelTaskList.isEmpty()) {
+            List<Task> q = new ArrayList<>();
+            for (int i = 0; i < modelTaskList.size(); i++) q.add(modelTaskList.get(i));
+            rows.add(new Object[]{"Current queue", q.size(), q});
+        }
+        Task sel = listTaskLibrary != null ? listTaskLibrary.getSelectedValue() : null;
+        if (sel != null) {
+            List<Task> one = new ArrayList<>();
+            one.add(sel);
+            rows.add(new Object[]{sel.getName(), 1, one});
+        }
+        if (rows.isEmpty()) {
+            showToast("Nothing publishable yet - save a preset or build a queue", anchor, false);
+            return;
+        }
 
-        boolean queueMode = choice.startsWith("The current queue");
-        publishItem(queueMode ? null : selectedTask, anchor);
+        JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(this),
+                "Publish to the market", java.awt.Dialog.ModalityType.APPLICATION_MODAL);
+        dlg.setAlwaysOnTop(true);   // the DreamBot canvas is always-on-top; match it or we hide behind
+        JPanel root = new JPanel(new BorderLayout(0, 8));
+        root.setBorder(new EmptyBorder(12, 12, 12, 12));
+        root.setBackground(BG_BASE);
+        JLabel head = new JLabel("Your publishable items - click the arrow to publish one:");
+        head.setForeground(TEXT_DIM);
+        root.add(head, BorderLayout.NORTH);
+
+        JPanel list = new JPanel(new GridLayout(0, 1, 0, 4));
+        list.setOpaque(false);
+        for (Object[] row : rows) {
+            String name = (String) row[0];
+            int count = (Integer) row[1];
+            @SuppressWarnings("unchecked")
+            List<Task> tasks = (List<Task>) row[2];
+            boolean already = name != null && published.contains(name.toLowerCase());
+
+            JPanel r = new JPanel(new BorderLayout(8, 0));
+            r.setOpaque(true);
+            r.setBackground(new Color(0x20, 0x20, 0x20));
+            r.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(COLOR_BORDER_DIM),
+                    new EmptyBorder(6, 10, 6, 6)));
+            JLabel lbl = new JLabel(name + "   \u00b7   " + count + " task" + (count == 1 ? "" : "s"));
+            lbl.setForeground(TEXT_MAIN);
+            if (already) {
+                lbl.setIcon(main.menu.components.UIIcons.server(13, new Color(0x5F, 0xB4, 0x66)));
+                lbl.setIconTextGap(7);
+                lbl.setToolTipText("Already on the server under your name");
+            }
+            r.add(lbl, BorderLayout.CENTER);
+            JButton up = iconButton(main.menu.components.UIIcons.publish(18,
+                    already ? TEXT_DIM : new Color(0x6F, 0xC2, 0x76)),
+                    already ? "Already published" : "Publish \"" + name + "\"",
+                    () -> { dlg.dispose(); publishTasks(name, tasks, anchor); });
+            up.setEnabled(!already);
+            r.add(up, BorderLayout.EAST);
+            list.add(r);
+        }
+        JScrollPane sp = Theme.thinScrollbars(new JScrollPane(list));
+        sp.setBorder(BorderFactory.createEmptyBorder());
+        root.add(sp, BorderLayout.CENTER);
+
+        dlg.setContentPane(root);
+        dlg.setResizable(true);
+        dlg.setSize(560, Math.min(520, 140 + rows.size() * 46));
+        dlg.setLocationRelativeTo(this);
+        dlg.toFront();
+        dlg.setVisible(true);
     }
 
     private void chooseMarketSource(JComponent anchor) {
@@ -3814,8 +4650,11 @@ public class DreamBotMenu extends JFrame {
         JPanel session = createInfoCard("Session");
         session.add(createSessionSummary());
 
-        JPanel grid = new JPanel(new GridLayout(2, 2, 14, 14));
+        JPanel dreamManAccount = buildDreamManAccountCard();
+
+        JPanel grid = new JPanel(new GridLayout(0, 2, 14, 14));
         grid.setOpaque(false);
+        grid.add(dreamManAccount);   // v1.32b: DreamMan account moved out of the Player card
         grid.add(account);
         grid.add(world);
         grid.add(script);
@@ -3890,10 +4729,34 @@ public class DreamBotMenu extends JFrame {
         addInfoRow(player, "Character name", lblCharName);
         addInfoRowWithIcon(player, "Membership", lblMemberText, lblMemberIcon);
 
-        // ── DreamMan account ──
-        player.add(playerSectionHeader("DreamMan account"));
-        addInfoRow(player, "Tier", lblAccountTier);   // Patch B.14: Free/VIP/Admin
-        player.add(buildAccountSwitcherRow());        // Patch B.15: sign-in + account switcher
+        // ── v1.31: account type (manual - the client can't reliably detect it) ──
+        // Gates the action picker: UIMs lose Bank (no bank to use), only GIMs see Group
+        // Storage. Changing it re-filters the Task Builder's action list immediately.
+        JComboBox<main.tools.AccountTypes> accountType =
+                new JComboBox<>(main.tools.AccountTypes.values());
+        accountType.setSelectedItem(main.tools.AccountTypes.current());
+        accountType.setToolTipText("<html>Your account's game mode. This is a manual setting "
+                + "(scripts can't reliably detect it) and it tailors the Task Builder:<br>"
+                + "\u2022 Ultimate Ironman - the Bank action is hidden; use the banker "
+                + "Note-Exchange action instead<br>"
+                + "\u2022 Group Ironman - unlocks the Group Storage action</html>");
+        accountType.addActionListener(e -> {
+            main.tools.AccountTypes picked =
+                    (main.tools.AccountTypes) accountType.getSelectedItem();
+            if (picked != null && picked != main.tools.AccountTypes.current()) {
+                main.tools.AccountTypes.set(picked);
+                refreshTaskLibrary();   // re-gates the action picker's built-in list
+                showToast("Account type: " + picked.label, accountType, true);
+            }
+        });
+        JPanel typeRow = new JPanel(new BorderLayout(8, 0));
+        typeRow.setOpaque(false);
+        JLabel typeLbl = new JLabel("Account type");
+        typeLbl.setForeground(TEXT_DIM);
+        typeRow.add(typeLbl, BorderLayout.WEST);
+        typeRow.add(accountType, BorderLayout.EAST);
+        typeRow.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40)));
+        player.add(typeRow);
 
         // ── Bank PIN (session only) ──
         player.add(playerSectionHeader("Bank PIN"));
@@ -3921,6 +4784,57 @@ public class DreamBotMenu extends JFrame {
                 BorderFactory.createMatteBorder(0, 0, 1, 0, COLOR_BORDER_DIM),
                 new EmptyBorder(10, 0, 3, 0)));
         return l;
+    }
+
+    /**
+     * v1.32b: the DreamMan account, split out of the Player card into its own card on the right
+     * (the Player card is now just the in-game person). Holds the tier, the sign-in / account
+     * switcher, and - finally - a real DreamMan-account <b>Log out</b> button (the bottom-bar
+     * Logout only logs out the game, which is why "I can't log out of my account" happened).
+     */
+    private JPanel buildDreamManAccountCard() {
+        JPanel card = createInfoCard("DreamMan Account");
+        addInfoRow(card, "Tier", lblAccountTier);
+        card.add(buildAccountSwitcherRow());
+
+        btnAccountLogout = createButton("Log out of DreamMan account");
+        btnAccountLogout.setToolTipText("Sign out of your DreamMan account (separate from the "
+                + "game logout at the bottom of the window)");
+        btnAccountLogout.addActionListener(e -> {
+            // v1.32b: guard the "logout before ever logging in" case - previously this ran the
+            // whole logout path, flashed an unreadable toast and yanked the button away.
+            if (!main.market.ServerAccount.isLoggedIn()) {
+                refreshAccountLogoutVisibility();
+                showToast("You're not signed in", lblAccountTier, false);
+                return;
+            }
+            try {
+                String url = marketRepo instanceof main.market.HttpRepository
+                        ? ((main.market.HttpRepository) marketRepo).baseUrl()
+                        : main.market.ServerAccount.session().baseUrl;
+                new main.market.ServerAccount(url == null || url.isEmpty()
+                        ? DEFAULT_MARKET_SERVER_URL : url).logout();
+                main.market.AccountVault.lock();
+            } catch (Throwable ignored) {}
+            onAccountChanged();
+            // anchor the toast on the tier label (always visible) - the button itself hides on
+            // logout, which made the old toast vanish with it
+            showToast("Signed out of your DreamMan account", lblAccountTier, true);
+        });
+        JPanel logoutRow = new JPanel(new BorderLayout());
+        logoutRow.setOpaque(false);
+        logoutRow.setBorder(new EmptyBorder(8, 0, 0, 0));
+        logoutRow.add(btnAccountLogout, BorderLayout.CENTER);
+        card.add(logoutRow);
+
+        refreshAccountLogoutVisibility();
+        return card;
+    }
+
+    /** Shows the account Log out button only while signed in. */
+    private void refreshAccountLogoutVisibility() {
+        if (btnAccountLogout != null)
+            btnAccountLogout.setVisible(main.market.ServerAccount.isLoggedIn());
     }
 
     /** The PIN field + Set button (moved into the Player card in B.17). */
@@ -4048,6 +4962,25 @@ public class DreamBotMenu extends JFrame {
         panelSettings.add(createSubtitle("Settings"), BorderLayout.NORTH);
         panelSettings.add(menuPanel, BorderLayout.WEST);
         panelSettings.add(settingGroup, BorderLayout.CENTER);
+
+        // v1.32: the Developers Console is a developer-only button here now (was a tab that
+        // overflowed the strip). Opens in its own resizable window. Hidden for everyone else.
+        if (isDeveloper()) {
+            JButton btnDevConsole = createButton("Open Developers Console\u2026");
+            btnDevConsole.setToolTipText("Developer tools (visible only to developers)");
+            btnDevConsole.addActionListener(e -> {
+                JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(this),
+                        "Developers Console", java.awt.Dialog.ModalityType.MODELESS);
+                dlg.setContentPane(new DevelopersConsole(libraryPanel));
+                dlg.setSize(900, 600);
+                dlg.setLocationRelativeTo(this);
+                dlg.setVisible(true);
+            });
+            JPanel devRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+            devRow.setOpaque(false);
+            devRow.add(btnDevConsole);
+            panelSettings.add(devRow, BorderLayout.SOUTH);
+        }
 
         return panelSettings;
     }
@@ -4412,7 +5345,9 @@ public class DreamBotMenu extends JFrame {
                 getLayeredPane().revalidate();
                 getLayeredPane().repaint();
 
-                Timer timer = new Timer(TOAST_DELAY, e -> {
+                // v1.33: errors linger so they're actually readable (they were vanishing in ~1s).
+                int showFor = request.success ? 2200 : 5000;
+                Timer timer = new Timer(showFor, e -> {
                     getLayeredPane().remove(toast);
                     getLayeredPane().revalidate();
                     getLayeredPane().repaint();
@@ -4540,7 +5475,7 @@ public class DreamBotMenu extends JFrame {
         refreshTaskLibrary();   // Patch B.3: counts + selector entries after a profile load
 
         // v1.30: seed any default tasks the user doesn't have yet (matched by id - never
-        // duplicates). Shipped defaults come from /resources/default-tasks.json; the admin's
+        // duplicates). Shipped defaults are fetched from <assets>/default-tasks.json; the admin's
         // starred set from <root>/default-tasks.json. See DefaultTasks for the release flow.
         if (!embeddedScriptMode) {
             try {
@@ -4942,7 +5877,7 @@ public class DreamBotMenu extends JFrame {
     }
 
     /** Right-click menu for a queued task card: edit / duplicate / set repeat / remove. */
-    private void showTaskContextMenu(MouseEvent e, int index) {
+    private void showTaskContextMenu(int px, int py, int index) {
         if (index < 0 || index >= modelTaskList.size()) return;
         Task task = modelTaskList.getElementAt(index);
         if (task == null) return;
@@ -4962,7 +5897,12 @@ public class DreamBotMenu extends JFrame {
         repeat.addActionListener(a -> promptRepeat(task));
 
         JMenuItem runHere = new JMenuItem("Run from here");
-        runHere.addActionListener(a -> { setCurrentExecutionIndex(index); resetLoopProgress(); listTaskList.repaint(); });
+        runHere.addActionListener(a -> {
+            setCurrentExecutionIndex(index);
+            resetLoopProgress();
+            listTaskList.repaint();
+            isMenuPaused(false);   // v1.31: starts immediately
+        });
 
         JMenuItem remove = new JMenuItem("Remove");
         remove.addActionListener(a -> {
@@ -4976,7 +5916,43 @@ public class DreamBotMenu extends JFrame {
         menu.add(runHere);
         menu.addSeparator();
         menu.add(remove);
-        menu.show(listTaskList, e.getX(), e.getY());
+        menu.show(listTaskList, px, py);
+    }
+
+    /**
+     * v1.31: laid-out hit-test for the row's -/+ loop steppers. @return true when consumed.
+     */
+    private boolean handleRepeatStepperClick(MouseEvent e, int index) {
+        if (taskCardRenderer == null) return false;
+        Task t = modelTaskList.getElementAt(index);
+        if (t == null || t.isTimed()) return false;
+        Rectangle b = listTaskList.getCellBounds(index, index);
+        if (b == null) return false;
+        taskCardRenderer.getListCellRendererComponent(listTaskList, t, index, false, false);
+        taskCardRenderer.setBounds(0, 0, b.width, b.height);
+        taskCardRenderer.doLayout();
+        // FlowLayout panels need a second pass for nested children
+        for (Component c : taskCardRenderer.getComponents())
+            if (c instanceof Container) ((Container) c).doLayout();
+        Component deep = SwingUtilities.getDeepestComponentAt(
+                taskCardRenderer, e.getX() - b.x, e.getY() - b.y);
+        int delta = 0;
+        if (deep == taskCardRenderer.repMinus) delta = -1;
+        else if (deep == taskCardRenderer.repPlus) delta = +1;
+        if (delta == 0) return false;
+        // v1.32: a task's repeat is another loop multiplier, so it's capped at the tier's max
+        // loops too (∞-tier keeps the 999 ceiling). This is half of closing the free-loop
+        // loophole; the other half is resetting exported/published loops to 1.
+        int ceiling = main.market.Tier.allowsInfinite() ? 999
+                : Math.max(1, main.market.Tier.maxLoops());
+        int now = Math.max(1, Math.min(ceiling, Math.max(1, t.getRepeat()) + delta));
+        if (delta > 0 && now == t.getRepeat())   // already at the ceiling
+            showToast("Your tier caps task loops at " + ceiling, listTaskList, false);
+        t.setRepeat(now);
+        listTaskList.repaint();
+        syncTaskRepeatSpinner();
+        saveAll(false);
+        return true;
     }
 
     /** Popup spinner to set a task's per-task repeat count. */
@@ -5320,55 +6296,59 @@ public class DreamBotMenu extends JFrame {
     }
 
     private ImageIcon loadMiscIcon(String name) {
-        try {
-            return new ImageIcon(new ImageIcon(
-                    Objects.requireNonNull(getClass()
-                            .getResource("/resources/icons/misc/" + name + ".png")))
-                    .getImage()
-                    .getScaledInstance(18, 18, Image.SCALE_SMOOTH));
-        } catch (Exception e) {
-            return null;
-        }
+        // v1.32 (SDN): fetched at runtime + cached, not bundled. Repaints when the real icon lands.
+        return main.tools.Assets.icon("misc", name, 18, name, this::repaint);
     }
 
     private ImageIcon loadSkillIcon(Skill skill) {
-        try {
-            return new ImageIcon(new ImageIcon(
-                    Objects.requireNonNull(getClass()
-                            .getResource("/resources/icons/skills/" + skill.name().toLowerCase() + "_icon.png")))
-                    .getImage()
-                    .getScaledInstance(26, 26, Image.SCALE_SMOOTH)
-            );
+        // v1.32 (SDN): runtime fetch + cache with a drawn fallback (the skill's initial).
+        return main.tools.Assets.icon("skills", skill.name().toLowerCase() + "_icon", 26,
+                skill.name(), this::repaint);
+    }
 
-        } catch (Exception e) {
-            return new ImageIcon();
-        }
+    /** v1.31: the Logs tab - searchable chat + player logs, memory only. */
+    private JPanel createLogsTab() {
+        JPanel panel = new JPanel(new BorderLayout(0, 10));
+        panel.setOpaque(false);
+        panel.setBorder(BorderFactory.createEmptyBorder(12, 14, 12, 14));
+        panel.add(createSubtitle("Logs"), BorderLayout.NORTH);
+        panel.add(new main.menu.components.LogsPanel(), BorderLayout.CENTER);
+        return panel;
+    }
+
+    /** v1.31: the Equipment tab - live paper doll + presets that equip via a generated task. */
+    private JPanel createEquipmentTab() {
+        JPanel panel = new JPanel(new BorderLayout(0, 10));
+        panel.setOpaque(false);
+        panel.setBorder(BorderFactory.createEmptyBorder(12, 14, 12, 14));
+        panel.add(createSubtitle("Equipment"), BorderLayout.NORTH);
+        main.menu.components.EquipmentPanel eq = new main.menu.components.EquipmentPanel();
+        // Equipping a preset = a real Task built from FindBank/Bank/Wield, injected at the
+        // CURRENT queue position and started immediately. When it finishes, the queue simply
+        // continues with whatever was next - your original task order is untouched.
+        eq.wire(new main.menu.components.JActionSelector(),
+                task -> {
+                    int at = currentExecutionIndex >= 0
+                            ? Math.min(currentExecutionIndex, modelTaskList.size()) : 0;
+                    modelTaskList.add(at, task);
+                    setCurrentExecutionIndex(at);
+                    refreshTaskListTab(at);
+                    isMenuPaused(false);
+                    showToast("Equipping now: " + task.getName(), listTaskList, true);
+                });
+        panel.add(eq, BorderLayout.CENTER);
+        return panel;
     }
 
     private ImageIcon loadTabIcon(String name) {
-        try {
-            return new ImageIcon(new ImageIcon(
-                    Objects.requireNonNull(getClass()
-                            .getResource("/resources/icons/tabs/" + name + ".png")))
-                    .getImage()
-                    .getScaledInstance(16, 16, Image.SCALE_SMOOTH));
-        } catch (Exception e) {
-            return null;
-        }
+        // v1.32 (SDN): runtime fetch + cache; repaint the tab strip when the icon arrives.
+        return main.tools.Assets.icon("tabs", name, 16, name,
+                () -> { if (mainTabs != null) mainTabs.repaint(); });
     }
 
     private ImageIcon loadStatusIcon(String name) {
-        try {
-            return new ImageIcon(new ImageIcon(
-                    Objects.requireNonNull(getClass()
-                            .getResource("/resources/icons/status/" + name + ".png")))
-                    .getImage()
-                    .getScaledInstance(16, 16, Image.SCALE_SMOOTH)
-            );
-
-        } catch (Exception ignored) {}
-
-        return null;
+        // v1.32 (SDN): runtime fetch + cache with a drawn fallback.
+        return main.tools.Assets.icon("status", name, 16, name, this::repaint);
     }
 
     private void updateUI() {
@@ -5943,6 +6923,35 @@ public class DreamBotMenu extends JFrame {
     private static final String DEV_TOKEN = "dm-dev-8f3a91c2";
 
     /** True only for you: recognised account name, or the exact secret token in dev.flag. */
+    /**
+     * v1.32: a crisp drawn +/- glyph for the per-row loop steppers. Replaces text labels, whose
+     * "+" rendered as an ellipsis in the client font. {@code plus} true = "+", false = "-".
+     */
+    private static Icon plusMinusIcon(boolean plus) {
+        final int s = 11;
+        return new Icon() {
+            public int getIconWidth() { return s; }
+            public int getIconHeight() { return s; }
+            public void paintIcon(Component c, Graphics g, int x, int y) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(new Color(0xC9, 0xCD, 0xD4));
+                g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                int mid = s / 2;
+                g2.drawLine(x + 1, y + mid, x + s - 1, y + mid);            // horizontal bar
+                if (plus) g2.drawLine(x + mid, y + 1, x + mid, y + s - 1);  // vertical bar
+                g2.dispose();
+            }
+        };
+    }
+
+    /** v1.32: select a main tab by its title (robust to tab order changes). */
+    private void selectMainTab(String title) {
+        if (mainTabs == null || title == null) return;
+        for (int i = 0; i < mainTabs.getTabCount(); i++)
+            if (title.equals(mainTabs.getTitleAt(i))) { mainTabs.setSelectedIndex(i); return; }
+    }
+
     private boolean isDeveloper() {
         String character = safePlayerName();
         if (character != null && DEV_ACCOUNTS.contains(character.trim().toLowerCase()))
@@ -6105,6 +7114,9 @@ public class DreamBotMenu extends JFrame {
         private final JLabel name = new JLabel();
         private final JLabel preview = new JLabel();
         private final JLabel badge = new JLabel("", SwingConstants.CENTER);
+        /** v1.31: tiny -/+ loop steppers beside the xN badge (hit-tested from the list). */
+        final JLabel repMinus = new JLabel("", SwingConstants.CENTER);
+        final JLabel repPlus = new JLabel("", SwingConstants.CENTER);
         private boolean running, selected, hovered;
 
         TaskCardRenderer() {
@@ -6138,9 +7150,31 @@ public class DreamBotMenu extends JFrame {
             badge.setForeground(new Color(0xC9CDD4));
             badge.setBorder(BorderFactory.createEmptyBorder(3, 9, 3, 9));
 
+            // v1.31: the loop count gets its own -/+ right on the row - no dialog needed.
+            // v1.32: drawn as VECTOR icons, not text - the client font renders "+" as an
+            // ellipsis, so a literal "+"/"-" label was unreliable. These always look right.
+            repMinus.setText("");
+            repPlus.setText("");
+            repMinus.setIcon(plusMinusIcon(false));
+            repPlus.setIcon(plusMinusIcon(true));
+            for (JLabel step : new JLabel[]{repMinus, repPlus}) {
+                step.setOpaque(true);
+                step.setBackground(new Color(0x2D, 0x2D, 0x2D));
+                step.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(new Color(0x46, 0x46, 0x46)),
+                        BorderFactory.createEmptyBorder(2, 6, 2, 6)));
+            }
+            repMinus.setToolTipText("One loop fewer for this task");
+            repPlus.setToolTipText("One loop more for this task");
+            JPanel east = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
+            east.setOpaque(false);
+            east.add(repMinus);
+            east.add(badge);
+            east.add(repPlus);
+
             add(chipWrap, BorderLayout.WEST);
             add(textWrap, BorderLayout.CENTER);
-            add(badge, BorderLayout.EAST);
+            add(east, BorderLayout.EAST);
         }
 
         @Override
@@ -6178,6 +7212,8 @@ public class DreamBotMenu extends JFrame {
             badge.setText(task.isTimed()
                     ? "TIMED"                                // Patch B.8: not part of the rotation
                     : "×" + Math.max(1, rep));               // Patch B.2: always visible, ×1 included
+            repMinus.setVisible(!task.isTimed());            // v1.31: steppers only for looped tasks
+            repPlus.setVisible(!task.isTimed());
 
             setToolTipText(task.getDescription());
             return this;
@@ -6324,6 +7360,15 @@ public class DreamBotMenu extends JFrame {
             presetButtons[i] = createButton("Preset " + (i + 1));
             presetButtons[i].setFont(new Font("Segoe UI", Font.BOLD, 10));
             presetButtons[i].addActionListener(e -> handlePresetClick(slot, e));
+            // v1.31: right-click a preset for Rename / Save queue here / Duplicate to slot -
+            // the ctrl+shift / shift shortcuts still work, this just makes them findable.
+            presetButtons[i].addMouseListener(new MouseAdapter() {
+                @Override public void mousePressed(MouseEvent me)  { maybe(me); }
+                @Override public void mouseReleased(MouseEvent me) { maybe(me); }
+                private void maybe(MouseEvent me) {
+                    if (me.isPopupTrigger()) showPresetContextMenu(slot, me.getX(), me.getY());
+                }
+            });
 
             // Map the physical 'Delete' key to securely prompt and squash the list
             presetButtons[i].addKeyListener(new KeyAdapter() {
@@ -6427,6 +7472,70 @@ public class DreamBotMenu extends JFrame {
 
         }
         return sb.toString();
+    }
+
+    /** v1.31: the preset button context menu (Rename / Save here / Duplicate to slot). */
+    private void showPresetContextMenu(int slot, int x, int y) {
+        int actualIndex = (currentPresetPage * 4) + slot;
+        while (modelPresets.size() <= actualIndex)
+            modelPresets.addElement(new Preset("Preset " + (modelPresets.size() + 1), new ArrayList<>()));
+        Preset preset = modelPresets.get(actualIndex);
+
+        JPopupMenu menu = new JPopupMenu();
+
+        JMenuItem miRename = new JMenuItem("Rename…");
+        miRename.addActionListener(a -> {
+            String newName = JOptionPane.showInputDialog(this, "Enter preset name:", preset.name);
+            if (newName != null && !newName.trim().isEmpty()) {
+                preset.name = newName.trim();
+                refreshPresetButtonLabels();
+                saveAll(false);
+                showToast("Renamed to " + preset.name, presetButtons[slot], true);
+            }
+        });
+
+        JMenuItem miSave = new JMenuItem("Save current queue here");
+        miSave.addActionListener(a -> {
+            List<Task> currentTasks = new ArrayList<>();
+            for (int i = 0; i < modelTaskList.size(); i++)
+                currentTasks.add(new Task(modelTaskList.getElementAt(i)));
+            modelPresets.set(actualIndex, new Preset(preset.name, currentTasks, queueLoopTarget));
+            selectedPresetIndex = actualIndex;
+            refreshPresetButtonLabels();
+            saveAll(false);
+            showToast("Saved " + currentTasks.size() + " task(s) to " + preset.name,
+                    presetButtons[slot], true);
+        });
+
+        JMenuItem miDuplicate = new JMenuItem("Duplicate to slot…");
+        miDuplicate.setEnabled(!preset.tasks.isEmpty());
+        miDuplicate.addActionListener(a -> {
+            JSpinner sp = new JSpinner(new SpinnerNumberModel(
+                    Math.min(MAX_PRESETS, actualIndex + 2), 1, MAX_PRESETS, 1));
+            if (JOptionPane.showConfirmDialog(this, sp,
+                    "Copy \"" + preset.name + "\" into which slot (1-" + MAX_PRESETS + ")?",
+                    JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE)
+                    != JOptionPane.OK_OPTION) return;
+            int target = (int) sp.getValue() - 1;
+            while (modelPresets.size() <= target)
+                modelPresets.addElement(new Preset("Preset " + (modelPresets.size() + 1), new ArrayList<>()));
+            Preset existing = modelPresets.get(target);
+            if (!existing.tasks.isEmpty() && JOptionPane.showConfirmDialog(this,
+                    "Slot " + (target + 1) + " (\"" + existing.name + "\") isn't empty. Overwrite?",
+                    "Overwrite preset", JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) return;
+            List<Task> copy = new ArrayList<>();
+            for (Task t : preset.tasks) copy.add(new Task(t));
+            modelPresets.set(target, new Preset(preset.name + " (copy)", copy, preset.getLoops()));
+            refreshPresetButtonLabels();
+            saveAll(false);
+            showToast("Copied to slot " + (target + 1), presetButtons[slot], true);
+        });
+
+        menu.add(miRename);
+        menu.add(miSave);
+        menu.add(miDuplicate);
+        menu.show(presetButtons[slot], x, y);
     }
 
     private void handlePresetClick(int slot, ActionEvent e) {

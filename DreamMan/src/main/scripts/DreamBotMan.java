@@ -24,7 +24,29 @@ import java.util.List;
 
 import main.actions.Action;
 
-public abstract class DreamBotMan extends AbstractScript implements GameStateListener, HumanMouseListener, ScriptControls {
+public abstract class DreamBotMan extends AbstractScript implements GameStateListener,
+        HumanMouseListener, ScriptControls,
+        org.dreambot.api.script.listener.ChatListener {   // v1.31: feeds the Logs tab
+
+    // ── v1.31: chat capture ──────────────────────────────────────────────────
+    // Every message type lands in the in-memory ChatLog (nothing touches disk or any server;
+    // it evaporates on close). The Logs tab renders + searches it, and the CHAT_CONTAINS
+    // check reads it to react to nearby players.
+    @Override public void onGameMessage(org.dreambot.api.wrappers.widgets.message.Message m) {
+        if (m != null) main.tools.ChatLog.chat("GAME", "", m.getMessage());
+    }
+    @Override public void onPlayerMessage(org.dreambot.api.wrappers.widgets.message.Message m) {
+        if (m != null) main.tools.ChatLog.chat("PUBLIC", m.getUsername(), m.getMessage());
+    }
+    @Override public void onPrivateInMessage(org.dreambot.api.wrappers.widgets.message.Message m) {
+        if (m != null) main.tools.ChatLog.chat("PRIVATE", m.getUsername(), m.getMessage());
+    }
+    @Override public void onTradeMessage(org.dreambot.api.wrappers.widgets.message.Message m) {
+        if (m != null) main.tools.ChatLog.chat("TRADE", m.getUsername(), m.getMessage());
+    }
+    @Override public void onClanMessage(org.dreambot.api.wrappers.widgets.message.Message m) {
+        if (m != null) main.tools.ChatLog.chat("CLAN", m.getUsername(), m.getMessage());
+    }
     ///  Class scope fields
 
     /**
@@ -117,6 +139,8 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
      * run N times before the queue advances. Reset whenever the queue index changes.
      */
     private int taskRunsDone = 0;
+    /** v1.31: how many timed-task runs have completed this session (gates on-start actions). */
+    private int timedTaskRunsEver = 0;
     /**
      * The queue index the engine last executed. If the menu changes the index behind the
      * engine's back (Skip / Run-from-here buttons), this lets us notice and reset the action
@@ -332,6 +356,20 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
                     // the task moves on - the randomness that lets niche/human detours fire only
                     // sometimes. Rolling on entry (not every poll) means a multi-poll action
                     // either runs to completion or is skipped, never half-rolled mid-way.
+                    // v1.31: setup actions run the FIRST pass only - first queue loop, first
+                    // repetition of this task. Later passes skip them exactly like a missed
+                    // chance roll: fetch the pickaxe once, don't re-fetch it every lap.
+                    if (action.isOnStartOnly()
+                            && (menu.getQueueLoopCurrentValue() > 1 || taskRunsDone > 0)) {
+                        action.resetAttempts();
+                        actionCursor++;
+                        if (actionCursor >= actions.size()) {
+                            actionCursor = 0;
+                            onTaskRunComplete(menu, currentTask);
+                        }
+                        return Rand.nextInt(120, 300);
+                    }
+
                     if (!action.rollChance()) {
                         Logger.log(Logger.LogType.DEBUG, "Chance skip (" + action.getChancePercent()
                                 + "%): " + action.toBuildString());
@@ -512,6 +550,13 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
         if (action != lastPolledAction) {
             action.resetAttempts();
             lastPolledAction = action;
+            // v1.31: on-start actions never re-run inside a TIMED task's repeats either
+            if (action.isOnStartOnly() && timedTaskRunsEver > 0) {
+                action.resetAttempts();
+                lastPolledAction = null;
+                timedCursor++;
+                return Rand.nextInt(120, 300);
+            }
             if (!action.rollChance()) {   // per-action chance applies here too
                 action.resetAttempts();
                 timedCursor++;
@@ -536,6 +581,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
 
     /** Reschedules the finished timed task and lets an AFTER_TIMED_TASK task chain in. */
     private void finishTimedTask(DreamBotMenu menu) {
+        timedTaskRunsEver++;   // v1.31
         DreamBotMenu.Task done = timedTask;
         if (done != null) {
             done.scheduleNext();   // roll the next interval (with jitter)

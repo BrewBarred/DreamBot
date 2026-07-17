@@ -6,6 +6,7 @@ import com.google.gson.reflect.TypeToken;
 import main.menu.DreamBotMenu;
 import org.dreambot.api.utilities.Logger;
 
+import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.reflect.Type;
@@ -70,16 +71,41 @@ public final class DefaultTasks {
         for (TaskData d : shipped()) if (d != null && d.id != null) defaultIds.add(d.id);
     }
 
-    /** The defaults baked into this build, or an empty list when none are shipped. */
+    /**
+     * The shipped defaults, fetched from the asset host at runtime and cached on disk.
+     *
+     * <p>v1.32 (SDN compliance): the guidelines forbid bundling resources as source files, so the
+     * default-task set is no longer read from the jar. It's fetched once from
+     * {@code <assets>/default-tasks.json}, cached under the sanctioned {@code scripts.path}, and
+     * served from that cache thereafter (and whenever the network is unavailable). No defaults
+     * simply means an empty starter library - never an error.
+     */
     private static List<TaskData> shipped() {
-        try (InputStream in = DefaultTasks.class.getResourceAsStream("/resources/default-tasks.json")) {
-            if (in == null) return new ArrayList<>();
-            List<TaskData> l = GSON.fromJson(
-                    new InputStreamReader(in, StandardCharsets.UTF_8), LIST_TYPE);
-            return l == null ? new ArrayList<>() : l;
-        } catch (Throwable e) {
-            return new ArrayList<>();
-        }
+        File cache = new File(LocalStore.getRoot(), "cache/default-tasks.json");
+        // 1) try a fresh fetch (best-effort, short timeout); refresh the cache on success
+        try {
+            byte[] bytes = main.tools.AssetsText.get("/default-tasks.json");
+            if (bytes != null && bytes.length > 0) {
+                List<TaskData> l = GSON.fromJson(
+                        new String(bytes, StandardCharsets.UTF_8), LIST_TYPE);
+                if (l != null) {
+                    try {
+                        cache.getParentFile().mkdirs();
+                        Files.write(cache.toPath(), bytes);
+                    } catch (Throwable ignored) {}
+                    return l;
+                }
+            }
+        } catch (Throwable ignored) { /* offline / host down - fall through to the cache */ }
+        // 2) fall back to the on-disk cache from a previous run
+        try {
+            if (cache.isFile()) {
+                List<TaskData> l = GSON.fromJson(new String(Files.readAllBytes(cache.toPath()),
+                        StandardCharsets.UTF_8), LIST_TYPE);
+                if (l != null) return l;
+            }
+        } catch (Throwable ignored) {}
+        return new ArrayList<>();
     }
 
     /** @return true when this task id is a default (shipped or locally starred). */

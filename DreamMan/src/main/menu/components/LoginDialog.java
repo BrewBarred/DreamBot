@@ -55,34 +55,80 @@ public final class LoginDialog {
 
     // ── LOGIN ──
 
+    /** Remembers the last username across logout so you don't retype it (session-scoped). */
+    private static String lastUser = null;
+
     private static void doLogin(Component parent, String url, Callback cb) {
         JTextField user = new JTextField(18);
+        if (lastUser != null && !lastUser.isEmpty()) user.setText(lastUser);
         JPasswordField pass = new JPasswordField(18);
-        JPanel form = form2("Username:", user, "Password:", pass);
+        JCheckBox show = new JCheckBox("Show password");
+        show.setOpaque(false);
+        final char echo = pass.getEchoChar();
+        show.addActionListener(e -> pass.setEchoChar(show.isSelected() ? (char) 0 : echo));
+        JLabel error = new JLabel(" ");
+        error.setForeground(new Color(0xE0, 0x6C, 0x6C));
+        doLoginAttempt(parent, url, cb, user, pass, show, error);
+    }
+
+    /**
+     * One login attempt that REUSES its field components, so a wrong password no longer wipes
+     * what you typed - the same dialog comes back with your username + password intact and the
+     * reason shown inline, instead of the whole thing closing.
+     */
+    private static void doLoginAttempt(Component parent, String url, Callback cb,
+            JTextField user, JPasswordField pass, JCheckBox show, JLabel error) {
+        JPanel form = new JPanel(new GridBagLayout());
+        form.setOpaque(false);
+        GridBagConstraints g = new GridBagConstraints();
+        g.insets = new Insets(4, 4, 4, 4);
+        g.anchor = GridBagConstraints.WEST;
+        g.gridx = 0; g.gridy = 0; form.add(new JLabel("Username:"), g);
+        g.gridx = 1; form.add(user, g);
+        g.gridx = 0; g.gridy = 1; form.add(new JLabel("Password:"), g);
+        g.gridx = 1; form.add(pass, g);
+        g.gridx = 1; g.gridy = 2; form.add(show, g);
+        g.gridx = 0; g.gridy = 3; g.gridwidth = 2; form.add(error, g);
+
+        SwingUtilities.invokeLater(() ->
+                (user.getText().trim().isEmpty() ? user : pass).requestFocusInWindow());
+
         if (JOptionPane.showConfirmDialog(parent, form, "Log in",
-                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) return;
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION)
+            return;
 
         String username = user.getText().trim();
         char[] password = pass.getPassword();
-        if (username.isEmpty() || password.length == 0) { toast(parent, "Enter both fields."); return; }
+        if (username.isEmpty() || password.length == 0) {
+            error.setText("Enter both a username and a password.");
+            doLoginAttempt(parent, url, cb, user, pass, show, error);   // re-show, input kept
+            return;
+        }
+        lastUser = username;
 
-        runAsync(parent, "Logging in...", ex -> loginFailed(parent, url, cb, ex), () -> {
-            ServerAccount server = new ServerAccount(url);
-            // step 1: salts
-            Map<String, Object> salts = server.vaultSalts(username);
-            String kekSalt = str(salts.get("kekSalt")), authSalt = str(salts.get("authSalt"));
-            // step 2: derive auth hash locally, send it
-            String authHash = Vault.authHash(password.clone(), authSalt);
-            Map<String, Object> res = server.vaultLogin(username, authHash);
-            // step 3: unwrap the vault key with the password-derived KEK
-            SecretKey kek = Vault.deriveKek(password.clone(), kekSalt);
-            String wrapped = str(res.get("wrappedByKek"));
-            SecretKey vaultKey = Vault.unwrapKey(wrapped, kek);
-            if (vaultKey == null) throw new IllegalStateException("Wrong password.");
-            String plain = Vault.decryptData(str(res.get("ciphertext")), vaultKey);
-            AccountVault.unlock(vaultKey, plain == null ? "[]" : plain);
-            return null;
-        }, cb, "Signed in.");
+        runAsync(parent, "Logging in...",
+            ex -> {
+                // Failure keeps the dialog data and re-opens with the reason shown inline.
+                error.setText(isBadCredentials(ex)
+                        ? "Wrong username or password - check both and try again."
+                        : friendly(ex));
+                SwingUtilities.invokeLater(() ->
+                        doLoginAttempt(parent, url, cb, user, pass, show, error));
+            },
+            () -> {
+                ServerAccount server = new ServerAccount(url);
+                Map<String, Object> salts = server.vaultSalts(username);
+                String kekSalt = str(salts.get("kekSalt")), authSalt = str(salts.get("authSalt"));
+                String authHash = Vault.authHash(password.clone(), authSalt);
+                Map<String, Object> res = server.vaultLogin(username, authHash);
+                SecretKey kek = Vault.deriveKek(password.clone(), kekSalt);
+                String wrapped = str(res.get("wrappedByKek"));
+                SecretKey vaultKey = Vault.unwrapKey(wrapped, kek);
+                if (vaultKey == null) throw new IllegalStateException("Wrong password.");
+                String plain = Vault.decryptData(str(res.get("ciphertext")), vaultKey);
+                AccountVault.unlock(vaultKey, plain == null ? "[]" : plain);
+                return null;
+            }, cb, "Signed in.");
     }
 
     // ── REGISTER ──
@@ -164,8 +210,12 @@ public final class LoginDialog {
         });
         JButton download = new JButton("Download .txt");
         download.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setSelectedFile(new File("dreamman-recovery-" + username + ".txt"));
+            // v1.32b: open in the script data folder (scripts.path/DreamMan/exports), not a
+            // Windows shell location - that default triggered the multi-second freeze and used
+            // an off-limits directory. This keeps it inside the sanctioned script tree.
+            JFileChooser fc = new JFileChooser(main.data.store.LocalStore.getExportsDir());
+            fc.setSelectedFile(new File(main.data.store.LocalStore.getExportsDir(),
+                    "dreamman-recovery-" + username + ".txt"));
             if (fc.showSaveDialog(parent) == JFileChooser.APPROVE_OPTION) {
                 try {
                     Files.write(fc.getSelectedFile().toPath(),

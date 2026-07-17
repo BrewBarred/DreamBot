@@ -45,6 +45,32 @@ public class JActionSelector extends JComboBox<Action> {
         REGISTRY.put("Shop", new main.actions.Shop());
         REGISTRY.put("TaskRef", new main.actions.TaskRef());
         REGISTRY.put("InventoryManager", new main.actions.InventoryManager());
+        // ── v1.31 ──
+        REGISTRY.put("Say", new main.actions.Say());
+        REGISTRY.put("WidgetAction", new main.actions.WidgetAction());
+        REGISTRY.put("ToggleRun", new main.actions.ToggleRun());
+        REGISTRY.put("PrayerAction", new main.actions.PrayerAction());
+        REGISTRY.put("CastSpell", new main.actions.CastSpell());
+        REGISTRY.put("Wield", new main.actions.Wield());
+        REGISTRY.put("UseItem", new main.actions.UseItem());
+        REGISTRY.put("HopWorld", new main.actions.HopWorld());
+        REGISTRY.put("WaitForItems", new main.actions.WaitForItems());
+        REGISTRY.put("GroupStorage", new main.actions.GroupStorage());
+        REGISTRY.put("NoteExchange", new main.actions.NoteExchange());
+    }
+
+    /**
+     * v1.31: account-type gating. UIMs have no bank, so Bank never appears for them (the
+     * banker Note-Exchange helper is their tool); Group Storage only exists for GIMs. Saved
+     * profiles still LOAD any action type (createByType is ungated) - this only filters what
+     * the picker offers.
+     */
+    private static boolean offeredTo(String key, main.tools.AccountTypes type) {
+        switch (key) {
+            case "Bank":         return type != main.tools.AccountTypes.UIM;
+            case "GroupStorage": return type == main.tools.AccountTypes.GIM;
+            default:             return true;
+        }
     }
 
     public JActionSelector() {
@@ -97,7 +123,9 @@ public class JActionSelector extends JComboBox<Action> {
         muted = true;
         try {
             DefaultComboBoxModel<Action> model = new DefaultComboBoxModel<>();
-            for (Action proto : REGISTRY.values()) model.addElement(proto);
+            main.tools.AccountTypes acct = main.tools.AccountTypes.current();   // v1.31
+            for (Map.Entry<String, Action> e : REGISTRY.entrySet())
+                if (offeredTo(e.getKey(), acct)) model.addElement(e.getValue());
             builtInCount = model.getSize();
             if (entries != null)
                 for (main.actions.TaskRef t : entries)

@@ -109,6 +109,8 @@ public class TaskBuilder extends JPanel {
                     // so it's obvious which actions are randomised and by how much.
                     if (action.getChancePercent() < 100)
                         text = "[" + action.getChancePercent() + "%]  " + text;
+                    if (action.isOnStartOnly())
+                        text = "[start]  " + text;   // v1.31: setup step, first pass only
                     setText(text);
                 }
 
@@ -370,7 +372,7 @@ public class TaskBuilder extends JPanel {
                 action.getTriggers(), true, botMenu::pickResponseActionPublic);
         editor.setPreferredSize(new Dimension(460, 380));
         JOptionPane.showMessageDialog(this, editor,
-                "Checks for " + action.getName(), JOptionPane.PLAIN_MESSAGE);
+                "Triggers for " + action.getName(), JOptionPane.PLAIN_MESSAGE);
         refreshList();   // build-string previews may now show attached-watcher counts
     }
 
@@ -383,6 +385,7 @@ public class TaskBuilder extends JPanel {
         }
 
         Action newAction = selected.copy();
+        main.tools.TargetHistory.record(newAction.getParamTarget());   // v1.31: MRU suggestions
         modelTaskBuilder.addElement(newAction);
         int addedIndex = modelTaskBuilder.getSize() - 1;   // B.17: reselect THIS row after add
 
@@ -456,12 +459,12 @@ public class TaskBuilder extends JPanel {
         // Patch B.4: per-action watchers - attach conditional checks to the SELECTED action in
         // the chain (e.g. Loot carries "if inventory full -> bank instead"). Distinct from the
         // always-on Watchers tab.
-        btnWatchers = createButton("Checks\u2026", new Color(70, 55, 20), null);
+        btnWatchers = createButton("Triggers\u2026", new Color(70, 55, 20), null);
         btnWatchers.setEnabled(false);
         btnWatchers.addActionListener(e -> {
             int idx = listTaskBuilder.getSelectedIndex();
             if (idx < 0) { toast("Select an action first", btnWatchers, false); return; }
-            // (user-facing name is "Checks"; internals keep the Trigger/Watcher class names)
+            // (user-facing name is "Triggers"; internal class names already match)
             openActionWatchers(modelTaskBuilder.getElementAt(idx));
         });
 
@@ -479,7 +482,7 @@ public class TaskBuilder extends JPanel {
         btnDuplicate = createButton("Duplicate", new Color(45, 45, 60), null);
         btnDuplicate.setEnabled(false);
         btnDuplicate.setToolTipText("Insert a copy of the selected action right below it "
-                + "(keeps its randomness and checks)");
+                + "(keeps its randomness and triggers)");
         btnDuplicate.addActionListener(e -> {
             int idx = listTaskBuilder.getSelectedIndex();
             if (idx < 0) { toast("Select an action first", btnDuplicate, false); return; }
@@ -503,6 +506,39 @@ public class TaskBuilder extends JPanel {
             if (has) loadAction(modelTaskBuilder.getElementAt(idx));
         });
 
+        // ── v1.31: drag to reorder the chain ─────────────────────────────────
+        listTaskBuilder.setDragEnabled(true);
+        listTaskBuilder.setDropMode(DropMode.INSERT);
+        listTaskBuilder.setTransferHandler(new TransferHandler() {
+            private int fromIndex = -1;
+            @Override public int getSourceActions(JComponent c) { return MOVE; }
+            @Override protected java.awt.datatransfer.Transferable createTransferable(JComponent c) {
+                fromIndex = listTaskBuilder.getSelectedIndex();
+                return new java.awt.datatransfer.StringSelection("");
+            }
+            @Override public boolean canImport(TransferSupport support) {
+                return support.isDrop() && fromIndex >= 0;
+            }
+            @Override public boolean importData(TransferSupport support) {
+                if (!canImport(support)) return false;
+                JList.DropLocation dl = (JList.DropLocation) support.getDropLocation();
+                int to = dl.getIndex();
+                if (to < 0 || fromIndex < 0 || fromIndex >= modelTaskBuilder.size()) return false;
+                Action moved = modelTaskBuilder.getElementAt(fromIndex);
+                modelTaskBuilder.remove(fromIndex);
+                if (to > fromIndex) to--;
+                to = Math.max(0, Math.min(to, modelTaskBuilder.size()));
+                modelTaskBuilder.add(to, moved);
+                listTaskBuilder.setSelectedIndex(to);
+                fromIndex = -1;
+                refreshList();
+                return true;
+            }
+            @Override protected void exportDone(JComponent c, java.awt.datatransfer.Transferable d, int a) {
+                fromIndex = -1;
+            }
+        });
+
         // Right-click any action for the full menu (Patch B.17). Double-click no longer
         // deletes - that was one slip away from losing work; Remove/Delete are explicit now.
         listTaskBuilder.addMouseListener(new MouseAdapter() {
@@ -517,10 +553,11 @@ public class TaskBuilder extends JPanel {
             }
         });
 
-        JPanel bottomBtns = new JPanel(new GridLayout(1, 5, 5, 5));
+        // v1.31: the Duplicate button is gone (it confused people) - duplicating lives on the
+        // right-click menu now, as "Duplicate below" and "Duplicate to end".
+        JPanel bottomBtns = new JPanel(new GridLayout(1, 4, 5, 5));
         bottomBtns.setOpaque(false);
         bottomBtns.add(btnRemove);
-        bottomBtns.add(btnDuplicate);
         bottomBtns.add(btnChance);
         bottomBtns.add(btnWatchers);
         bottomBtns.add(btnReset);
@@ -542,8 +579,23 @@ public class TaskBuilder extends JPanel {
             listTaskBuilder.setSelectedIndex(idx);   // selection listener arms the edit
             loadAction(modelTaskBuilder.getElementAt(idx));
         });
-        JMenuItem miDuplicate = new JMenuItem("Duplicate");
+        JMenuItem miDuplicate = new JMenuItem("Duplicate below");
         miDuplicate.addActionListener(e -> duplicateAction(idx));
+        JMenuItem miDuplicateEnd = new JMenuItem("Duplicate to end");
+        miDuplicateEnd.addActionListener(e -> duplicateActionToEnd(idx));
+
+        // v1.31: mark an action as SETUP - runs the first pass only (fetch the pickaxe once)
+        Action target = modelTaskBuilder.getElementAt(idx);
+        JCheckBoxMenuItem miOnStart = new JCheckBoxMenuItem("Only run on first loop (setup)",
+                target != null && target.isOnStartOnly());
+        miOnStart.setToolTipText("Runs on the task's first pass of the session and is skipped"
+                + " on every later loop - preparation that shouldn't repeat.");
+        miOnStart.addActionListener(e -> {
+            if (target != null) {
+                target.setOnStartOnly(miOnStart.isSelected());
+                refreshList();
+            }
+        });
         JMenuItem miDelete = new JMenuItem("Delete");
         miDelete.addActionListener(e -> {
             listTaskBuilder.setSelectedIndex(idx);
@@ -552,17 +604,30 @@ public class TaskBuilder extends JPanel {
         JMenuItem miChance = new JMenuItem("Add randomness\u2026");
         miChance.setToolTipText("Give this action a chance-to-run below 100%");
         miChance.addActionListener(e -> openActionChance(modelTaskBuilder.getElementAt(idx)));
-        JMenuItem miCheck = new JMenuItem("Add a check\u2026");
-        miCheck.setToolTipText("Attach a conditional check to this action");
+        JMenuItem miCheck = new JMenuItem("Add a trigger\u2026");
+        miCheck.setToolTipText("Attach a conditional trigger to this action");
         miCheck.addActionListener(e -> openActionWatchers(modelTaskBuilder.getElementAt(idx)));
 
         menu.add(miEdit);
         menu.add(miDuplicate);
+        menu.add(miDuplicateEnd);
         menu.add(miDelete);
         menu.addSeparator();
+        menu.add(miOnStart);
         menu.add(miChance);
         menu.add(miCheck);
         return menu;
+    }
+
+    /** v1.31: appends a deep copy of the action at {@code idx} to the END of the chain. */
+    private void duplicateActionToEnd(int idx) {
+        if (idx < 0 || idx >= modelTaskBuilder.size()) return;
+        Action original = modelTaskBuilder.getElementAt(idx);
+        if (original == null) return;
+        modelTaskBuilder.addElement(original.copyDeep());
+        listTaskBuilder.setSelectedIndex(modelTaskBuilder.size() - 1);
+        toast("Duplicated " + original.getName() + " to end", listTaskBuilder, true);
+        refreshList();
     }
 
     /** Duplicates the action at {@code idx} in place (deep copy: params, chance AND checks). */
@@ -600,6 +665,7 @@ public class TaskBuilder extends JPanel {
             for (main.watchers.Trigger t : current.getTriggers())
                 if (t != null) updated.getTriggers().add(new main.watchers.Trigger(t));
         }
+        main.tools.TargetHistory.record(updated.getParamTarget());   // v1.31
         modelTaskBuilder.set(idx, updated);
         listTaskBuilder.setSelectedIndex(idx);
         toast("Updated " + updated.getName(), btnUpdateAction, true);
@@ -674,6 +740,9 @@ public class TaskBuilder extends JPanel {
         // the entity list matches the form width and takes all the height above it
         listLibrary.setPreferredSize(new Dimension(300, 300));
         listLibrary.addClickListener(this::applyEntityToCurrentAction);
+        // v1.31: the strip's chips (name / position / area / My position) write their exact
+        // value into the current action's target - no more guessing which form you wanted.
+        listLibrary.setTargetSink(this::applyTargetValue);
 
         JPanel east = new JPanel(new BorderLayout(0, 8));
         east.setOpaque(false);
@@ -693,13 +762,21 @@ public class TaskBuilder extends JPanel {
     private void applyEntityToCurrentAction(JLibraryList.EntityEntry entry) {
         if (entry == null) return;
         Action template = actionSelector.getSelectedAction();
+        if (template == null) return;
+        String value = (template.prefersTileTarget() && entry.hasTile())
+                ? entry.tileString()
+                : entry.name;
+        applyTargetValue(value);
+    }
+
+    /** v1.31: writes an exact value (from a strip chip or a row click) into the target. */
+    private void applyTargetValue(String value) {
+        if (value == null || value.isBlank()) return;
+        Action template = actionSelector.getSelectedAction();
         if (template == null || template.paramTarget == null || !template.acceptsEntityTarget()) {
             toast("\"" + actionSelector.getSelectedItem() + "\" has no entity target", listLibrary, false);
             return;
         }
-        String value = (template.prefersTileTarget() && entry.hasTile())
-                ? entry.tileString()
-                : entry.name;
         template.paramTarget.setParam(value);
         toast("Target set: " + value, listLibrary, true);
     }
@@ -927,6 +1004,7 @@ public class TaskBuilder extends JPanel {
         dynamicControlPanel.setOpaque(false);
         dynamicControlPanel.add(newPanel, BorderLayout.CENTER);
         currentParamPanel = newPanel;
+        attachHistory(newPanel);   // v1.31: MRU target suggestions on the fields
 
         dynamicControlPanel.revalidate();
         dynamicControlPanel.repaint();
@@ -952,6 +1030,22 @@ public class TaskBuilder extends JPanel {
 //        dynamicControlPanel.revalidate();
 //        dynamicControlPanel.repaint();
 //    }
+
+    /** v1.31: attaches the target-history suggester once per field (guarded by a marker). */
+    private void attachHistory(java.awt.Container root) {
+        if (root == null) return;
+        for (java.awt.Component c : root.getComponents()) {
+            if (c instanceof main.components.JParamTextField) {
+                JComponent jc = (JComponent) c;
+                if (jc.getClientProperty("histAttached") == null) {
+                    jc.putClientProperty("histAttached", Boolean.TRUE);
+                    main.tools.TargetHistory.attach((javax.swing.JTextField) c);
+                }
+            } else if (c instanceof java.awt.Container) {
+                attachHistory((java.awt.Container) c);
+            }
+        }
+    }
 
     private void refreshList(boolean selectLast) {
         if (selectLast && !modelTaskBuilder.isEmpty())

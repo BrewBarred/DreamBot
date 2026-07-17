@@ -53,8 +53,24 @@ public class Chat extends Action {
         String m = paramMode.getParam() == null ? "continue" : paramMode.getParam().trim().toLowerCase();
         if (m.startsWith("opt")) return "option";
         if (m.startsWith("seq")) return "sequence";
+        if (m.startsWith("sel")) return "select";   // v1.31: pick BY TEXT (works on make-menus)
         return "continue";
     }
+
+    /** v1.31: finds a visible widget containing the text and clicks it (production menus). */
+    private boolean clickWidgetWithText(String text) {
+        try {
+            // v1.31 hotfix: build-agnostic lookup via WidgetFinder (reflection inside)
+            for (org.dreambot.api.wrappers.widgets.WidgetChild w
+                    : main.tools.WidgetFinder.containingText(text))
+                if (w != null && w.isVisible())
+                    return w.interact();
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    private transient boolean widgetClicked;
+    private transient long widgetClickedAt;
 
     private int[] sequence() {
         String raw = paramSequence.getParam() == null ? "1" : paramSequence.getParam();
@@ -83,6 +99,53 @@ public class Chat extends Action {
         try { in = Dialogues.inDialogue(); } catch (Throwable t) { in = false; }
 
         long now = System.currentTimeMillis();
+
+        // ── v1.31c: select mode, take two ────────────────────────────────────
+        // The furnace make-menu taught us two things: (1) it can register as a DIALOGUE with
+        // no options, so this must run whether in==true or not; (2) the bar slot is a MODEL
+        // widget - the string "Bronze bar" is its NAME, not its text - so WidgetFinder now
+        // matches names too. Flow: settle-wait after a click; else prefer a matching dialogue
+        // option; else click the matching widget by text OR name.
+        if ("select".equals(mode())) {
+            String text = paramSequence.getParam() == null ? "" : paramSequence.getParam().trim();
+            if (!text.isEmpty()) {
+                if (widgetClicked) {
+                    if (now - widgetClickedAt > 900) {
+                        widgetClicked = false;
+                        resetState();
+                        resetAttempts();
+                        return true;
+                    }
+                    return false;
+                }
+                if (in) {
+                    try {
+                        String[] opts = Dialogues.getOptions();
+                        if (opts != null)
+                            for (String o : opts)
+                                if (o != null && o.toLowerCase().contains(text.toLowerCase())) {
+                                    if (Dialogues.chooseOption(o)) {
+                                        widgetClicked = true;
+                                        widgetClickedAt = now;
+                                    }
+                                    return false;
+                                }
+                    } catch (Throwable ignored) {}
+                }
+                if (clickWidgetWithText(text)) {
+                    widgetClicked = true;
+                    widgetClickedAt = now;
+                    return false;
+                }
+                // nothing matching on screen yet - give it a beat, then burn a retry
+                if (waitingSince == 0) waitingSince = now;
+                if (now - waitingSince > 2500) {
+                    waitingSince = now;
+                    noteAttempt();
+                }
+                return false;
+            }
+        }
 
         if (!in) {
             if (sawDialogue) {           // we were talking and it ended - done
@@ -121,6 +184,10 @@ public class Chat extends Action {
                     }
                     break;
                 }
+                case "select":
+                    // handled above (runs whether or not the interface counts as a dialogue);
+                    // reaching here just means the select block chose to wait this poll
+                    break;
                 default:
                     if (Dialogues.canContinue()) Dialogues.continueDialogue();
                     else Dialogues.chooseOption(1);   // stuck on a choice: take the first

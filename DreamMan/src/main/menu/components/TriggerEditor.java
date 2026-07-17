@@ -131,7 +131,7 @@ public class TriggerEditor extends JPanel {
             }
         });
 
-        JButton add = new Theme.ThemedButton("+ Add check");
+        JButton add = new Theme.ThemedButton("+ Add trigger");
         add.addActionListener(e -> {
             Trigger t = new Trigger(Condition.HP_BELOW, "15");
             model.add(t);
@@ -191,7 +191,7 @@ public class TriggerEditor extends JPanel {
         detail.removeAll();
 
         if (t == null) {
-            JLabel hint = new JLabel("Select a check on the left, or + Add check to create one.");
+            JLabel hint = new JLabel("Select a trigger on the left, or + Add trigger to create one.");
             hint.setForeground(Theme.TEXT_DIM);
             hint.setBorder(new EmptyBorder(12, 8, 0, 0));
             hint.setAlignmentX(LEFT_ALIGNMENT);
@@ -283,7 +283,7 @@ public class TriggerEditor extends JPanel {
         JCheckBox chkTimer = new JCheckBox("only every", t.isTimerEnabled());
         chkTimer.setOpaque(false);
         chkTimer.setForeground(Theme.TEXT);
-        chkTimer.setToolTipText("Fire this check at most once per interval (minimum 5 seconds)");
+        chkTimer.setToolTipText("Fire this trigger at most once per interval (minimum 5 seconds)");
         long iv = Math.max(0, t.getTimerIntervalMs()) / 1000;
         JSpinner spH = new JSpinner(new SpinnerNumberModel((int) Math.min(60, iv / 3600), 0, 60, 1));
         JSpinner spM = new JSpinner(new SpinnerNumberModel((int) ((iv % 3600) / 60), 0, 60, 1));
@@ -300,7 +300,7 @@ public class TriggerEditor extends JPanel {
                     + (int) spS.getValue()) * 1000L;
             t.setTimer(on, ms);
             if (!on) {
-                timerHint.setText("  off - the check fires whenever its condition holds");
+                timerHint.setText("  off - the trigger fires whenever its condition holds");
                 timerHint.setForeground(Theme.TEXT_MUTED);
             } else if (ms < Trigger.MIN_TIMER_MS) {
                 timerHint.setText("  needs at least 5 seconds - timer inactive");
@@ -350,7 +350,7 @@ public class TriggerEditor extends JPanel {
         respBtns.add(addAct);
         respBtns.add(delAct);
 
-        JLabel thenLbl = new JLabel("Then run (several checks can run at once - see notes):");
+        JLabel thenLbl = new JLabel("Then run (several triggers can run at once - see notes):");
         thenLbl.setForeground(Theme.ACCENT);
         thenLbl.setAlignmentX(LEFT_ALIGNMENT);
 
