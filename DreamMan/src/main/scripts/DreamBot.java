@@ -10,7 +10,7 @@ import java.awt.*;
 @ScriptManifest(
         author = "ETA",
         name = "DreamBot (Beta)",
-        version = 1.53,
+        version = 1.56,
         category = Category.MISC
 )
 public class DreamBot extends DreamBotMan {
@@ -24,7 +24,6 @@ public class DreamBot extends DreamBotMan {
 
     @Override
     public void postPaint(Graphics graphics) {
-
     }
 
     @Override

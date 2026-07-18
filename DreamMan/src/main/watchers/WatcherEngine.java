@@ -54,10 +54,18 @@ public final class WatcherEngine {
         List<Trigger> candidates = new ArrayList<>();
         if (perAction != null) candidates.addAll(perAction);
         if (globals != null) candidates.addAll(globals);
+        // v1.50: if/else-if chains. A trigger marked "else" belongs to the chain started by the
+        // nearest earlier non-else trigger; once ANY member of a chain fires this cycle (or is
+        // already mid-response), the rest of the chain is skipped - first match wins, exactly
+        // like an if / else-if ladder in code.
+        boolean chainSuppressed = false;
         for (Trigger t : candidates) {
-            if (t == null || active.contains(t)) continue;
+            if (t == null) continue;
+            if (!t.isChainedElse()) chainSuppressed = false;      // a new chain starts here
+            else if (chainSuppressed) continue;                    // an earlier branch already won
+            if (active.contains(t)) { chainSuppressed = true; continue; }
             try {
-                if (t.shouldFire()) active.add(t);
+                if (t.shouldFire()) { active.add(t); chainSuppressed = true; }
             } catch (Throwable ignored) {}
         }
 

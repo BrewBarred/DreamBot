@@ -54,9 +54,15 @@ public class Trigger {
         public Condition condition;
         public String arg = "";
         public boolean negate = false;   // true = the condition must be FALSE
+        /** v1.50: connector to the PREVIOUS term - false = AND, true = OR. Evaluated with
+         *  code-style precedence: AND binds tighter than OR (x AND y OR z = (x AND y) OR z). */
+        public boolean or = false;
         public Clause() {}
         public Clause(Condition c, String a, boolean n) {
             condition = c; arg = a == null ? "" : a; negate = n;
+        }
+        public Clause(Condition c, String a, boolean n, boolean orConn) {
+            this(c, a, n); this.or = orConn;
         }
         /** Whether this clause is currently satisfied (negation applied). Never throws. */
         public boolean holds() {
@@ -126,6 +132,11 @@ public class Trigger {
     public void setReplacesAction(boolean r) { this.replacesAction = r; }
     public Control getControl() { return control == null ? Control.NONE : control; }
     public void setControl(Control c) { this.control = c == null ? Control.NONE : c; }
+    /** v1.50: this trigger is an ELSE-IF of the trigger above it in the list - it is only
+     *  considered when no earlier trigger in its chain fired this evaluation cycle. */
+    private boolean chainedElse = false;
+    public boolean isChainedElse() { return chainedElse; }
+    public void setChainedElse(boolean b) { this.chainedElse = b; }
     public long getCooldownMs() { return cooldownMs; }
     public void setCooldownMs(long ms) { this.cooldownMs = Math.max(0, ms); }
 
@@ -157,12 +168,23 @@ public class Trigger {
             if (now - lastFiredAt < cooldownMs) return false;
             if (timerActive() && now - lastFiredAt < timerIntervalMs) return false;
         }
-        boolean holds;
-        try { holds = condition.test(arg); } catch (Throwable t) { return false; }
-        if (!holds) return false;
-        // v1.33: every ANDed extra clause must also hold (with its NOT applied)
-        for (Clause c : extraClauses)
-            if (c != null && !c.holds()) return false;
+        // v1.50: code-style evaluation with precedence - AND binds tighter than OR. The primary
+        // condition is the first term; each extra clause carries its connector (AND / OR) to the
+        // previous term. "x AND y OR z" evaluates as "(x AND y) OR z", exactly as it would in code.
+        boolean primary;
+        try { primary = condition.test(arg); } catch (Throwable t) { primary = false; }
+        boolean orAccum = false;      // OR of the completed AND-groups so far
+        boolean andAccum = primary;   // the AND-group currently being built
+        for (Clause c : extraClauses) {
+            if (c == null || c.condition == null) continue;
+            if (c.or) {               // OR closes the current AND-group and starts a new one
+                orAccum = orAccum || andAccum;
+                andAccum = c.holds();
+            } else {                  // AND extends the current group
+                andAccum = andAccum && c.holds();
+            }
+        }
+        if (!(orAccum || andAccum)) return false;
         if (!running && chancePercent < 100
                 && java.util.concurrent.ThreadLocalRandom.current().nextInt(100) >= chancePercent) {
             lastFiredAt = now;   // roll missed: this opportunity is spent, wait out the window

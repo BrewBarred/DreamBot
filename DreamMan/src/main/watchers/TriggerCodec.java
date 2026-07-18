@@ -37,6 +37,7 @@ public final class TriggerCodec {
         boolean timerEnabled = false;   // v1.30: run-every timer
         long timerIntervalMs = 0;
         String control = "NONE";        // v1.33: post-response queue control
+        boolean chainedElse = false;    // v1.50: else-if of the trigger above
         java.util.List<ClauseDTO> clauses = new ArrayList<>();   // v1.33: ANDed extra conditions
         List<ActionData> response = new ArrayList<>();
     }
@@ -46,6 +47,7 @@ public final class TriggerCodec {
         String condition;
         String arg = "";
         boolean negate = false;
+        boolean or = false;          // v1.50: connector to the previous term (false = AND)
     }
 
     /** @return a JSON string for the triggers, or "" for an empty/null list. */
@@ -64,12 +66,14 @@ public final class TriggerCodec {
             d.timerEnabled = t.isTimerEnabled();             // v1.30
             d.timerIntervalMs = t.getTimerIntervalMs();      // v1.30
             d.control = t.getControl().name();               // v1.33
+            d.chainedElse = t.isChainedElse();               // v1.50
             for (Trigger.Clause cl : t.getExtraClauses()) {  // v1.33
                 if (cl == null || cl.condition == null) continue;
                 ClauseDTO cd = new ClauseDTO();
                 cd.condition = cl.condition.name();
                 cd.arg = cl.arg;
                 cd.negate = cl.negate;
+                cd.or = cl.or;                       // v1.50
                 d.clauses.add(cd);
             }
             for (Action a : t.getResponse())
@@ -101,11 +105,13 @@ public final class TriggerCodec {
                 t.setTimer(d.timerEnabled, d.timerIntervalMs);       // v1.30 (off in old saves)
                 try { t.setControl(Trigger.Control.valueOf(d.control)); }   // v1.33 (NONE if absent)
                 catch (Throwable ignored) { t.setControl(Trigger.Control.NONE); }
+                t.setChainedElse(d.chainedElse);                             // v1.50
                 if (d.clauses != null)                                      // v1.33
                     for (ClauseDTO cd : d.clauses) {
                         Condition cc = Condition.fromName(cd.condition);
                         if (cc != null)
-                            t.getExtraClauses().add(new Trigger.Clause(cc, cd.arg, cd.negate));
+                            t.getExtraClauses().add(
+                                    new Trigger.Clause(cc, cd.arg, cd.negate, cd.or));   // v1.50
                     }
                 if (d.response != null)
                     for (ActionData ad : d.response) {

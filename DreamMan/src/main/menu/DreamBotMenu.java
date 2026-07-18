@@ -207,10 +207,10 @@ public class DreamBotMenu extends JFrame {
     private final JList<main.market.ScriptListing> listMarket = new JList<>(modelMarket);
     private JButton btnMyUploads;   // v1.32b: hidden unless the server market is active
     // v1.49: inline comments panel (folded in from the old pop-up)
-    private JTextArea inlineCommentFeed;
     private JTextField inlineCommentInput;
     private JButton inlineCommentPost;
-    private main.market.ScriptListing inlineCommentTarget;
+    private String expandedCommentsId;   // v1.50: the row whose comments are open (one at a time)
+    private final java.util.Map<String, String> marketCommentsCache = new java.util.HashMap<>();
     private final List<main.market.ScriptListing> marketAll = new ArrayList<>();
     private JTextField marketSearchField;
     private JComboBox<String> marketSortCombo;
@@ -1495,14 +1495,12 @@ public class DreamBotMenu extends JFrame {
         bundle.author = txtAuthor.getText().trim();
         bundle.version = ((Number) spVersion.getValue()).doubleValue();
         bundle.description = txtDesc.getText().trim();
-        // v1.32: loop counts are RESET on export - both the queue loops and every task's own
-        // repeat. Shared scripts must not carry a baked-in loop count: that was the exploit
-        // (package 50 loops, import it, then loop THAT 50x for 2500). The importer sets their
-        // own loops within their tier cap. Same reset is applied to task + preset export below.
+        // v1.49: preserve each task's own loop count on export (the runtime tier cap clamps a
+        // task's repeat to the runner's max loops when it executes, so a shared script can't push
+        // any loop dimension past the cap - which is all a free user could do manually anyway).
+        // Queue-level loops still default to 1 so the importer picks their own.
         bundle.loops = 1;
         bundle.tasks = ProfileCodec.tasksToData(modelTaskList);
-        if (bundle.tasks != null)
-            for (main.data.store.TaskData td : bundle.tasks) if (td != null) td.repeat = 1;
         if (chkChecks.isSelected())
             bundle.globalTriggers = main.watchers.TriggerCodec.toJson(
                     new ArrayList<>(globalTriggers));
@@ -3030,6 +3028,7 @@ public class DreamBotMenu extends JFrame {
         marketSourceCombo.addActionListener(e -> {
             refilterMarket();
             updateMarketButtons();
+            updateMarketViewDesc();    // v1.49: clear per-view description
             refreshMyUploadsQuota();   // v1.49: show per-kind quota inline in My uploads view
         });
         JButton btnSortIcon = iconButton(main.menu.components.UIIcons.sort(20, ic),
@@ -3147,6 +3146,15 @@ public class DreamBotMenu extends JFrame {
         btnMyUploads.addActionListener(e -> openMyUploads());
         bottom.add(btnMyUploads);
         bottom.add(btnRemove);
+        // v1.50: write-a-comment row - enabled while a row's comments are expanded
+        inlineCommentInput = new JTextField(16);
+        inlineCommentInput.setEnabled(false);
+        inlineCommentInput.setToolTipText("Open [comments] on a script to write one");
+        inlineCommentPost = createButton("Post");
+        inlineCommentPost.setEnabled(false);
+        inlineCommentPost.addActionListener(e -> postInlineComment());
+        bottom.add(inlineCommentInput);
+        bottom.add(inlineCommentPost);
         JLabel dlHint = new JLabel("   double-click a script to download it");
         dlHint.setForeground(TEXT_DIM);
         dlHint.setFont(new Font("Segoe UI", Font.ITALIC, 11));
@@ -3156,100 +3164,72 @@ public class DreamBotMenu extends JFrame {
         JPanel body = new JPanel(new BorderLayout(0, 8));
         body.setOpaque(false);
         body.add(head, BorderLayout.NORTH);
-        // v1.49: list on the left, an inline comments panel on the right - no more pop-up window.
-        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
-                scroll, buildInlineCommentsPanel());
-        split.setResizeWeight(0.68);
-        split.setBorder(null);
-        split.setOpaque(false);
-        body.add(split, BorderLayout.CENTER);
+        // v1.50: comments now expand UNDER each row (click [comments] on a card), so the list
+        // gets the full width back - no side panel, no pop-up.
+        body.add(scroll, BorderLayout.CENTER);
         body.add(bottom, BorderLayout.SOUTH);
         panel.add(body, BorderLayout.CENTER);
-
-        // load the selected script's comments into the inline panel
-        listMarket.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) loadInlineComments(listMarket.getSelectedValue());
-        });
 
         reloadMarket();
         return panel;
     }
 
-    /** v1.49: the inline comments panel that replaces the old comments pop-up. */
-    private JComponent buildInlineCommentsPanel() {
-        JPanel p = new JPanel(new BorderLayout(0, 6));
-        p.setOpaque(false);
-        p.setBorder(new EmptyBorder(0, 8, 0, 0));
-        JLabel title = new JLabel("Comments");
-        title.setForeground(Theme.ACCENT);
-        title.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        p.add(title, BorderLayout.NORTH);
-
-        inlineCommentFeed = new JTextArea();
-        inlineCommentFeed.setEditable(false);
-        inlineCommentFeed.setLineWrap(true);
-        inlineCommentFeed.setWrapStyleWord(true);
-        inlineCommentFeed.setBackground(new Color(0x1A, 0x1A, 0x1A));
-        inlineCommentFeed.setForeground(TEXT_MAIN);
-        inlineCommentFeed.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        inlineCommentFeed.setText("Select a script to see its comments.");
-        p.add(Theme.thinScrollbars(new JScrollPane(inlineCommentFeed)), BorderLayout.CENTER);
-
-        inlineCommentInput = new JTextField();
-        inlineCommentPost = createButton("Post");
-        inlineCommentPost.addActionListener(e -> postInlineComment());
-        JPanel row = new JPanel(new BorderLayout(6, 0));
-        row.setOpaque(false);
-        row.add(inlineCommentInput, BorderLayout.CENTER);
-        row.add(inlineCommentPost, BorderLayout.EAST);
-        p.add(row, BorderLayout.SOUTH);
-        p.setPreferredSize(new Dimension(280, 100));
-        return p;
-    }
-
-    private void loadInlineComments(main.market.ScriptListing l) {
-        inlineCommentTarget = l;
-        if (inlineCommentFeed == null) return;
-        boolean server = marketRepo instanceof main.market.HttpRepository;
-        boolean canPost = server && !"local".equals(l == null ? "" : l.origin)
+    /** v1.50: expand/collapse a row's comments (one row at a time, accordion-style). */
+    private void toggleRowComments(main.market.ScriptListing l) {
+        if (l == null || l.id == null || !"server".equals(l.origin)) return;
+        String prev = expandedCommentsId;
+        expandedCommentsId = l.id.equals(prev) ? null : l.id;
+        // poke the affected rows so the JList recomputes their heights
+        for (int i = 0; i < modelMarket.size(); i++) {
+            main.market.ScriptListing e = modelMarket.get(i);
+            if (e == null || e.id == null) continue;
+            if (e.id.equals(l.id) || e.id.equals(prev)) modelMarket.setElementAt(e, i);
+        }
+        boolean canPost = expandedCommentsId != null
+                && marketRepo instanceof main.market.HttpRepository
                 && main.market.ServerAccount.isLoggedIn();
         if (inlineCommentInput != null) inlineCommentInput.setEnabled(canPost);
         if (inlineCommentPost != null) inlineCommentPost.setEnabled(canPost);
-        if (l == null) { inlineCommentFeed.setText("Select a script to see its comments."); return; }
-        if (!server || "local".equals(l.origin)) {
-            inlineCommentFeed.setText("Comments are for the live market only.");
-            return;
-        }
-        inlineCommentFeed.setText("Loading comments\u2026");
+        if (expandedCommentsId != null && !marketCommentsCache.containsKey(l.id))
+            fetchCommentsInto(l.id);
+    }
+
+    /** Loads a script's comment thread into the cache, then refreshes its row. */
+    private void fetchCommentsInto(String id) {
+        if (!(marketRepo instanceof main.market.HttpRepository)) return;
         final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
-        final String id = l.id;
         new Thread(() -> {
+            String text;
             try {
                 main.market.HttpRepository.CommentPage cp = repo.comments(id, 0, 30);
-                StringBuilder sb = new StringBuilder();
-                if (cp.comments.isEmpty()) sb.append("No comments yet.");
-                java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("d MMM HH:mm");
-                for (main.market.HttpRepository.Comment c : cp.comments)
-                    sb.append(c.author).append("  \u00b7  ")
-                      .append(fmt.format(new java.util.Date(c.at))).append("\n")
-                      .append(c.body).append("\n\n");
-                final String text = sb.toString();
-                SwingUtilities.invokeLater(() -> {
-                    if (inlineCommentTarget != null && id.equals(inlineCommentTarget.id)) {
-                        inlineCommentFeed.setText(text);
-                        inlineCommentFeed.setCaretPosition(0);
-                    }
-                });
+                if (cp.comments.isEmpty()) {
+                    text = "No comments yet - be the first.";
+                } else {
+                    StringBuilder sb = new StringBuilder();
+                    java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("d MMM HH:mm");
+                    for (main.market.HttpRepository.Comment c : cp.comments)
+                        sb.append(c.author).append("  \u00b7  ")
+                          .append(fmt.format(new java.util.Date(c.at))).append("\n")
+                          .append(c.body).append("\n\n");
+                    text = sb.toString().trim();
+                }
             } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> inlineCommentFeed.setText(
-                        "Couldn't load comments: " + ex.getMessage()));
+                text = "Couldn't load comments: " + ex.getMessage();
             }
-        }, "DreamMan-InlineComments").start();
+            final String out = text;
+            SwingUtilities.invokeLater(() -> {
+                marketCommentsCache.put(id, out);
+                for (int i = 0; i < modelMarket.size(); i++) {
+                    main.market.ScriptListing e = modelMarket.get(i);
+                    if (e != null && id.equals(e.id)) { modelMarket.setElementAt(e, i); break; }
+                }
+            });
+        }, "DreamMan-RowComments").start();
     }
 
     private void postInlineComment() {
-        main.market.ScriptListing l = inlineCommentTarget;
-        if (l == null || !(marketRepo instanceof main.market.HttpRepository)) return;
+        final String id = expandedCommentsId;
+        if (id == null || !(marketRepo instanceof main.market.HttpRepository)) return;
         String body = inlineCommentInput.getText().trim();
         if (body.isEmpty()) return;
         if (!main.market.ServerAccount.isLoggedIn()) { showToast("Log in to comment", inlineCommentPost, false); return; }
@@ -3257,8 +3237,9 @@ public class DreamBotMenu extends JFrame {
         inlineCommentInput.setText("");
         new Thread(() -> {
             try {
-                repo.addComment(l.id, body);
-                SwingUtilities.invokeLater(() -> loadInlineComments(l));
+                repo.addComment(id, body);
+                marketCommentsCache.remove(id);   // stale - refetch with the new comment
+                SwingUtilities.invokeLater(() -> fetchCommentsInto(id));
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() ->
                         showToast("Comment failed: " + ex.getMessage(), inlineCommentPost, false));
@@ -3715,6 +3696,28 @@ public class DreamBotMenu extends JFrame {
         if (btnMyUploads != null) btnMyUploads.setVisible(serverMode);
     }
 
+    /** v1.49: a plain-language description of the current market view, to kill the confusion. */
+    private void updateMarketViewDesc() {
+        if (lblMarketSource == null || marketSourceCombo == null) return;
+        String src = (String) marketSourceCombo.getSelectedItem();
+        String desc;
+        switch (src == null ? "" : src) {
+            case "Live market":
+                desc = "LIVE MARKET \u2014 everyone's published scripts. Download (green \u2193), rate & comment.";
+                break;
+            case "My uploads":
+                desc = "MY UPLOADS \u2014 your scripts saved on the server (right-click to rename/remove).";
+                break;
+            case "Local":
+                desc = "LOCAL / market-ready \u2014 items staged on THIS device. Click the blue publish \u2191 to upload one.";
+                break;
+            default:
+                desc = "ALL \u2014 everything from every source.";
+                break;
+        }
+        lblMarketSource.setText(desc);
+    }
+
     /** v1.49: shows your per-kind upload quota inline (in the header) when in the My-uploads view. */
     private void refreshMyUploadsQuota() {
         if (lblMarketSource == null || marketSourceCombo == null) return;
@@ -4076,6 +4079,9 @@ public class DreamBotMenu extends JFrame {
         private final JLabel dl = new JLabel("", SwingConstants.RIGHT);
         /** v1.32b: per-row download button (import into library) - no select-then-click dance. */
         private final JLabel dlButton = new JLabel();
+        /** v1.50: per-row comments - click to expand the thread under this card. */
+        private final JLabel commentsToggle = new JLabel();
+        private final JTextArea commentsBox = new JTextArea();
         /** The row the mouse is over and the star it's over, driven by the list's listeners. */
         int hoverRow = -1, hoverStar = -1;
 
@@ -4100,6 +4106,8 @@ public class DreamBotMenu extends JFrame {
             // bottom-right: downloads count + the per-row download button
             JPanel dlRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
             dlRow.setOpaque(false);
+            commentsToggle.setFont(new Font("Segoe UI", Font.BOLD, 11));
+            dlRow.add(commentsToggle);
             dlRow.add(dl);
             dlRow.add(dlButton);
             JPanel right = new JPanel(new GridLayout(2, 1));
@@ -4108,6 +4116,18 @@ public class DreamBotMenu extends JFrame {
             right.add(dlRow);
             add(left, BorderLayout.CENTER);
             add(right, BorderLayout.EAST);
+            // v1.50: the expandable comment thread, shown only for the open row
+            commentsBox.setEditable(false);
+            commentsBox.setLineWrap(true);
+            commentsBox.setWrapStyleWord(true);
+            commentsBox.setOpaque(true);
+            commentsBox.setBackground(new Color(0x17, 0x17, 0x17));
+            commentsBox.setForeground(TEXT_MAIN);
+            commentsBox.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+            commentsBox.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(1, 0, 0, 0, COLOR_BORDER_DIM),
+                    new EmptyBorder(8, 14, 8, 14)));
+            add(commentsBox, BorderLayout.SOUTH);
         }
 
         @Override
@@ -4145,15 +4165,37 @@ public class DreamBotMenu extends JFrame {
 
             // v1.32b: the per-row download button. Disabled (dim) for your own uploads and for
             // listings with no bundle to import; active (green) otherwise.
-            // v1.49: you can now download your own uploads too (collision-checked on import).
+            // v1.49: LOCAL (market-ready) rows get a PUBLISH button (upload to the server); market
+            // rows get a DOWNLOAD button. Makes it obvious what each row can do.
             boolean own = isOwnListing(l);
-            boolean canDownload = l.bundle != null
-                    && l.bundle.tasks != null && !l.bundle.tasks.isEmpty();
-            dlButton.setIcon(main.menu.components.UIIcons.importIcon(17,
-                    canDownload ? new Color(0x6F, 0xC2, 0x76) : new Color(0x55, 0x55, 0x55)));
-            dlButton.setToolTipText(!canDownload ? (l.vipOnly ? "VIP only" : "No tasks to download")
-                    : own ? "Download your own upload (e.g. to another device)"
-                    : "Download / import into your library");
+            boolean isLocal = "local".equals(l.origin);
+            boolean hasTasks = l.bundle != null && l.bundle.tasks != null && !l.bundle.tasks.isEmpty();
+            if (isLocal) {
+                boolean canPublish = hasTasks && main.market.ServerAccount.isLoggedIn();
+                dlButton.setIcon(main.menu.components.UIIcons.publish(17,
+                        canPublish ? new Color(0x6F, 0xA8, 0xE0) : new Color(0x55, 0x55, 0x55)));
+                dlButton.setToolTipText(canPublish ? "Publish this market-ready item to the market"
+                        : (main.market.ServerAccount.isLoggedIn() ? "Nothing to publish"
+                        : "Log in to publish"));
+            } else {
+                dlButton.setIcon(main.menu.components.UIIcons.importIcon(17,
+                        hasTasks ? new Color(0x6F, 0xC2, 0x76) : new Color(0x55, 0x55, 0x55)));
+                dlButton.setToolTipText(!hasTasks ? (l.vipOnly ? "VIP only" : "No tasks to download")
+                        : own ? "Download your own upload (e.g. to another device)"
+                        : "Download / import into your library");
+            }
+
+            // v1.50: comments toggle + expanded thread (server rows only; one open at a time)
+            boolean serverRow = "server".equals(l.origin);
+            boolean expanded = serverRow && l.id != null && l.id.equals(expandedCommentsId);
+            commentsToggle.setVisible(serverRow);
+            commentsToggle.setText(expanded ? "[hide comments]" : "[comments]");
+            commentsToggle.setForeground(expanded ? Theme.ACCENT : new Color(0x7F, 0xA8, 0xC9));
+            commentsBox.setVisible(expanded);
+            if (expanded)
+                commentsBox.setText(marketCommentsCache.getOrDefault(l.id, "Loading comments\u2026"));
+            else
+                commentsBox.setText("");
 
             setBackground(selected ? new Color(46, 42, 30) : Theme.SURFACE_1);
             name.setForeground(selected ? Theme.ACCENT : TEXT_MAIN);
@@ -4184,6 +4226,13 @@ public class DreamBotMenu extends JFrame {
             setBounds(0, 0, cellBounds.width, cellBounds.height);
             layoutTree(this);
             return SwingUtilities.getDeepestComponentAt(this, p.x, p.y) == dlButton;
+        }
+
+        /** v1.50: true when the point is on the [comments] toggle (cell coordinates). */
+        boolean commentsAt(Point p, Rectangle cellBounds) {
+            setBounds(0, 0, cellBounds.width, cellBounds.height);
+            layoutTree(this);
+            return SwingUtilities.getDeepestComponentAt(this, p.x, p.y) == commentsToggle;
         }
 
         private void layoutTree(Component c) {
@@ -4402,8 +4451,8 @@ public class DreamBotMenu extends JFrame {
         List<Task> one = new ArrayList<>();
         one.add(t);
         b.tasks = ProfileCodec.tasksToData(one);
-        if (b.tasks != null)
-            for (main.data.store.TaskData td : b.tasks) if (td != null) td.repeat = 1;
+        // v1.49: keep the task's own loop count (repeat) - the runtime tier cap prevents abuse,
+        // so we no longer flatten it to 1 and break the script.
         listing.bundle = b;
 
         try {
@@ -4493,13 +4542,13 @@ public class DreamBotMenu extends JFrame {
         b.author = listing.author;
         b.version = listing.version;
         b.description = listing.description;
-        // v1.32: same loop reset as export - published scripts never carry a loop count, so
-        // they can't be used to multiply past the free cap. Reset the queue loops AND every
-        // task's repeat to 1; the importer chooses their own within their tier limit.
-        b.loops = 1;
+        // v1.49: preserve the author's loop counts (queue loops + per-task repeat). Previously
+        // these were flattened to 1 to stop free users multiplying past their cap - but that
+        // silently broke legitimate scripts. The tier cap is now enforced at RUNTIME instead
+        // (a downloaded task's repeat is clamped to the runner's max loops when it executes),
+        // so the intended loops travel with the script and only over-cap use is prevented.
+        b.loops = 1;   // queue-level loops default to 1; the importer picks their own
         b.tasks = ProfileCodec.tasksToData(tasks);
-        if (b.tasks != null)
-            for (main.data.store.TaskData td : b.tasks) if (td != null) td.repeat = 1;
         if (chkChecks.isSelected())
             b.globalTriggers = main.watchers.TriggerCodec.toJson(new ArrayList<>(globalTriggers));
         listing.bundle = b;
@@ -4670,8 +4719,14 @@ public class DreamBotMenu extends JFrame {
         // configure the renderer for THIS row, then hit-test in cell coordinates
         marketCardRenderer.getListCellRendererComponent(listMarket, l, idx, false, false);
         Point cell = new Point(me.getX() - bounds.x, me.getY() - bounds.y);
-        // v1.32b: per-row download button
-        if (marketCardRenderer.downloadAt(cell, bounds)) { importFromMarket(listMarket); return; }
+        // v1.50: [comments] toggle expands the thread under this row
+        if (marketCardRenderer.commentsAt(cell, bounds)) { toggleRowComments(l); return; }
+        // v1.49: per-row button - publish for local/market-ready rows, download for market rows
+        if (marketCardRenderer.downloadAt(cell, bounds)) {
+            if ("local".equals(l.origin)) uploadLocalListing(l);
+            else importFromMarket(listMarket);
+            return;
+        }
         int star = marketCardRenderer.starAt(cell, bounds);
         if (star >= 1 && star <= 5) rateListing(l, star);
     }

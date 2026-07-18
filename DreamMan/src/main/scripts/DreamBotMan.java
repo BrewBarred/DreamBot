@@ -693,7 +693,11 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
         // Delivered through onLoop's return value: non-blocking and pause-safe.
         if (menu != null && menu.isQueueAutoWait())
             pendingTaskGapMs = Rand.nextInt(menu.getQueueAutoWaitMinMs(), menu.getQueueAutoWaitMaxMs());
-        int repeat = task != null ? Math.max(1, task.getRepeat()) : 1;
+        // v1.49: enforce the tier loop cap at RUNTIME instead of destroying loop values on
+        // publish. A downloaded task keeps its author's intended repeat, but a free user can't
+        // exceed their tier's max loops by running it - the cap is applied where it matters.
+        int loopCap = Math.max(1, main.market.Tier.maxLoops());
+        int repeat = task != null ? Math.max(1, Math.min(task.getRepeat(), loopCap)) : 1;
 
         if (taskRunsDone >= repeat) {
             // task done for this pass - move on (index reset of counters handled here)

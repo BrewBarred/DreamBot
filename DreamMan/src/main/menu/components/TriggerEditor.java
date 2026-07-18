@@ -72,7 +72,8 @@ public class TriggerEditor extends JPanel {
                     // number wins that cycle and the other waits.
                     // v1.30: the on/off dot is DRAWN (UIIcons.dot) - the \u25cf/\u25cb glyphs
                     // were the last font-dependent icons in this tab.
-                    lab.setText((i + 1) + ". " + t.describe());
+                    // v1.50: chained else-if triggers read as the ladder they are
+                    lab.setText((i + 1) + ". " + (t.isChainedElse() ? "else " : "") + t.describe());
                     lab.setIcon(UIIcons.dot(12,
                             t.isEnabled() ? Theme.ACCENT : Theme.TEXT_MUTED, t.isEnabled()));
                     lab.setIconTextGap(6);
@@ -366,7 +367,7 @@ public class TriggerEditor extends JPanel {
         detail.add(argRow);
         detail.add(Box.createVerticalStrut(6));
         // v1.33: ANDed extra conditions (with NOT). All must hold for the trigger to fire.
-        JLabel andLbl = new JLabel("AND also (all must be true):");
+        JLabel andLbl = new JLabel("More conditions  (AND binds tighter than OR, like code):");
         andLbl.setForeground(Theme.ACCENT);
         andLbl.setFont(andLbl.getFont().deriveFont(Font.BOLD, 11f));
         andLbl.setAlignmentX(LEFT_ALIGNMENT);
@@ -438,13 +439,35 @@ public class TriggerEditor extends JPanel {
         wrap.removeAll();
         for (Trigger.Clause cl : t.getExtraClauses())
             wrap.add(clauseRow(t, wrap, cl));
-        JButton addC = new JButton("+ AND condition");
+        // v1.50: one "+" that offers the three ways to extend the logic. AND/OR add a clause to
+        // THIS trigger (AND binds tighter than OR, code-style); "else if" starts a NEW trigger
+        // chained below this one - it only runs when this one didn't fire, first match wins.
+        JButton addC = new JButton("+");
         addC.setAlignmentX(LEFT_ALIGNMENT);
+        addC.setToolTipText("Extend the logic: and if\u2026 / or if\u2026 / else if\u2026");
         addC.addActionListener(e -> {
-            t.getExtraClauses().add(new Trigger.Clause(Condition.INVENTORY_FULL, "", false));
-            rebuildClauses(t, wrap);
-            wrap.revalidate();
-            wrap.repaint();
+            JPopupMenu m = new JPopupMenu();
+            JMenuItem andIf = new JMenuItem("and if\u2026  (this trigger, binds tighter)");
+            andIf.addActionListener(a -> {
+                t.getExtraClauses().add(new Trigger.Clause(Condition.INVENTORY_FULL, "", false, false));
+                rebuildClauses(t, wrap); wrap.revalidate(); wrap.repaint();
+            });
+            JMenuItem orIf = new JMenuItem("or if\u2026  (this trigger, alternative)");
+            orIf.addActionListener(a -> {
+                t.getExtraClauses().add(new Trigger.Clause(Condition.INVENTORY_FULL, "", false, true));
+                rebuildClauses(t, wrap); wrap.revalidate(); wrap.repaint();
+            });
+            JMenuItem elseIf = new JMenuItem("else if\u2026  (new trigger, runs only if this one didn't)");
+            elseIf.addActionListener(a -> {
+                Trigger et = new Trigger(Condition.HP_BELOW, "15");
+                et.setChainedElse(true);
+                int at = listModel.indexOf(t);
+                model.add(model.indexOf(t) + 1, et);
+                listModel.add(at + 1, et);
+                list.setSelectedValue(et, true);
+            });
+            m.add(andIf); m.add(orIf); m.addSeparator(); m.add(elseIf);
+            m.show(addC, 0, addC.getHeight());
         });
         wrap.add(addC);
     }
@@ -454,6 +477,14 @@ public class TriggerEditor extends JPanel {
         p.setOpaque(false);
         p.setAlignmentX(LEFT_ALIGNMENT);
         p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+
+        // v1.50: the connector to the previous term - AND binds tighter than OR (code precedence)
+        JComboBox<String> conn = new JComboBox<>(new String[]{"AND", "OR"});
+        conn.setSelectedIndex(cl.or ? 1 : 0);
+        conn.setMaximumSize(new Dimension(64, 28));
+        conn.setToolTipText("How this joins the previous condition (AND binds tighter than OR)");
+        conn.addActionListener(e -> { cl.or = conn.getSelectedIndex() == 1; list.repaint(); });
+        p.add(conn);
 
         JCheckBox not = new JCheckBox("NOT", cl.negate);
         not.setOpaque(false);
@@ -477,8 +508,9 @@ public class TriggerEditor extends JPanel {
         });
         arg.setVisible(cl.condition != null && cl.condition.needsArg());
 
-        JButton rm = new JButton("\u2715");
-        rm.setMargin(new Insets(0, 6, 0, 6));
+        // v1.50: DRAWN X icon - the \u2715 glyph is missing from the client font (rendered as a box)
+        JButton rm = new JButton(drawnX(11, new Color(0xC9, 0x6A, 0x6A)));
+        rm.setMargin(new Insets(2, 6, 2, 6));
         rm.setToolTipText("Remove this condition");
         rm.addActionListener(e -> {
             t.getExtraClauses().remove(cl);
@@ -504,6 +536,21 @@ public class TriggerEditor extends JPanel {
                 return this;
             }
         };
+    }
+
+    /** v1.50: a small vector-drawn X (the \u2715 glyph is missing from some client fonts). */
+    private static javax.swing.Icon drawnX(int size, Color color) {
+        java.awt.image.BufferedImage img =
+                new java.awt.image.BufferedImage(size, size, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(color);
+        g.setStroke(new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        int m = 2;
+        g.drawLine(m, m, size - m, size - m);
+        g.drawLine(size - m, m, m, size - m);
+        g.dispose();
+        return new ImageIcon(img);
     }
 
     /** Friendly label for the post-run control dropdown (v1.33). */
