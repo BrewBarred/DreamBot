@@ -3096,7 +3096,7 @@ public class DreamBotMenu extends JFrame {
         marketSortCombo = new JComboBox<>(new String[]{"Top rated", "Newest", "Most downloaded", "A-Z"});
         marketSortCombo.addActionListener(e -> refilterMarket());
         // v1.32b: the three views (replaces the confusing "All/On server/Local only")
-        marketSourceCombo = new JComboBox<>(new String[]{"Live market", "My uploads", "Local", "All"});
+        marketSourceCombo = new JComboBox<>(new String[]{"Live market", "My uploads", "Local", "All", "Loved"});
         marketSourceCombo.setToolTipText("<html><b>Live market</b> - other people's public scripts "
                 + "(rate &amp; comment here).<br><b>My uploads</b> - your scripts that are on the "
                 + "server.<br><b>Local</b> - your local/market-ready staging.<br><b>All</b> - "
@@ -3740,6 +3740,7 @@ public class DreamBotMenu extends JFrame {
             if ("Live market".equals(src) && !(onServer && !own)) continue;
             if ("My uploads".equals(src) && !(onServer && own)) continue;
             if ("Local".equals(src) && !"local".equals(l.origin)) continue;
+            if ("Loved".equals(src) && !(onServer && l.myFavorite)) continue;   // v1.59
             if (!q.isEmpty()) {
                 String hay = (l.name + " " + l.author + " " + l.description + " "
                         + String.join(" ", l.tags == null ? List.<String>of() : l.tags))
@@ -3760,6 +3761,9 @@ public class DreamBotMenu extends JFrame {
                     .comparingDouble((main.market.ScriptListing l) -> l.avgRating)
                     .thenComparingInt(l -> l.ratingCount)
                     .reversed());
+
+        // v1.59: loved items float to the top within whichever sort is active (stable)
+        view.sort(Comparator.comparingInt((main.market.ScriptListing l) -> l.myFavorite ? 0 : 1));
 
         modelMarket.clear();
         for (main.market.ScriptListing l : view) modelMarket.addElement(l);
@@ -3791,6 +3795,8 @@ public class DreamBotMenu extends JFrame {
                 desc = "ALL \u2014 everything from every source.";
                 break;
         }
+        if ("Loved".equals(src))
+            desc = "LOVED \u2014 the scripts you hearted (click the heart on any card).";
         lblMarketSource.setText(desc);
     }
 
@@ -4157,6 +4163,8 @@ public class DreamBotMenu extends JFrame {
         private final JLabel dlButton = new JLabel();
         /** v1.50: per-row comments - click to expand the thread under this card. */
         private final JLabel commentsToggle = new JLabel();
+        /** v1.59: the love-heart (drawn - font glyphs are unreliable on the client). */
+        private final JLabel favButton = new JLabel();
         private final JTextArea commentsBox = new JTextArea();
         /** The row the mouse is over and the star it's over, driven by the list's listeners. */
         int hoverRow = -1, hoverStar = -1;
@@ -4177,6 +4185,7 @@ public class DreamBotMenu extends JFrame {
             // top-right: the clickable star strip + "4.8 (12)" text beside it
             JPanel starRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
             starRow.setOpaque(false);
+            starRow.add(favButton);
             starRow.add(stars);
             starRow.add(starText);
             // bottom-right: downloads count + the per-row download button
@@ -4267,6 +4276,9 @@ public class DreamBotMenu extends JFrame {
             commentsToggle.setVisible(serverRow);
             commentsToggle.setText(expanded ? "[hide comments]" : "[comments]");
             commentsToggle.setForeground(expanded ? Theme.ACCENT : new Color(0x7F, 0xA8, 0xC9));
+            favButton.setVisible(serverRow);
+            favButton.setIcon(drawnHeart(15, l.myFavorite));
+            favButton.setToolTipText((l.myFavorite ? "Unlove" : "Love") + "  (" + l.favorites + ")");
             commentsBox.setVisible(expanded);
             if (expanded)
                 commentsBox.setText(marketCommentsCache.getOrDefault(l.id, "Loading comments\u2026"));
@@ -4302,6 +4314,13 @@ public class DreamBotMenu extends JFrame {
             setBounds(0, 0, cellBounds.width, cellBounds.height);
             layoutTree(this);
             return SwingUtilities.getDeepestComponentAt(this, p.x, p.y) == dlButton;
+        }
+
+        /** v1.59: true when the point is on the love-heart (cell coordinates). */
+        boolean favAt(Point p, Rectangle cellBounds) {
+            setBounds(0, 0, cellBounds.width, cellBounds.height);
+            layoutTree(this);
+            return SwingUtilities.getDeepestComponentAt(this, p.x, p.y) == favButton;
         }
 
         /** v1.50: true when the point is on the [comments] toggle (cell coordinates). */
@@ -4663,6 +4682,58 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
+    /** v1.59: love/unlove a market listing on the server, then refresh its card. */
+    private void toggleFavorite(main.market.ScriptListing l, int idx) {
+        if (l == null || !"server".equals(l.origin)) return;
+        if (!(marketRepo instanceof main.market.HttpRepository)) return;
+        if (!main.market.ServerAccount.isLoggedIn()) {
+            showToast("Log in to favorite scripts", listMarket, false);
+            return;
+        }
+        final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
+        new Thread(() -> {
+            try {
+                String resp = repo.favorite(l.id);
+                boolean fav = resp != null && resp.contains("\"myFavorite\":true");
+                int count = Math.max(0, l.favorites + (fav ? 1 : -1));
+                try {
+                    java.util.regex.Matcher m = java.util.regex.Pattern
+                            .compile("\"favorites\":(\\d+)").matcher(resp == null ? "" : resp);
+                    if (m.find()) count = Integer.parseInt(m.group(1));
+                } catch (Throwable ignored) {}
+                final boolean ff = fav; final int fc = count;
+                SwingUtilities.invokeLater(() -> {
+                    l.myFavorite = ff;
+                    l.favorites = fc;
+                    if (idx >= 0 && idx < modelMarket.size())
+                        modelMarket.setElementAt(modelMarket.get(idx), idx);
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() ->
+                        showToast("Favorite failed: " + ex.getMessage(), listMarket, false));
+            }
+        }, "DreamMan-Favorite").start();
+    }
+
+    /** v1.59: drawn heart, outline or filled. */
+    private static javax.swing.Icon drawnHeart(int size, boolean filled) {
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(size, size,
+                java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        java.awt.geom.Path2D.Float h = new java.awt.geom.Path2D.Float();
+        float w = size, t = size;
+        h.moveTo(w / 2f, t * 0.86f);
+        h.curveTo(-w * 0.18f, t * 0.42f, w * 0.16f, -t * 0.14f, w / 2f, t * 0.28f);
+        h.curveTo(w * 0.84f, -t * 0.14f, w * 1.18f, t * 0.42f, w / 2f, t * 0.86f);
+        h.closePath();
+        g.setColor(new Color(0xE0, 0x5A, 0x6B));
+        if (filled) g.fill(h);
+        else { g.setStroke(new BasicStroke(1.6f)); g.draw(h); }
+        g.dispose();
+        return new ImageIcon(img);
+    }
+
     /** v1.49: flag any library task with this name as published (best-effort name match). */
     private void markLibraryPublished(String name) {
         if (name == null || name.isBlank()) return;
@@ -4796,6 +4867,8 @@ public class DreamBotMenu extends JFrame {
         // configure the renderer for THIS row, then hit-test in cell coordinates
         marketCardRenderer.getListCellRendererComponent(listMarket, l, idx, false, false);
         Point cell = new Point(me.getX() - bounds.x, me.getY() - bounds.y);
+        // v1.59: the love-heart
+        if (marketCardRenderer.favAt(cell, bounds)) { toggleFavorite(l, idx); return; }
         // v1.50: [comments] toggle expands the thread under this row
         if (marketCardRenderer.commentsAt(cell, bounds)) { toggleRowComments(l); return; }
         // v1.49: per-row button - publish for local/market-ready rows, download for market rows

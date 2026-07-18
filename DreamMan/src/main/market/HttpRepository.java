@@ -101,6 +101,12 @@ public class HttpRepository implements ScriptRepository {
         request("POST", "/scripts/" + enc(scriptId) + "/ratings", "{\"stars\":" + stars + "}");
     }
 
+    /** v1.59: toggles a favorite; returns the raw JSON ({myFavorite, favorites}). */
+    public String favorite(String scriptId) throws Exception {
+        requireConsent(main.privacy.Consent.MARKET_BROWSE);
+        return request("POST", "/scripts/" + enc(scriptId) + "/favorites", "{}");
+    }
+
     @Override
     public void noteDownload(String scriptId) {
         try {

@@ -41,6 +41,9 @@ public class ScriptListing {
     public int downloads;
     /** This install's own rating (0 = hasn't rated). */
     public int myRating;
+    /** v1.59: love-hearts - total count + whether I favorited it (server fills both). */
+    public int favorites;
+    public boolean myFavorite;
 
     /** Patch B.16: VIP-gated listing. The server sends the bundle as null to non-VIP callers. */
     public boolean vipOnly = false;
