@@ -113,6 +113,7 @@ public final class ProfileCodec {
         d.marketReady = task.isMarketReady();
         d.published = task.isPublished();
         d.downloaded = task.isDownloaded();
+        d.tags = new java.util.ArrayList<>(task.getTags());   // v1.51
         d.timed = task.isTimed();
         d.timerMinutes = task.getTimerMinutes();
         d.timerJitterPct = task.getTimerJitterPct();
@@ -141,6 +142,7 @@ public final class ProfileCodec {
         t.setMarketReady(d.marketReady);
         t.setPublished(d.published);
         t.setDownloaded(d.downloaded);
+        t.setTags(d.tags);                                    // v1.51 (null-safe)
         t.setTimed(d.timed);
         if (d.timerMinutes > 0) t.setTimerMinutes(d.timerMinutes);
         t.setTimerJitterPct(d.timerJitterPct);

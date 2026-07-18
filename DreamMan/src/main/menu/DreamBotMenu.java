@@ -1449,10 +1449,29 @@ public class DreamBotMenu extends JFrame {
         txtDesc.setLineWrap(true);
         txtDesc.setWrapStyleWord(true);
 
-        JCheckBox chkChecks = new JCheckBox("Include my always-on checks (" + globalTriggers.size() + ")",
-                !globalTriggers.isEmpty());
-        chkChecks.setOpaque(false);
-        chkChecks.setForeground(TEXT_MAIN);
+        // v1.51: pick WHICH checks travel with the export - all listed, the currently-enabled
+        // ones pre-ticked (the old single checkbox blindly included everything).
+        java.util.List<JCheckBox> trigPicks = new ArrayList<>();
+        JPanel trigPanel = new JPanel();
+        trigPanel.setLayout(new BoxLayout(trigPanel, BoxLayout.Y_AXIS));
+        trigPanel.setOpaque(false);
+        for (main.watchers.Trigger gt : globalTriggers) {
+            if (gt == null) continue;
+            JCheckBox cb = new JCheckBox(gt.describe(), gt.isEnabled());
+            cb.setOpaque(false);
+            cb.setForeground(TEXT_MAIN);
+            cb.putClientProperty("trigger", gt);
+            trigPicks.add(cb);
+            trigPanel.add(cb);
+        }
+        JScrollPane trigScroll = Theme.thinScrollbars(new JScrollPane(trigPanel));
+        trigScroll.setPreferredSize(new Dimension(330,
+                Math.min(120, 24 * Math.max(1, trigPicks.size()) + 10)));
+        // v1.51: optionally stage this same export straight into the local market (off by default)
+        JComboBox<String> cmbStage = new JComboBox<>(new String[]{
+                "Don't add to market-ready",
+                "Also stage as TASK (market-ready)",
+                "Also stage as SCRIPT (market-ready)"});
 
         java.io.File scriptsDir = main.tools.ScriptExporter.dreamBotScriptsDir();
         JLabel lblWhere = new JLabel(scriptsDir != null
@@ -1478,7 +1497,11 @@ public class DreamBotMenu extends JFrame {
         form.add(styledLabel("Description:"), c);
         c.gridx = 1; form.add(new JScrollPane(txtDesc), c);
         c.gridx = 0; c.gridy++; c.gridwidth = 2;
-        form.add(chkChecks, c);
+        form.add(styledLabel("Checks to include (ticked ones travel with the script):"), c);
+        c.gridy++;
+        form.add(trigScroll, c);
+        c.gridy++;
+        form.add(cmbStage, c);
         c.gridy++;
         form.add(styledLabel(modelTaskList.size() + " task(s), "
                 + (queueLoopTarget <= 0 ? "looping forever" : queueLoopTarget + " loop(s)")), c);
@@ -1501,9 +1524,37 @@ public class DreamBotMenu extends JFrame {
         // Queue-level loops still default to 1 so the importer picks their own.
         bundle.loops = 1;
         bundle.tasks = ProfileCodec.tasksToData(modelTaskList);
-        if (chkChecks.isSelected())
-            bundle.globalTriggers = main.watchers.TriggerCodec.toJson(
-                    new ArrayList<>(globalTriggers));
+        java.util.List<main.watchers.Trigger> pickedTrigs = new ArrayList<>();
+        for (JCheckBox cb : trigPicks)
+            if (cb.isSelected())
+                pickedTrigs.add((main.watchers.Trigger) cb.getClientProperty("trigger"));
+        if (!pickedTrigs.isEmpty())
+            bundle.globalTriggers = main.watchers.TriggerCodec.toJson(pickedTrigs);
+
+        // v1.51: optional stage-to-market-ready of this same export (task or script)
+        if (cmbStage.getSelectedIndex() > 0) {
+            main.market.ScriptListing st = new main.market.ScriptListing();
+            st.name = bundle.name;
+            st.author = bundle.author;
+            st.description = bundle.description;
+            st.version = bundle.version;
+            st.kind = cmbStage.getSelectedIndex() == 2 ? "script" : "task";
+            st.origin = "local";
+            java.util.LinkedHashSet<String> tagset = new java.util.LinkedHashSet<>();
+            for (int ti = 0; ti < modelTaskList.size(); ti++) {
+                Task qt = modelTaskList.get(ti);
+                if (qt != null) tagset.addAll(qt.getTags());
+            }
+            st.tags = new ArrayList<>(tagset);
+            st.bundle = bundle;
+            try {
+                localMarketRepo.publish(st);
+                reloadMarket();
+                showToast("Also staged \"" + st.name + "\" as a market-ready " + st.kind, mainTabs, true);
+            } catch (Exception sx) {
+                showToast("Staging failed: " + sx.getMessage(), mainTabs, false);
+            }
+        }
 
         // where to write it
         java.io.File target;
@@ -2134,7 +2185,26 @@ public class DreamBotMenu extends JFrame {
         btnSection.add(btnTaskLibraryEdit);
         btnSection.add(btnTaskLibraryExport);
         btnSection.add(btnTaskLibraryImport);
+        JButton btnTags = createButton("Tags…", new Color(55, 45, 65), null);
+        btnTags.setToolTipText("Comma-separated tags for the selected task - search filters for the library + market");
+        btnTags.addActionListener(e -> {
+            Task sel = listTaskLibrary.getSelectedValue();
+            if (sel == null) { showToast("Select a library task first", btnTags, false); return; }
+            String cur = String.join(", ", sel.getTags());
+            String in = (String) JOptionPane.showInputDialog(this,
+                    "Tags for \"" + sel.getName() + "\" (comma-separated):",
+                    "Edit tags", JOptionPane.PLAIN_MESSAGE, null, null, cur);
+            if (in == null) return;
+            java.util.List<String> parsed = new ArrayList<>();
+            for (String part : in.split(","))
+                if (!part.trim().isEmpty()) parsed.add(part.trim());
+            sel.setTags(parsed);
+            saveAll(false);
+            refilterLibrary();
+            showToast(parsed.isEmpty() ? "Tags cleared" : "Tags: " + String.join(", ", parsed), btnTags, true);
+        });
         btnSection.add(btnMarketReady);
+        btnSection.add(btnTags);
 
         panelCenterEastLibraryTab.add(buildLibraryInspector(), BorderLayout.CENTER);
 
@@ -2421,7 +2491,7 @@ public class DreamBotMenu extends JFrame {
                                  : "Click to make this a default task for every user.")
                     : (isDefault ? "Default task - included with DreamMan." : null));
             // v1.49: show the version beside the name, and the strongest lifecycle tag on the date row
-            name.setText(t.getName() + "  v" + String.format("%.1f", t.getVersion()));
+            name.setText(t.getName());
             StringBuilder sb = new StringBuilder();
             if (t.getActions() != null) {
                 int shown = 0;
@@ -2443,7 +2513,13 @@ public class DreamBotMenu extends JFrame {
             String dateStr = t.getCreatedAt() > 0
                     ? new java.text.SimpleDateFormat("yyyy-MM-dd").format(new Date(t.getCreatedAt()))
                     : "";
-            date.setText(tag != null ? tag + "  ·  " + dateStr : (dateStr.isEmpty() ? " " : dateStr));
+            // v1.51: version + tags on the small line under the title
+            java.util.List<String> bits = new java.util.ArrayList<>();
+            bits.add("v" + String.format("%.1f", t.getVersion()));
+            if (!t.getTags().isEmpty()) bits.add(String.join(", ", t.getTags()));
+            if (tag != null) bits.add(tag);
+            if (!dateStr.isEmpty()) bits.add(dateStr);
+            date.setText(String.join("  ·  ", bits));
             date.setForeground(tag != null ? Theme.ACCENT : TEXT_DIM);
             setBackground(selected ? new Color(46, 42, 30) : Theme.SURFACE_1);
             name.setForeground(selected ? Theme.ACCENT : TEXT_MAIN);
@@ -2660,8 +2736,8 @@ public class DreamBotMenu extends JFrame {
         for (Task t : libraryAll) {
             if (t == null) continue;
             if (!search.isEmpty()) {
-                String hay = (t.getName() + " " + (t.getDescription() == null ? "" : t.getDescription()))
-                        .toLowerCase();
+                String hay = (t.getName() + " " + (t.getDescription() == null ? "" : t.getDescription())
+                        + " " + String.join(" ", t.getTags())).toLowerCase();
                 if (!hay.contains(search)) continue;
             }
             // Patch B.15: VIP-only tasks are filtered by an explicit checkbox now (not auto-
@@ -4147,8 +4223,8 @@ public class DreamBotMenu extends JFrame {
                                          : "Local only - right-click to upload it to the server");
             name.setText((l.vipOnly ? "[VIP] " : "") + l.name + "  v" + l.version);
             String tags = (l.tags == null || l.tags.isEmpty()) ? "" : "  \u00b7  " + String.join(", ", l.tags);
-            meta.setText("by " + l.author + "  \u00b7  "
-                    + (locked ? "VIP only \u2014 upgrade to view" : l.summarise()) + tags);
+            meta.setText("by " + l.author + "  \u00b7  v" + String.format("%.1f", l.version)
+                    + "  \u00b7  " + (locked ? "VIP only \u2014 upgrade to view" : l.summarise()) + tags);
 
             stars.setValues(l.avgRating, l.myRating);
             stars.setHoverPreview(index == hoverRow ? hoverStar : -1);
@@ -4441,6 +4517,7 @@ public class DreamBotMenu extends JFrame {
         listing.description = t.getDescription() == null ? "" : t.getDescription();
         listing.kind = kind;
         listing.origin = "local";
+        listing.tags = new ArrayList<>(t.getTags());   // v1.51: tags travel to the market
 
         main.data.store.ScriptBundle b = new main.data.store.ScriptBundle();
         b.name = listing.name;
@@ -5427,6 +5504,8 @@ public class DreamBotMenu extends JFrame {
         private boolean marketReady = false;  // staged to the local market
         private boolean published = false;    // uploaded to the server market
         private boolean downloaded = false;   // pulled down from the market
+        /** v1.51: comma-entered tags - search filters for the library + market. */
+        private java.util.List<String> tags = new java.util.ArrayList<>();
         /** Patch B.14: VIP-gated task. Admins tick this; the library hides it from free users. */
         private boolean vipOnly = false;
         private String name;
@@ -5472,6 +5551,7 @@ public class DreamBotMenu extends JFrame {
             this.marketReady = o.marketReady;
             this.published = o.published;
             this.downloaded = o.downloaded;
+            this.tags = new ArrayList<>(o.getTags());   // v1.51
             this.name = o.name;
             this.description = o.description;
             this.status = o.status;
@@ -5523,6 +5603,8 @@ public class DreamBotMenu extends JFrame {
         public void setPublished(boolean b) { this.published = b; }
         public boolean isDownloaded() { return downloaded; }
         public void setDownloaded(boolean b) { this.downloaded = b; }
+        public java.util.List<String> getTags() { return tags == null ? new java.util.ArrayList<>() : tags; }
+        public void setTags(java.util.List<String> t) { this.tags = t == null ? new java.util.ArrayList<>() : t; }
 
         /** Patch B.14: whether this is a VIP-only task. */
         public boolean isVipOnly() { return vipOnly; }

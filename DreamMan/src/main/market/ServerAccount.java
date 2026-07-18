@@ -371,7 +371,7 @@ public class ServerAccount {
         c.setRequestProperty("Accept", "application/json");
         // v1.31: a descriptive UA - Java's default ("Java/21") is exactly the fingerprint
         // Cloudflare's bot rules love to challenge, and a challenge page breaks the client.
-        c.setRequestProperty("User-Agent", "DreamMan/1.50 (DreamBot script)");
+        c.setRequestProperty("User-Agent", "DreamMan/1.51 (DreamBot script)");
         c.setRequestProperty("X-Install-Id", MarketIdentity.installId());
         if (token != null && !token.isEmpty())
             c.setRequestProperty("Authorization", "Bearer " + token);

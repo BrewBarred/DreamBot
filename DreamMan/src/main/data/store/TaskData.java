@@ -31,6 +31,8 @@ public class TaskData {
     public boolean marketReady = false;
     public boolean published = false;
     public boolean downloaded = false;
+    /** v1.51: comma-entered tags (search filters). Absent in old saves. */
+    public java.util.List<String> tags;
     public String name;
     public String description;
     public String status;

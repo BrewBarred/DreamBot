@@ -4,9 +4,9 @@
 *.pkg
 /.idea/
 /icons/
+/out/
+/patches/
 /references/
 /pass
 /past revisions/
-/DreamMan/server.js
-/DreamMan/out/
-/DreamMan/src/resources/
+server.js
