@@ -13,6 +13,7 @@ import java.awt.*;
         version = 1.60,
         category = Category.MISC
 )
+
 public class DreamBot extends DreamBotMan {
     @Override
     public void postResume() {

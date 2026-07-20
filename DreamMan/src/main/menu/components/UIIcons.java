@@ -255,4 +255,78 @@ public final class UIIcons {
         p.closePath();
         return p;
     }
+    /** v1.60: a left/right chevron for the market-ready strip's bounded arrows. */
+    public static Icon chevron(int s, Color c, boolean left) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int midY = s / 2;
+                int x1 = left ? (int) (s * 0.62) : (int) (s * 0.38);
+                int x2 = left ? (int) (s * 0.36) : (int) (s * 0.64);
+                g2.drawLine(x1, (int) (s * 0.24), x2, midY);
+                g2.drawLine(x2, midY, x1, (int) (s * 0.76));
+            }
+        };
+    }
+
+    /** v1.60: the favourite heart (ported from the menu's v1.59 drawnHeart, colour now a param). */
+    public static Icon heart(int s, Color c, boolean filled) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                Path2D.Float h = new Path2D.Float();
+                float w = s, t = s;
+                h.moveTo(w / 2f, t * 0.86f);
+                h.curveTo(-w * 0.18f, t * 0.42f, w * 0.16f, -t * 0.14f, w / 2f, t * 0.28f);
+                h.curveTo(w * 0.84f, -t * 0.14f, w * 1.18f, t * 0.42f, w / 2f, t * 0.86f);
+                h.closePath();
+                if (filled) g2.fill(h);
+                else { g2.setStroke(new BasicStroke(Math.max(1.2f, s / 11f))); g2.draw(h); }
+            }
+        };
+    }
+
+    /** v1.60: a speech bubble for the per-card comments toggle. */
+    public static Icon comment(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int w = (int) (s * 0.78), h = (int) (s * 0.56);
+                int x = (int) (s * 0.10), y = (int) (s * 0.12);
+                g2.drawRoundRect(x, y, w, h, s / 3, s / 3);
+                // the tail
+                int tx = x + (int) (w * 0.28);
+                g2.drawLine(tx, y + h, tx - (int) (s * 0.06), y + h + (int) (s * 0.20));
+                g2.drawLine(tx - (int) (s * 0.06), y + h + (int) (s * 0.20), tx + (int) (s * 0.14), y + h);
+            }
+        };
+    }
+
+    /** v1.60: a picture placeholder, shown when a listing has no icon (or a broken one). */
+    public static Icon image(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int m = Math.max(1, s / 8);
+                int w = s - m * 2, h = s - m * 2;
+                g2.drawRoundRect(m, m, w, h, s / 6, s / 6);
+                // sun
+                int r = Math.max(2, s / 7);
+                g2.drawOval(m + w / 5, m + h / 5, r, r);
+                // mountains
+                int base = m + (int) (h * 0.82);
+                g2.drawLine(m + (int) (w * 0.12), base, m + (int) (w * 0.42), m + (int) (h * 0.45));
+                g2.drawLine(m + (int) (w * 0.42), m + (int) (h * 0.45), m + (int) (w * 0.62), base);
+                g2.drawLine(m + (int) (w * 0.55), base, m + (int) (w * 0.74), m + (int) (h * 0.58));
+                g2.drawLine(m + (int) (w * 0.74), m + (int) (h * 0.58), m + (int) (w * 0.90), base);
+            }
+        };
+    }
+
+    /** v1.60: a small x, for the strip card's "remove from market-ready" button. */
+    public static Icon cross(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int a = (int) (s * 0.26), b = (int) (s * 0.74);
+                g2.drawLine(a, a, b, b);
+                g2.drawLine(b, a, a, b);
+            }
+        };
+    }
 }

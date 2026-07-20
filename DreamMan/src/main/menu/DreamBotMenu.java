@@ -201,20 +201,44 @@ public class DreamBotMenu extends JFrame {
     private boolean rememberTrackers = false;
     private JCheckBox rememberTrackersCheck;
 
-    // ── Patch B.11: the script market ──
+    // ── Patch B.11: the script market (v1.60: rebuilt as a card grid) ──
     private main.market.ScriptRepository marketRepo;
-    private final DefaultListModel<main.market.ScriptListing> modelMarket = new DefaultListModel<>();
-    private final JList<main.market.ScriptListing> listMarket = new JList<>(modelMarket);
     private JButton btnMyUploads;   // v1.32b: hidden unless the server market is active
-    // v1.49: inline comments panel (folded in from the old pop-up)
-    private JTextField inlineCommentInput;
-    private JButton inlineCommentPost;
-    private String expandedCommentsId;   // v1.50: the row whose comments are open (one at a time)
+    private String expandedCommentsId;   // v1.50: the card whose comments are open (one at a time)
     private final java.util.Map<String, String> marketCommentsCache = new java.util.HashMap<>();
     private final List<main.market.ScriptListing> marketAll = new ArrayList<>();
     private JTextField marketSearchField;
-    private JComboBox<String> marketSortCombo;
     private JLabel lblMarketSource;
+    // v1.60: the TOP GRID - everyone's published scripts as real card components (no more JList
+    // renderer + hit-testing maths; each star/heart/button is a live component of its own).
+    private JPanel marketGridPanel;
+    private JScrollPane marketGridScroll;
+    private final java.util.Map<String, main.menu.components.MarketCard> marketCardById =
+            new java.util.HashMap<>();
+    private String marketSort = "Top rated";
+    private static final String[] MARKET_SORTS = {"Top rated", "Most downloaded", "Newest",
+            "A-Z", "Version (highest)", "Version (lowest)"};
+    private boolean fltHideVip, fltHideFree, fltLovedOnly;
+    /** Roadmap default: only the highest version of each name+author shows. Coexistence of two
+     *  versions stays possible - untick the filter to see every version side by side. */
+    private boolean fltHideOlder = true;
+    private final java.util.Set<String> fltTags =
+            new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+    private JButton btnMarketSort, btnMarketFilter;
+    private static final Color MARKET_ICON_GOLD = new Color(212, 175, 55);
+    // v1.60: the BOTTOM STRIP - your own market-ready staging, one bounded row of cards.
+    private JPanel readyCardsPanel;
+    private JLabel readySortLabel, readyCountLabel;
+    private JButton readyPrev, readyNext;
+    private int readyStart = 0;
+    private boolean readySortAZ = false;   // false = newest first (the default)
+    private final List<main.market.ScriptListing> readyAll = new ArrayList<>();
+    private static final int READY_VISIBLE = 3;
+    // v1.60: listing icons - the picker's cap mirrors the server's, and the resize link is the
+    // exact one the roadmap asks the upload dialog to carry.
+    private static final String ILOVEIMG_RESIZE_URL =
+            "https://www.iloveimg.com/resize-image#resize-options,pixels";
+    private static final int LISTING_ICON_MAX_BYTES = 300 * 1024;
     private JComboBox<String> libraryFilterCombo;
     /** Patch B.15: explicit "hide VIP tasks" toggle (default on for non-VIP). */
     private JCheckBox libraryHideVipCheck;
@@ -2165,7 +2189,8 @@ public class DreamBotMenu extends JFrame {
         btnTaskLibraryImport.addActionListener(e -> importTaskFromFile(btnTaskLibraryImport));
 
         // v1.33: stage the selected library task to the LOCAL market (market-ready), without
-        // removing it from the library. From there it shows in the market's Local view and can
+        // removing it from the library. From there it shows in the market-ready row at the
+        // bottom of the Market tab (v1.60) and can
         // be uploaded to the server.
         JButton btnMarketReady = createButton("\u2191 Market-ready", new Color(25, 60, 75), null);
         btnMarketReady.setToolTipText("Copy the selected task to your local market so you can "
@@ -3026,8 +3051,6 @@ public class DreamBotMenu extends JFrame {
     private java.io.File marketFolder;
     /** v1.32b: the local market folder, ALWAYS loaded alongside the server (merged view). */
     private main.market.FolderRepository localMarketRepo;
-    /** v1.32b: All / On server / Local only. */
-    private JComboBox<String> marketSourceCombo;
 
     /**
      * v1.33: the default local market folder lives under the sanctioned script dir
@@ -3092,49 +3115,34 @@ public class DreamBotMenu extends JFrame {
             }
         });
 
-        // ── filter + sort as icon toggles/menus with tooltips ──
-        marketSortCombo = new JComboBox<>(new String[]{"Top rated", "Newest", "Most downloaded", "A-Z"});
-        marketSortCombo.addActionListener(e -> refilterMarket());
-        // v1.32b: the three views (replaces the confusing "All/On server/Local only")
-        marketSourceCombo = new JComboBox<>(new String[]{"Live market", "My uploads", "Local", "All", "Loved"});
-        marketSourceCombo.setToolTipText("<html><b>Live market</b> - other people's public scripts "
-                + "(rate &amp; comment here).<br><b>My uploads</b> - your scripts that are on the "
-                + "server.<br><b>Local</b> - your local/market-ready staging.<br><b>All</b> - "
-                + "everything.</html>");
-        marketSourceCombo.addActionListener(e -> {
-            refilterMarket();
-            updateMarketButtons();
-            updateMarketViewDesc();    // v1.49: clear per-view description
-            refreshMyUploadsQuota();   // v1.49: show per-kind quota inline in My uploads view
-        });
-        JButton btnSortIcon = iconButton(main.menu.components.UIIcons.sort(20, ic),
-                "Sort the list", null);
-        btnSortIcon.addActionListener(e -> {
-            JPopupMenu m = new JPopupMenu();
-            for (String opt : new String[]{"Top rated", "Newest", "Most downloaded", "A-Z"}) {
-                JMenuItem mi = new JMenuItem(opt);
-                mi.addActionListener(a -> { marketSortCombo.setSelectedItem(opt); refilterMarket(); });
-                m.add(mi);
-            }
-            m.show(btnSortIcon, 0, btnSortIcon.getHeight());
-        });
+        // ── v1.60: sort + filter over the CARD GRID, as popup menus behind two icons. The old
+        // view dropdown (Live market / My uploads / Local / All / Loved) is gone: Local is now
+        // the permanent strip at the bottom, Loved is a filter, and My uploads keeps its own
+        // manager dialog behind the header button.
+        btnMarketSort = iconButton(main.menu.components.UIIcons.sort(20, ic),
+                sortTooltip(), null);
+        btnMarketSort.addActionListener(e -> showSortMenu());
+        btnMarketFilter = iconButton(main.menu.components.UIIcons.filter(20, ic),
+                filterTooltip(), null);
+        btnMarketFilter.addActionListener(e -> showFilterMenu());
 
         // ── search field ──
         marketSearchField = new JTextField();
         marketSearchField.setToolTipText("Search by name, author, description or tag");
         marketSearchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            public void insertUpdate(javax.swing.event.DocumentEvent e) { refilterMarket(); }
-            public void removeUpdate(javax.swing.event.DocumentEvent e) { refilterMarket(); }
-            public void changedUpdate(javax.swing.event.DocumentEvent e) { refilterMarket(); }
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { refreshMarketGrid(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { refreshMarketGrid(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { refreshMarketGrid(); }
         });
 
-        // ── top-right action icons: refresh + import ──
+        // ── top-right actions: refresh + My uploads (import is per-card now) ──
         JButton btnRefresh = iconButton(main.menu.components.UIIcons.refresh(20, ic),
-                "Refresh the list", this::reloadMarket);
-        JButton btnImport = iconButton(main.menu.components.UIIcons.importIcon(20, ic),
-                "Import the selected script into your library", () -> importFromMarket(listMarket));
+                "Refresh the market", this::reloadMarket);
+        btnMyUploads = createButton("My uploads\u2026", new Color(40, 55, 40), null);
+        btnMyUploads.setToolTipText("View and manage the scripts you've uploaded (rename, delete, quota)");
+        btnMyUploads.addActionListener(e -> openMyUploads());
 
-        // header row: [folder|server] [sort] [search .......] [refresh] [import]
+        // header row: [folder|server] [sort] [filter] [search .......] [refresh] [My uploads]
         JPanel head = new JPanel(new BorderLayout(6, 4));
         head.setOpaque(false);
 
@@ -3143,15 +3151,13 @@ public class DreamBotMenu extends JFrame {
         left.add(btnFolderSource);
         left.add(btnServerSource);
         left.add(Box.createHorizontalStrut(8));
-        left.add(btnSortIcon);
-        left.add(Box.createHorizontalStrut(8));
-        marketSourceCombo.setPreferredSize(new Dimension(104, 24));
-        left.add(marketSourceCombo);   // v1.32b: All / On server / Local only
+        left.add(btnMarketSort);
+        left.add(btnMarketFilter);
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         right.setOpaque(false);
         right.add(btnRefresh);
-        right.add(btnImport);
+        right.add(btnMyUploads);
 
         JPanel searchWrap = new JPanel(new BorderLayout(4, 0));
         searchWrap.setOpaque(false);
@@ -3171,103 +3177,401 @@ public class DreamBotMenu extends JFrame {
         head.add(topRow, BorderLayout.NORTH);
         head.add(lblMarketSource, BorderLayout.SOUTH);
 
-        // ── the listings, with per-row stars + publish ──
-        marketCardRenderer = new MarketCardRenderer();
-        listMarket.setCellRenderer(marketCardRenderer);
-        listMarket.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        listMarket.setBackground(BG_BASE);
-        // clicking a row's star strip rates it; the renderer itself does the hit-testing so the
-        // clickable zones always line up with the drawn stars (Patch B.17)
-        listMarket.addMouseListener(new MouseAdapter() {
-            @Override public void mouseClicked(MouseEvent me) {
-                handleMarketRowClick(me);
-            }
-            @Override public void mouseExited(MouseEvent me) {
-                setMarketHover(-1, -1);
-            }
-        });
-        listMarket.addMouseMotionListener(new MouseAdapter() {
-            @Override public void mouseMoved(MouseEvent me) {
-                int idx = listMarket.locationToIndex(me.getPoint());
-                int star = -1;
-                if (idx >= 0) {
-                    Rectangle b = listMarket.getCellBounds(idx, idx);
-                    if (b != null && b.contains(me.getPoint())) {
-                        marketCardRenderer.getListCellRendererComponent(
-                                listMarket, modelMarket.getElementAt(idx), idx, false, false);
-                        star = marketCardRenderer.starAt(
-                                new Point(me.getX() - b.x, me.getY() - b.y), b);
-                    } else idx = -1;
-                }
-                setMarketHover(idx, star);
-                listMarket.setCursor(Cursor.getPredefinedCursor(
-                        star > 0 ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
-            }
-        });
-        JScrollPane scroll = Theme.thinScrollbars(new JScrollPane(listMarket));
-        scroll.setBorder(BorderFactory.createLineBorder(COLOR_BORDER_DIM));
+        // ── v1.60 TOP: everyone's published scripts as a wrapping CARD GRID. Real components,
+        // not a renderer: every star, heart and button is live, and comments expand inside the
+        // card itself (the v1.50 accordion carries forward - one open at a time).
+        marketGridPanel = new JPanel(new main.menu.components.WrapLayout(FlowLayout.LEFT, 10, 10));
+        marketGridPanel.setOpaque(false);
+        marketGridScroll = Theme.thinScrollbars(new JScrollPane(marketGridPanel,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER));
+        marketGridScroll.setBorder(BorderFactory.createLineBorder(COLOR_BORDER_DIM));
+        marketGridScroll.getVerticalScrollBar().setUnitIncrement(24);
+        marketGridScroll.getViewport().setBackground(BG_BASE);
 
-        // ── bottom: a single "publish current item" control (one script/task/preset at a time) ──
+        // ── v1.60 BOTTOM: my market-ready staging as one bounded row of compact cards.
+        // [<] and [>] step through them and simply disable at the ends - no wrap-around.
+        JPanel strip = new JPanel(new BorderLayout(0, 4));
+        strip.setOpaque(false);
+        strip.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, COLOR_BORDER_DIM),
+                new EmptyBorder(8, 0, 0, 0)));
+
+        readyCountLabel = new JLabel("MY MARKET-READY");
+        readyCountLabel.setFont(new Font("Consolas", Font.BOLD, 11));
+        readyCountLabel.setForeground(Theme.ACCENT);
+        readySortLabel = new JLabel("newest first \u25be");
+        readySortLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        readySortLabel.setForeground(TEXT_DIM);
+        readySortLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        readySortLabel.setToolTipText("Click to switch between newest-first and A-Z");
+        readySortLabel.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent me) {
+                readySortAZ = !readySortAZ;
+                refreshReadyStrip();
+            }
+        });
+        JPanel stripLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        stripLeft.setOpaque(false);
+        stripLeft.add(readyCountLabel);
+        stripLeft.add(readySortLabel);
+
         JButton btnPublish = createButton("Publish\u2026", new Color(25, 60, 75), null);
         btnPublish.setToolTipText("Publish one of your presets, the current queue, or the selected "
                 + "library task \u2014 pick from the list");
         btnPublish.addActionListener(e -> publishOneItem(btnPublish));
-        JButton btnRemove = createButton("Remove mine", COLOR_BUTTON_RED, null);
-        btnRemove.addActionListener(e -> removeFromMarket(btnRemove));
-        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        bottom.setOpaque(false);
-        bottom.add(btnPublish);
-        btnMyUploads = createButton("My uploads\u2026", new Color(40, 55, 40), null);
-        btnMyUploads.setToolTipText("View and manage the scripts you've uploaded (rename, delete, quota)");
-        btnMyUploads.addActionListener(e -> openMyUploads());
-        bottom.add(btnMyUploads);
-        bottom.add(btnRemove);
-        // v1.50: write-a-comment row - enabled while a row's comments are expanded
-        inlineCommentInput = new JTextField(16);
-        inlineCommentInput.setEnabled(false);
-        inlineCommentInput.setToolTipText("Open [comments] on a script to write one");
-        inlineCommentPost = createButton("Post");
-        inlineCommentPost.setEnabled(false);
-        inlineCommentPost.addActionListener(e -> postInlineComment());
-        bottom.add(inlineCommentInput);
-        bottom.add(inlineCommentPost);
-        JLabel dlHint = new JLabel("   double-click a script to download it");
-        dlHint.setForeground(TEXT_DIM);
-        dlHint.setFont(new Font("Segoe UI", Font.ITALIC, 11));
-        bottom.add(dlHint);
+        JPanel stripRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        stripRight.setOpaque(false);
+        stripRight.add(btnPublish);
+
+        JPanel stripHead = new JPanel(new BorderLayout(8, 0));
+        stripHead.setOpaque(false);
+        stripHead.add(stripLeft, BorderLayout.WEST);
+        stripHead.add(stripRight, BorderLayout.EAST);
+
+        readyPrev = iconButton(main.menu.components.UIIcons.chevron(18, ic, true),
+                "Earlier cards", () -> { readyStart--; refreshReadyStrip(); });
+        readyNext = iconButton(main.menu.components.UIIcons.chevron(18, ic, false),
+                "Later cards", () -> { readyStart++; refreshReadyStrip(); });
+        readyCardsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        readyCardsPanel.setOpaque(false);
+        JPanel stripMid = new JPanel(new BorderLayout(6, 0));
+        stripMid.setOpaque(false);
+        stripMid.add(readyPrev, BorderLayout.WEST);
+        stripMid.add(readyCardsPanel, BorderLayout.CENTER);
+        stripMid.add(readyNext, BorderLayout.EAST);
+
+        strip.add(stripHead, BorderLayout.NORTH);
+        strip.add(stripMid, BorderLayout.CENTER);
 
         panel.add(createSubtitle("Market"), BorderLayout.NORTH);
         JPanel body = new JPanel(new BorderLayout(0, 8));
         body.setOpaque(false);
         body.add(head, BorderLayout.NORTH);
-        // v1.50: comments now expand UNDER each row (click [comments] on a card), so the list
-        // gets the full width back - no side panel, no pop-up.
-        body.add(scroll, BorderLayout.CENTER);
-        body.add(bottom, BorderLayout.SOUTH);
+        body.add(marketGridScroll, BorderLayout.CENTER);
+        body.add(strip, BorderLayout.SOUTH);
         panel.add(body, BorderLayout.CENTER);
 
         reloadMarket();
         return panel;
     }
 
+    /** v1.60: the sort menu over the card grid - one radio per option, roadmap's full set. */
+    private void showSortMenu() {
+        JPopupMenu m = new JPopupMenu();
+        for (String opt : MARKET_SORTS) {
+            JRadioButtonMenuItem mi = new JRadioButtonMenuItem(opt, opt.equals(marketSort));
+            mi.addActionListener(a -> {
+                marketSort = opt;
+                btnMarketSort.setToolTipText(sortTooltip());
+                refreshMarketGrid();
+            });
+            m.add(mi);
+        }
+        m.show(btnMarketSort, 0, btnMarketSort.getHeight());
+    }
+
+    private String sortTooltip() {
+        return "<html><b>Sort</b> \u00b7 " + marketSort + "<br>Top rated is weighted: average "
+                + "first, then how many people rated (v1.59, computed server-side).</html>";
+    }
+
+    /**
+     * v1.60: the filter menu - hide VIP, hide free, loved-only, hide-older-versions (default ON)
+     * and a tag section where any ticked tag matches. Each click applies immediately.
+     */
+    private void showFilterMenu() {
+        JPopupMenu m = new JPopupMenu();
+
+        JCheckBoxMenuItem vip = new JCheckBoxMenuItem("Hide VIP scripts", fltHideVip);
+        vip.addActionListener(a -> { fltHideVip = vip.isSelected(); filtersChanged(); });
+        m.add(vip);
+        JCheckBoxMenuItem free = new JCheckBoxMenuItem("Hide free scripts", fltHideFree);
+        free.addActionListener(a -> { fltHideFree = free.isSelected(); filtersChanged(); });
+        m.add(free);
+        JCheckBoxMenuItem loved = new JCheckBoxMenuItem("Loved only \u2665", fltLovedOnly);
+        loved.setToolTipText("Only the scripts you've hearted");
+        loved.addActionListener(a -> { fltLovedOnly = loved.isSelected(); filtersChanged(); });
+        m.add(loved);
+        JCheckBoxMenuItem older = new JCheckBoxMenuItem("Hide older versions", fltHideOlder);
+        older.setToolTipText("<html>On (the default): only the highest version of each script "
+                + "shows.<br>Two versions of the same script CAN coexist on the market \u2014 "
+                + "untick this to see<br>every version side by side.</html>");
+        older.addActionListener(a -> { fltHideOlder = older.isSelected(); filtersChanged(); });
+        m.add(older);
+
+        m.addSeparator();
+        JMenuItem tagHead = new JMenuItem("Filter by tag \u2014 any ticked tag matches:");
+        tagHead.setEnabled(false);
+        m.add(tagHead);
+        java.util.TreeSet<String> tags = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        for (main.market.ScriptListing l : marketAll)
+            if (l != null && l.tags != null && !"local".equals(l.origin)) tags.addAll(l.tags);
+        if (tags.isEmpty()) {
+            JMenuItem none = new JMenuItem("(no tags on the market yet)");
+            none.setEnabled(false);
+            m.add(none);
+        } else {
+            int shown = 0;
+            for (String tag : tags) {
+                if (++shown > 20) {   // a popup can't scroll; the search field covers the rest
+                    JMenuItem more = new JMenuItem("\u2026and " + (tags.size() - 20)
+                            + " more \u2014 use the search field");
+                    more.setEnabled(false);
+                    m.add(more);
+                    break;
+                }
+                JCheckBoxMenuItem t = new JCheckBoxMenuItem("#" + tag, fltTags.contains(tag));
+                t.addActionListener(a -> {
+                    if (t.isSelected()) fltTags.add(tag); else fltTags.remove(tag);
+                    filtersChanged();
+                });
+                m.add(t);
+            }
+            if (!fltTags.isEmpty()) {
+                m.addSeparator();
+                JMenuItem clear = new JMenuItem("Clear tag filter (" + fltTags.size() + ")");
+                clear.addActionListener(a -> { fltTags.clear(); filtersChanged(); });
+                m.add(clear);
+            }
+        }
+        m.show(btnMarketFilter, 0, btnMarketFilter.getHeight());
+    }
+
+    /** v1.60: re-applies filters and re-tints the funnel gold while any non-default one is on. */
+    private void filtersChanged() {
+        boolean active = fltHideVip || fltHideFree || fltLovedOnly
+                || !fltTags.isEmpty() || !fltHideOlder;
+        btnMarketFilter.setIcon(main.menu.components.UIIcons.filter(20,
+                active ? Theme.ACCENT : MARKET_ICON_GOLD));
+        btnMarketFilter.setToolTipText(filterTooltip());
+        refreshMarketGrid();
+    }
+
+    private String filterTooltip() {
+        List<String> on = new ArrayList<>();
+        if (fltHideVip) on.add("hiding VIP");
+        if (fltHideFree) on.add("hiding free");
+        if (fltLovedOnly) on.add("loved only");
+        if (!fltHideOlder) on.add("showing older versions");
+        if (!fltTags.isEmpty()) on.add("tags: " + String.join(", ", fltTags));
+        return "<html><b>Filter</b>" + (on.isEmpty() ? " \u00b7 none active"
+                : " \u00b7 " + String.join(" \u00b7 ", on))
+                + "<br>Older versions are hidden by default \u2014 two versions of the same "
+                + "script can still coexist.</html>";
+    }
+
+    /** A safe toast/dialog anchor for market actions, whatever built first. */
+    private JComponent marketAnchor() {
+        return marketGridScroll != null ? marketGridScroll : mainTabs;
+    }
+
+    /**
+     * v1.60: rebuilds the card GRID from marketAll + the active search, filters and sort. The
+     * open-comments card and the scroll position both survive a rebuild, so rating or hearting
+     * something doesn't yank the view around.
+     */
+    private void refreshMarketGrid() {
+        if (marketGridPanel == null) return;
+        String q = marketSearchField == null ? ""
+                : marketSearchField.getText().trim().toLowerCase();
+
+        List<main.market.ScriptListing> view = new ArrayList<>();
+        for (main.market.ScriptListing l : marketAll) {
+            if (l == null || "local".equals(l.origin)) continue;   // staging lives in the strip
+            if (fltHideVip && l.vipOnly) continue;
+            if (fltHideFree && !l.vipOnly) continue;
+            if (fltLovedOnly && !l.myFavorite) continue;
+            if (!fltTags.isEmpty()) {
+                boolean hit = false;
+                if (l.tags != null)
+                    for (String t : l.tags) if (fltTags.contains(t)) { hit = true; break; }
+                if (!hit) continue;
+            }
+            if (!q.isEmpty()) {
+                String hay = (l.name + " " + l.author + " " + l.description + " "
+                        + (l.tags == null ? "" : String.join(" ", l.tags))).toLowerCase();
+                if (!hay.contains(q)) continue;
+            }
+            view.add(l);
+        }
+
+        if (fltHideOlder) {
+            // keep only the highest version per author+name. The server allows versions to
+            // coexist (1.4.0 version-integrity); this is purely a view default.
+            java.util.Map<String, main.market.ScriptListing> best = new LinkedHashMap<>();
+            for (main.market.ScriptListing l : view) {
+                String k = (l.author + "\u0000" + l.name).toLowerCase();
+                main.market.ScriptListing b = best.get(k);
+                if (b == null || l.version > b.version) best.put(k, l);
+            }
+            view = new ArrayList<>(best.values());
+        }
+
+        switch (marketSort) {
+            case "Most downloaded":
+                view.sort((a, b) -> Integer.compare(b.downloads, a.downloads)); break;
+            case "Newest":
+                view.sort((a, b) -> Long.compare(b.publishedAt, a.publishedAt)); break;
+            case "A-Z":
+                view.sort(Comparator.comparing(l -> l.name == null ? "" : l.name.toLowerCase()));
+                break;
+            case "Version (highest)":
+                view.sort((a, b) -> Double.compare(b.version, a.version)); break;
+            case "Version (lowest)":
+                view.sort(Comparator.comparingDouble(l -> l.version)); break;
+            default:   // "Top rated" - weighted: average first, then how many rated (v1.59)
+                view.sort((a, b) -> {
+                    int byAvg = Double.compare(b.avgRating, a.avgRating);
+                    if (byAvg != 0) return byAvg;
+                    return Integer.compare(b.ratingCount, a.ratingCount);
+                });
+        }
+        // v1.59: loved cards float to the top of whichever sort is active (stable sort)
+        view.sort(Comparator.comparingInt(l -> l.myFavorite ? 0 : 1));
+
+        int scroll = marketGridScroll == null ? 0
+                : marketGridScroll.getVerticalScrollBar().getValue();
+        marketGridPanel.removeAll();
+        marketCardById.clear();
+        if (view.isEmpty()) {
+            JLabel empty = new JLabel(marketAll.isEmpty()
+                    ? "Nothing here yet \u2014 hit refresh, or publish something below."
+                    : "No scripts match the search/filters.");
+            empty.setForeground(TEXT_DIM);
+            empty.setFont(new Font("Segoe UI", Font.ITALIC, 12));
+            empty.setBorder(new EmptyBorder(18, 8, 18, 8));
+            marketGridPanel.add(empty);
+        }
+        for (main.market.ScriptListing l : view) {
+            main.menu.components.MarketCard card = new main.menu.components.MarketCard(
+                    l, main.menu.components.MarketCard.Mode.GRID, cardCallbacks);
+            if (l.id != null) marketCardById.put(l.id, card);
+            if (l.id != null && l.id.equals(expandedCommentsId)) {
+                card.setCommentsExpanded(true);
+                card.setCommentsText(marketCommentsCache.getOrDefault(l.id, "Loading comments\u2026"));
+                if (!marketCommentsCache.containsKey(l.id)) fetchCommentsInto(l.id);
+            }
+            marketGridPanel.add(card);
+        }
+        marketGridPanel.revalidate();
+        marketGridPanel.repaint();
+        final int keep = scroll;
+        SwingUtilities.invokeLater(() ->
+                marketGridScroll.getVerticalScrollBar().setValue(keep));
+    }
+
+    /**
+     * v1.60: rebuilds the market-ready STRIP - your local staging as compact cards, newest first
+     * (click the label to switch to A-Z), stepped through with bounded [<] [>] arrows.
+     */
+    private void refreshReadyStrip() {
+        if (readyCardsPanel == null) return;
+        readyAll.clear();
+        for (main.market.ScriptListing l : marketAll)
+            if (l != null && "local".equals(l.origin)) readyAll.add(l);
+        if (readySortAZ)
+            readyAll.sort(Comparator.comparing(l -> l.name == null ? "" : l.name.toLowerCase()));
+        else
+            readyAll.sort((a, b) -> Long.compare(b.publishedAt, a.publishedAt));
+
+        readyStart = Math.max(0, Math.min(readyStart, readyAll.size() - READY_VISIBLE));
+        if (readyAll.size() <= READY_VISIBLE) readyStart = 0;
+
+        readyCardsPanel.removeAll();
+        if (readyAll.isEmpty()) {
+            JLabel hint = new JLabel("Nothing staged \u2014 use the Library's "
+                    + "\"\u2191 Market-ready\" button, then publish from here.");
+            hint.setForeground(TEXT_DIM);
+            hint.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+            hint.setBorder(new EmptyBorder(10, 4, 10, 4));
+            readyCardsPanel.add(hint);
+        } else {
+            int end = Math.min(readyAll.size(), readyStart + READY_VISIBLE);
+            for (int i = readyStart; i < end; i++)
+                readyCardsPanel.add(new main.menu.components.MarketCard(readyAll.get(i),
+                        main.menu.components.MarketCard.Mode.STRIP, cardCallbacks));
+        }
+        readyPrev.setEnabled(readyStart > 0);
+        readyNext.setEnabled(readyStart + READY_VISIBLE < readyAll.size());
+        readyCountLabel.setText("MY MARKET-READY \u00b7 " + readyAll.size()
+                + (readyAll.size() == 1 ? " item" : " items"));
+        readySortLabel.setText(readySortAZ ? "A-Z \u25be" : "newest first \u25be");
+        readyCardsPanel.revalidate();
+        readyCardsPanel.repaint();
+    }
+
+    /** v1.60: everything a card can ask the menu to do - one shared wiring for grid + strip. */
+    private final main.menu.components.MarketCard.Callbacks cardCallbacks =
+            new main.menu.components.MarketCard.Callbacks() {
+        @Override public void onDownload(main.market.ScriptListing l) {
+            importListing(l, marketAnchor());
+        }
+        @Override public void onPublish(main.market.ScriptListing l) {
+            uploadLocalListing(l);
+        }
+        @Override public void onUnpublish(main.market.ScriptListing l, JComponent src) {
+            unpublishListing(l, src);
+        }
+        @Override public void onRate(main.market.ScriptListing l, int stars) {
+            rateListing(l, stars);
+        }
+        @Override public void onToggleFavorite(main.market.ScriptListing l) {
+            toggleFavorite(l);
+        }
+        @Override public void onToggleComments(main.market.ScriptListing l,
+                                               main.menu.components.MarketCard card) {
+            toggleCardComments(l);
+        }
+        @Override public void onPostComment(main.market.ScriptListing l, String body,
+                                            main.menu.components.MarketCard card) {
+            postCardComment(l, body, card);
+        }
+        @Override public void onSetIcon(main.market.ScriptListing l) {
+            chooseIconForLocal(l);
+        }
+        @Override public void onDeleteLocal(main.market.ScriptListing l) {
+            deleteLocalListing(l);
+        }
+        @Override public void onContextMenu(main.market.ScriptListing l, MouseEvent e,
+                                            JComponent src) {
+            showMarketRowMenu(l, e, src);
+        }
+        @Override public boolean isOwn(main.market.ScriptListing l) {
+            return isOwnListing(l);
+        }
+        @Override public boolean canRate(main.market.ScriptListing l) {
+            // published rows only (server or shared folder), never your own listing
+            return l != null && !"local".equals(l.origin) && !isOwnListing(l);
+        }
+        @Override public boolean canComment(main.market.ScriptListing l) {
+            return l != null && "server".equals(l.origin)
+                    && marketRepo instanceof main.market.HttpRepository
+                    && main.market.ServerAccount.isLoggedIn();
+        }
+    };
+
     /** v1.50: expand/collapse a row's comments (one row at a time, accordion-style). */
-    private void toggleRowComments(main.market.ScriptListing l) {
+    private void toggleCardComments(main.market.ScriptListing l) {
         if (l == null || l.id == null || !"server".equals(l.origin)) return;
         String prev = expandedCommentsId;
         expandedCommentsId = l.id.equals(prev) ? null : l.id;
-        // poke the affected rows so the JList recomputes their heights
-        for (int i = 0; i < modelMarket.size(); i++) {
-            main.market.ScriptListing e = modelMarket.get(i);
-            if (e == null || e.id == null) continue;
-            if (e.id.equals(l.id) || e.id.equals(prev)) modelMarket.setElementAt(e, i);
+        // v1.60: cards are live components, so we just flip them - no row-poking
+        if (prev != null) {
+            main.menu.components.MarketCard was = marketCardById.get(prev);
+            if (was != null) was.setCommentsExpanded(false);
         }
-        boolean canPost = expandedCommentsId != null
-                && marketRepo instanceof main.market.HttpRepository
-                && main.market.ServerAccount.isLoggedIn();
-        if (inlineCommentInput != null) inlineCommentInput.setEnabled(canPost);
-        if (inlineCommentPost != null) inlineCommentPost.setEnabled(canPost);
-        if (expandedCommentsId != null && !marketCommentsCache.containsKey(l.id))
-            fetchCommentsInto(l.id);
+        if (expandedCommentsId != null) {
+            main.menu.components.MarketCard now = marketCardById.get(expandedCommentsId);
+            if (now != null) {
+                now.setCommentsExpanded(true);
+                now.setCommentsText(marketCommentsCache.getOrDefault(l.id, "Loading comments\u2026"));
+            }
+            if (!marketCommentsCache.containsKey(l.id)) fetchCommentsInto(l.id);
+        }
+        if (marketGridPanel != null) {
+            marketGridPanel.revalidate();
+            marketGridPanel.repaint();
+        }
     }
 
     /** Loads a script's comment thread into the cache, then refreshes its row. */
@@ -3295,64 +3599,89 @@ public class DreamBotMenu extends JFrame {
             final String out = text;
             SwingUtilities.invokeLater(() -> {
                 marketCommentsCache.put(id, out);
-                for (int i = 0; i < modelMarket.size(); i++) {
-                    main.market.ScriptListing e = modelMarket.get(i);
-                    if (e != null && id.equals(e.id)) { modelMarket.setElementAt(e, i); break; }
-                }
+                // v1.60: hand the text straight to the card, if it's still the open one
+                main.menu.components.MarketCard card = marketCardById.get(id);
+                if (card != null && id.equals(expandedCommentsId)) card.setCommentsText(out);
             });
         }, "DreamMan-RowComments").start();
     }
 
-    private void postInlineComment() {
-        final String id = expandedCommentsId;
-        if (id == null || !(marketRepo instanceof main.market.HttpRepository)) return;
-        String body = inlineCommentInput.getText().trim();
-        if (body.isEmpty()) return;
-        if (!main.market.ServerAccount.isLoggedIn()) { showToast("Log in to comment", inlineCommentPost, false); return; }
+    /** v1.60: posts a comment from a card's own input row (each expanded card has one). */
+    private void postCardComment(main.market.ScriptListing l, String body,
+                                 main.menu.components.MarketCard card) {
+        if (l == null || l.id == null || body == null || body.trim().isEmpty()) return;
+        if (!(marketRepo instanceof main.market.HttpRepository)) return;
+        if (!main.market.ServerAccount.isLoggedIn()) {
+            showToast("Log in to comment", card, false);
+            return;
+        }
+        final String id = l.id;
+        final String text = body.trim();
         final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
-        inlineCommentInput.setText("");
         new Thread(() -> {
             try {
-                repo.addComment(id, body);
+                repo.addComment(id, text);
                 marketCommentsCache.remove(id);   // stale - refetch with the new comment
                 SwingUtilities.invokeLater(() -> fetchCommentsInto(id));
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() ->
-                        showToast("Comment failed: " + ex.getMessage(), inlineCommentPost, false));
+                        showToast("Comment failed: " + ex.getMessage(), card, false));
             }
         }, "DreamMan-PostComment").start();
     }
 
     /** v1.32b: the per-row market menu - actions depend on where the row lives and whose it is. */
-    private void showMarketRowMenu(main.market.ScriptListing l, MouseEvent me) {
+    /** v1.60: the per-CARD market menu - actions depend on where the listing lives and whose it is. */
+    private void showMarketRowMenu(main.market.ScriptListing l, MouseEvent me, JComponent src) {
         if (l == null) return;
         JPopupMenu menu = new JPopupMenu();
 
         JMenuItem miImport = new JMenuItem("Download / import into library");
-        miImport.addActionListener(a -> importFromMarket(listMarket));
+        miImport.addActionListener(a -> importListing(l, src));
         menu.add(miImport);
 
         if ("local".equals(l.origin)) {
             JMenuItem miUpload = new JMenuItem("Upload to server\u2026");
             miUpload.addActionListener(a -> uploadLocalListing(l));
             menu.add(miUpload);
+            JMenuItem miIcon = new JMenuItem("Set icon\u2026");
+            miIcon.addActionListener(a -> chooseIconForLocal(l));
+            menu.add(miIcon);
+            if (l.icon != null && !l.icon.isEmpty()) {
+                JMenuItem miNoIcon = new JMenuItem("Remove icon");
+                miNoIcon.addActionListener(a -> {
+                    l.icon = null;
+                    try {
+                        localMarketRepo.publish(l);
+                        refreshReadyStrip();
+                    } catch (Exception ex) {
+                        showToast("Couldn't save: " + ex.getMessage(), src, false);
+                    }
+                });
+                menu.add(miNoIcon);
+            }
             JMenuItem miDeleteLocal = new JMenuItem("Delete local copy");
-            miDeleteLocal.addActionListener(a -> {
+            miDeleteLocal.addActionListener(a -> deleteLocalListing(l));
+            menu.add(miDeleteLocal);
+        } else if ("folder".equals(l.origin)) {
+            // v1.60: a shared folder has no logins, so removal is open to anyone with the folder
+            menu.addSeparator();
+            JMenuItem miRemove = new JMenuItem("Remove listing");
+            miRemove.addActionListener(a -> {
                 if (JOptionPane.showConfirmDialog(this,
-                        "Delete the local file for \"" + l.name + "\"?", "Delete local script",
-                        JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION)
-                    return;
+                        "Remove \"" + l.name + "\" from the market?\n\n"
+                                + "A shared folder has no logins, so this deletes it for everyone.",
+                        "Remove listing", JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) return;
                 try {
-                    localMarketRepo.remove(l.id);
+                    marketRepo.remove(l.id);
                     reloadMarket();
-                    showToast("Deleted local copy of \"" + l.name + "\"", listMarket, true);
                 } catch (Exception ex) {
-                    showToast("Couldn't delete: " + ex.getMessage(), listMarket, false);
+                    showToast("Remove failed: " + ex.getMessage(), src, false);
                 }
             });
-            menu.add(miDeleteLocal);
+            menu.add(miRemove);
         } else {
-            // v1.49: comments are now shown INLINE (right-hand panel) - no pop-up menu item.
             if (isOwnListing(l) || main.market.Tier.isAdmin()) {
                 menu.addSeparator();
                 JMenuItem miRename = new JMenuItem("Rename\u2026");
@@ -3366,15 +3695,22 @@ public class DreamBotMenu extends JFrame {
                             SwingUtilities.invokeLater(this::reloadMarket);
                         } catch (Exception ex) {
                             SwingUtilities.invokeLater(() ->
-                                    showToast("Rename failed: " + ex.getMessage(), listMarket, false));
+                                    showToast("Rename failed: " + ex.getMessage(), src, false));
                         }
                     }, "DreamMan-Rename").start();
                 });
                 menu.add(miRename);
+                if (isOwnListing(l)) {
+                    JMenuItem miUnpub = new JMenuItem("Unpublish (back to market-ready)\u2026");
+                    miUnpub.addActionListener(a -> unpublishListing(l, src));
+                    menu.add(miUnpub);
+                }
                 JMenuItem miRemove = new JMenuItem("Remove from server");
                 miRemove.addActionListener(a -> {
                     if (JOptionPane.showConfirmDialog(this,
-                            "Remove \"" + l.name + "\" from the market permanently?",
+                            "Remove \"" + l.name + "\" from the market permanently?\n\n"
+                                    + "Nothing is staged back locally - if you might republish "
+                                    + "it, use Unpublish instead.",
                             "Remove upload", JOptionPane.YES_NO_OPTION,
                             JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) return;
                     new Thread(() -> {
@@ -3383,29 +3719,29 @@ public class DreamBotMenu extends JFrame {
                             SwingUtilities.invokeLater(this::reloadMarket);
                         } catch (Exception ex) {
                             SwingUtilities.invokeLater(() ->
-                                    showToast("Remove failed: " + ex.getMessage(), listMarket, false));
+                                    showToast("Remove failed: " + ex.getMessage(), src, false));
                         }
                     }, "DreamMan-Remove").start();
                 });
                 menu.add(miRemove);
             }
         }
-        menu.show(listMarket, me.getX(), me.getY());
+        menu.show(src, me.getX(), me.getY());
     }
 
     /** v1.32b: pushes a LOCAL script to the server (quota + auth enforced server-side). */
     private void uploadLocalListing(main.market.ScriptListing l) {
         if (!(marketRepo instanceof main.market.HttpRepository)) {
-            showToast("Switch to the server source first (the server icon)", listMarket, false);
+            showToast("Switch to the server source first (the server icon)", marketAnchor(), false);
             return;
         }
         if (!main.market.ServerAccount.isLoggedIn()) {
-            showToast("Log in to upload scripts", listMarket, false);
+            showToast("Log in to upload scripts", marketAnchor(), false);
             return;
         }
         if (!ensureConsent(main.privacy.Consent.MARKET_PUBLISH)) return;
         if (l.bundle == null) {
-            showToast("That local file has no bundle to upload", listMarket, false);
+            showToast("That local file has no bundle to upload", marketAnchor(), false);
             return;
         }
         new Thread(() -> {
@@ -3413,128 +3749,14 @@ public class DreamBotMenu extends JFrame {
                 marketRepo.publish(l);
                 SwingUtilities.invokeLater(() -> {
                     reloadMarket();
-                    showToast("Uploaded \"" + l.name + "\" to the server", listMarket, true);
+                    showToast("Uploaded \"" + l.name + "\" to the server", marketAnchor(), true);
                 });
             } catch (Exception ex) {
-                SwingUtilities.invokeLater(() ->
-                        showToast("Upload failed: " + ex.getMessage(), listMarket, false));
+                // v1.60: 409 (version integrity) and 403 (anti-plagiarism) come back with a real
+                // explanation from the server - show it in full instead of a clipped toast.
+                SwingUtilities.invokeLater(() -> showPublishError(ex, marketAnchor()));
             }
         }, "DreamMan-Upload").start();
-    }
-
-    /** v1.32b: forum comments on a server listing - read them all, add your own. */
-    private void openComments(main.market.ScriptListing l) {
-        if (!(marketRepo instanceof main.market.HttpRepository)) return;
-        final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
-
-        JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(this),
-                "Comments \u2014 " + l.name, java.awt.Dialog.ModalityType.MODELESS);
-        dlg.setSize(520, 420);
-        dlg.setLocationRelativeTo(this);
-        JPanel root = new JPanel(new BorderLayout(0, 8));
-        root.setBorder(new EmptyBorder(12, 12, 12, 12));
-        root.setBackground(BG_BASE);
-
-        JTextArea feed = new JTextArea();
-        feed.setEditable(false);
-        feed.setLineWrap(true);
-        feed.setWrapStyleWord(true);
-        feed.setBackground(new Color(0x1A, 0x1A, 0x1A));
-        feed.setForeground(TEXT_MAIN);
-        feed.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        feed.setText("Loading comments\u2026");
-
-        JTextField input = new JTextField();
-        JButton btnPost = createButton("Post");
-        boolean canPost = main.market.ServerAccount.isLoggedIn();
-        input.setEnabled(canPost);
-        btnPost.setEnabled(canPost);
-        if (!canPost) input.setText("Log in to comment");
-
-        // v1.32b: PAGED - one page (20) per request keeps the menu light; Newer/Older move
-        // through the thread, newest first.
-        final int[] page = {0};
-        final JButton btnNewer = createButton("\u2190 Newer");
-        final JButton btnOlder = createButton("Older \u2192");
-        final JLabel lblPage = new JLabel(" ", SwingConstants.CENTER);
-        lblPage.setForeground(TEXT_DIM);
-        btnNewer.setEnabled(false);
-        btnOlder.setEnabled(false);
-
-        Runnable load = () -> new Thread(() -> {
-            try {
-                main.market.HttpRepository.CommentPage cp = repo.comments(l.id, page[0], 20);
-                StringBuilder sb = new StringBuilder();
-                if (cp.comments.isEmpty())
-                    sb.append(cp.total == 0 ? "No comments yet - be the first." : "(empty page)");
-                java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("d MMM HH:mm");
-                for (main.market.HttpRepository.Comment c : cp.comments)
-                    sb.append(c.author).append("  \u00b7  ")
-                      .append(fmt.format(new java.util.Date(c.at))).append("\n")
-                      .append(c.body).append("\n\n");
-                final String text = sb.toString();
-                final int totalPages = Math.max(1, (int) Math.ceil(cp.total / 20.0));
-                final boolean more = cp.hasMore;
-                SwingUtilities.invokeLater(() -> {
-                    feed.setText(text);
-                    feed.setCaretPosition(0);
-                    lblPage.setText("page " + (page[0] + 1) + " of " + totalPages
-                            + "  (" + cp.total + " total)");
-                    btnNewer.setEnabled(page[0] > 0);
-                    btnOlder.setEnabled(more);
-                });
-            } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> feed.setText("Couldn't load comments: " + ex.getMessage()));
-            }
-        }, "DreamMan-Comments").start();
-        btnNewer.addActionListener(a -> { if (page[0] > 0) { page[0]--; load.run(); } });
-        btnOlder.addActionListener(a -> { page[0]++; load.run(); });
-
-        Runnable post = () -> {
-            String body = input.getText().trim();
-            if (body.isEmpty()) return;
-            btnPost.setEnabled(false);
-            new Thread(() -> {
-                try {
-                    repo.addComment(l.id, body);
-                    SwingUtilities.invokeLater(() -> {
-                        input.setText("");
-                        btnPost.setEnabled(true);
-                        page[0] = 0;   // a new post is on the newest page
-                        load.run();
-                    });
-                } catch (Exception ex) {
-                    SwingUtilities.invokeLater(() -> {
-                        btnPost.setEnabled(true);
-                        showToast("Couldn't post: " + ex.getMessage(), root, false);
-                    });
-                }
-            }, "DreamMan-PostComment").start();
-        };
-        btnPost.addActionListener(a -> post.run());
-        input.addActionListener(a -> post.run());
-
-        JPanel pager = new JPanel(new BorderLayout(6, 0));
-        pager.setOpaque(false);
-        pager.add(btnNewer, BorderLayout.WEST);
-        pager.add(lblPage, BorderLayout.CENTER);
-        pager.add(btnOlder, BorderLayout.EAST);
-
-        JPanel postRow = new JPanel(new BorderLayout(6, 0));
-        postRow.setOpaque(false);
-        postRow.add(input, BorderLayout.CENTER);
-        postRow.add(btnPost, BorderLayout.EAST);
-
-        JPanel bottom = new JPanel(new GridLayout(2, 1, 0, 6));
-        bottom.setOpaque(false);
-        bottom.add(pager);
-        bottom.add(postRow);
-
-        root.add(Theme.thinScrollbars(new JScrollPane(feed)), BorderLayout.CENTER);
-        root.add(bottom, BorderLayout.SOUTH);
-        dlg.setContentPane(root);
-        load.run();
-        dlg.setVisible(true);
     }
 
     /**
@@ -3544,11 +3766,11 @@ public class DreamBotMenu extends JFrame {
      */
     private void openMyUploads() {
         if (!(marketRepo instanceof main.market.HttpRepository)) {
-            showToast("My uploads needs the server market (not a local folder)", listMarket, false);
+            showToast("My uploads needs the server market (not a local folder)", marketAnchor(), false);
             return;
         }
         if (!main.market.ServerAccount.isLoggedIn()) {
-            showToast("Log in to see your uploads", listMarket, false);
+            showToast("Log in to see your uploads", marketAnchor(), false);
             return;
         }
         final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
@@ -3663,110 +3885,64 @@ public class DreamBotMenu extends JFrame {
         if (marketRepo instanceof main.market.HttpRepository
                 && !main.privacy.Consent.has(main.privacy.Consent.MARKET_BROWSE)) {
             lblMarketSource.setText("Not connected - you haven't agreed to send anything yet.");
-            modelMarket.clear();
             marketAll.clear();
+            refreshMarketGrid();
+            refreshReadyStrip();
             return;
         }
         final main.market.ScriptRepository repo = marketRepo;
         setStatus("Loading market...");
         new Thread(() -> {
-            // ── v1.32b: MERGED view ──────────────────────────────────────────
-            // The market always shows your LOCAL scripts alongside the SERVER's. Server rows are
-            // tagged with an upload badge (live stats, comments); local rows are yours-only until
-            // you right-click -> Upload. A local script that's already on the server (same name,
-            // authored by you) is shown ONCE - as the server copy, since that's the one with
-            // stats - so uploading doesn't duplicate the row.
-            List<main.market.ScriptListing> server = new ArrayList<>();
+            // ── v1.60: the tab is split visually (grid above, staging strip below) but stays ONE
+            // merged load. Published rows - the server's, or the shared folder's in folder mode -
+            // get origin "server"/"folder" and fill the grid; your staging gets origin "local"
+            // and fills the strip. A staged copy that's already published is shown once, as the
+            // published card (that's the one with stats), so uploading never duplicates a card:
+            //   \u00b7 same id            -> folder mode pointing at the default staging folder
+            //   \u00b7 same name + author -> your server upload of a staged script
+            List<main.market.ScriptListing> published = new ArrayList<>();
             List<main.market.ScriptListing> local = new ArrayList<>();
-            if (repo instanceof main.market.HttpRepository) {
-                server = repo.list();
-                if (localMarketRepo != null) local = localMarketRepo.list();
-            } else {
-                local = repo.list();
-            }
-            for (main.market.ScriptListing l : server) if (l != null) l.origin = "server";
+            published = repo.list();
+            if (localMarketRepo != null) local = localMarketRepo.list();
+            final boolean serverMode = repo instanceof main.market.HttpRepository;
+            for (main.market.ScriptListing l : published)
+                if (l != null) l.origin = serverMode ? "server" : "folder";
             String me = main.market.ServerAccount.session().username;
-            List<main.market.ScriptListing> merged = new ArrayList<>(server);
+            List<main.market.ScriptListing> merged = new ArrayList<>(published);
             for (main.market.ScriptListing l : local) {
                 if (l == null) continue;
                 l.origin = "local";
-                boolean uploadedAlready = false;
-                for (main.market.ScriptListing s : server)
-                    if (s != null && s.name != null && s.name.equalsIgnoreCase(l.name)
+                boolean shownAlready = false;
+                for (main.market.ScriptListing s : published) {
+                    if (s == null) continue;
+                    if (s.id != null && s.id.equals(l.id)) { shownAlready = true; break; }
+                    if (s.name != null && s.name.equalsIgnoreCase(l.name)
                             && me != null && !me.isEmpty() && me.equalsIgnoreCase(s.author)) {
-                        uploadedAlready = true;
+                        shownAlready = true;
                         break;
                     }
-                if (!uploadedAlready) merged.add(l);
+                }
+                if (!shownAlready) merged.add(l);
             }
             final List<main.market.ScriptListing> found = merged;
-            final int nServer = server.size(), nLocal = found.size() - server.size();
-            final boolean serverMode = repo instanceof main.market.HttpRepository;
+            final int nPublished = published.size(), nLocal = found.size() - published.size();
             SwingUtilities.invokeLater(() -> {
                 marketAll.clear();
                 marketAll.addAll(found);
                 if (serverMode) {
-                    lblMarketSource.setText(repo.describe() + "  \u00b7  " + nServer
-                            + " on server, " + nLocal + " local"
-                            + (nServer == 0 ? "  \u00b7  (server empty or unreachable)" : ""));
+                    lblMarketSource.setText(repo.describe() + "  \u00b7  " + nPublished
+                            + " published, " + nLocal + " market-ready"
+                            + (nPublished == 0 ? "  \u00b7  (server empty or unreachable)" : ""));
                 } else {
-                    lblMarketSource.setText(repo.describe() + "  \u00b7  " + found.size()
-                            + " local script(s)");
+                    lblMarketSource.setText(repo.describe() + "  \u00b7  " + nPublished
+                            + " in the shared folder, " + nLocal + " staged locally");
                 }
-                refilterMarket();
+                refreshMarketGrid();
+                refreshReadyStrip();
                 updateMarketButtons();
                 setStatus(found.isEmpty() ? "Market is empty" : "Market loaded");
             });
         }, "DreamMan-Market").start();
-    }
-
-    /** Applies the search box + sort to the listing view. */
-    private void refilterMarket() {
-        String q = marketSearchField == null ? "" : marketSearchField.getText().trim().toLowerCase();
-        String sort = marketSortCombo == null ? "Top rated" : (String) marketSortCombo.getSelectedItem();
-
-        // v1.32b: three distinct views (your notes) instead of a merged blur:
-        //   Live market - OTHERS' public listings (rate + comment here; never your own)
-        //   My uploads  - YOUR scripts that are on the server
-        //   Local       - YOUR local/market-ready staging (not yet on the server)
-        //   All         - everything, for convenience
-        String src = marketSourceCombo == null ? "Live market"
-                : (String) marketSourceCombo.getSelectedItem();
-        List<main.market.ScriptListing> view = new ArrayList<>();
-        for (main.market.ScriptListing l : marketAll) {
-            if (l == null) continue;
-            boolean onServer = "server".equals(l.origin);
-            boolean own = isOwnListing(l);
-            if ("Live market".equals(src) && !(onServer && !own)) continue;
-            if ("My uploads".equals(src) && !(onServer && own)) continue;
-            if ("Local".equals(src) && !"local".equals(l.origin)) continue;
-            if ("Loved".equals(src) && !(onServer && l.myFavorite)) continue;   // v1.59
-            if (!q.isEmpty()) {
-                String hay = (l.name + " " + l.author + " " + l.description + " "
-                        + String.join(" ", l.tags == null ? List.<String>of() : l.tags))
-                        .toLowerCase();
-                if (!hay.contains(q)) continue;
-            }
-            view.add(l);
-        }
-
-        if ("Newest".equals(sort))
-            view.sort(Comparator.comparingLong((main.market.ScriptListing l) -> l.publishedAt).reversed());
-        else if ("Most downloaded".equals(sort))
-            view.sort(Comparator.comparingInt((main.market.ScriptListing l) -> l.downloads).reversed());
-        else if ("A-Z".equals(sort))
-            view.sort(Comparator.comparing(l -> l.name, String.CASE_INSENSITIVE_ORDER));
-        else   // Top rated: average, then how many people rated it (so 1x5* doesn't beat 50x4.9*)
-            view.sort(Comparator
-                    .comparingDouble((main.market.ScriptListing l) -> l.avgRating)
-                    .thenComparingInt(l -> l.ratingCount)
-                    .reversed());
-
-        // v1.59: loved items float to the top within whichever sort is active (stable)
-        view.sort(Comparator.comparingInt((main.market.ScriptListing l) -> l.myFavorite ? 0 : 1));
-
-        modelMarket.clear();
-        for (main.market.ScriptListing l : view) modelMarket.addElement(l);
     }
 
     /** v1.32b: hide buttons that can't do anything in the current view (your notes). */
@@ -3774,50 +3950,6 @@ public class DreamBotMenu extends JFrame {
         boolean serverMode = marketRepo instanceof main.market.HttpRepository;
         // "My uploads" manager only means something against the server.
         if (btnMyUploads != null) btnMyUploads.setVisible(serverMode);
-    }
-
-    /** v1.49: a plain-language description of the current market view, to kill the confusion. */
-    private void updateMarketViewDesc() {
-        if (lblMarketSource == null || marketSourceCombo == null) return;
-        String src = (String) marketSourceCombo.getSelectedItem();
-        String desc;
-        switch (src == null ? "" : src) {
-            case "Live market":
-                desc = "LIVE MARKET \u2014 everyone's published scripts. Download (green \u2193), rate & comment.";
-                break;
-            case "My uploads":
-                desc = "MY UPLOADS \u2014 your scripts saved on the server (right-click to rename/remove).";
-                break;
-            case "Local":
-                desc = "LOCAL / market-ready \u2014 items staged on THIS device. Click the blue publish \u2191 to upload one.";
-                break;
-            default:
-                desc = "ALL \u2014 everything from every source.";
-                break;
-        }
-        if ("Loved".equals(src))
-            desc = "LOVED \u2014 the scripts you hearted (click the heart on any card).";
-        lblMarketSource.setText(desc);
-    }
-
-    /** v1.49: shows your per-kind upload quota inline (in the header) when in the My-uploads view. */
-    private void refreshMyUploadsQuota() {
-        if (lblMarketSource == null || marketSourceCombo == null) return;
-        if (!(marketRepo instanceof main.market.HttpRepository)) return;
-        if (!"My uploads".equals(marketSourceCombo.getSelectedItem())) return;
-        if (!main.market.ServerAccount.isLoggedIn()) return;
-        final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
-        new Thread(() -> {
-            try {
-                main.market.HttpRepository.MyUploads mine = repo.myScripts();
-                final String q = (mine.usage != null && mine.usage.task != null)
-                        ? "Your uploads \u2014 Tasks: " + mine.usage.task.used + "/" + mine.usage.task.cap
-                          + "  \u00b7  Scripts: " + mine.usage.script.used + "/" + mine.usage.script.cap
-                          + "   (" + mine.tier + " tier)"
-                        : "Your uploads: " + mine.used + " / " + mine.cap + "  (" + mine.tier + " tier)";
-                SwingUtilities.invokeLater(() -> lblMarketSource.setText(q));
-            } catch (Exception ignored) { /* leave the existing label */ }
-        }, "DreamMan-Quota").start();
     }
 
     private JTextArea privacyStatusArea;   // legacy (unused after the v1.32b checkbox redesign)
@@ -4151,200 +4283,15 @@ public class DreamBotMenu extends JFrame {
         return askConsent(purpose);
     }
 
-    /** Card renderer for a market listing: name, author, stars, downloads, what it does. */
-    private class MarketCardRenderer extends JPanel implements ListCellRenderer<main.market.ScriptListing> {
-        private final JLabel name = new JLabel();
-        private final JLabel meta = new JLabel();
-        /** Patch B.17: vector stars - font glyphs (\u2605) rendered as boxes on some systems. */
-        final main.menu.components.StarRating stars = new main.menu.components.StarRating(15, false);
-        private final JLabel starText = new JLabel();
-        private final JLabel dl = new JLabel("", SwingConstants.RIGHT);
-        /** v1.32b: per-row download button (import into library) - no select-then-click dance. */
-        private final JLabel dlButton = new JLabel();
-        /** v1.50: per-row comments - click to expand the thread under this card. */
-        private final JLabel commentsToggle = new JLabel();
-        /** v1.59: the love-heart (drawn - font glyphs are unreliable on the client). */
-        private final JLabel favButton = new JLabel();
-        private final JTextArea commentsBox = new JTextArea();
-        /** The row the mouse is over and the star it's over, driven by the list's listeners. */
-        int hoverRow = -1, hoverStar = -1;
-
-        MarketCardRenderer() {
-            setLayout(new BorderLayout(10, 0));
-            setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(0, 0, 1, 0, COLOR_BORDER_DIM),
-                    new EmptyBorder(9, 12, 9, 12)));
-            name.setFont(new Font("Segoe UI", Font.BOLD, 14));
-            meta.setFont(new Font("Consolas", Font.PLAIN, 11));
-            starText.setFont(new Font("Segoe UI", Font.BOLD, 13));
-            dl.setFont(new Font("Consolas", Font.PLAIN, 11));
-            JPanel left = new JPanel(new GridLayout(2, 1));
-            left.setOpaque(false);
-            left.add(name);
-            left.add(meta);
-            // top-right: the clickable star strip + "4.8 (12)" text beside it
-            JPanel starRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
-            starRow.setOpaque(false);
-            starRow.add(favButton);
-            starRow.add(stars);
-            starRow.add(starText);
-            // bottom-right: downloads count + the per-row download button
-            JPanel dlRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-            dlRow.setOpaque(false);
-            commentsToggle.setFont(new Font("Segoe UI", Font.BOLD, 11));
-            dlRow.add(commentsToggle);
-            dlRow.add(dl);
-            dlRow.add(dlButton);
-            JPanel right = new JPanel(new GridLayout(2, 1));
-            right.setOpaque(false);
-            right.add(starRow);
-            right.add(dlRow);
-            add(left, BorderLayout.CENTER);
-            add(right, BorderLayout.EAST);
-            // v1.50: the expandable comment thread, shown only for the open row
-            commentsBox.setEditable(false);
-            commentsBox.setLineWrap(true);
-            commentsBox.setWrapStyleWord(true);
-            commentsBox.setOpaque(true);
-            commentsBox.setBackground(new Color(0x17, 0x17, 0x17));
-            commentsBox.setForeground(TEXT_MAIN);
-            commentsBox.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-            commentsBox.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(1, 0, 0, 0, COLOR_BORDER_DIM),
-                    new EmptyBorder(8, 14, 8, 14)));
-            add(commentsBox, BorderLayout.SOUTH);
-        }
-
-        @Override
-        public Component getListCellRendererComponent(JList<? extends main.market.ScriptListing> list,
-                main.market.ScriptListing l, int index, boolean selected, boolean focus) {
-            if (l == null) return this;
-            // Patch B.16: VIP-gated listings show a marker and no bundle preview for non-VIP.
-            // (Plain text, not the padlock emoji - that also fell back to a missing-glyph box.)
-            boolean locked = l.vipOnly && (l.bundle == null);
-            // v1.32b: origin badge - server rows get the upload icon, local ones the folder.
-            boolean onServer = !"local".equals(l.origin);
-            name.setIcon(onServer
-                    ? main.menu.components.UIIcons.server(13, new Color(0x5F, 0xB4, 0x66))
-                    : main.menu.components.UIIcons.folder(13, new Color(0xB9, 0xA0, 0x55)));
-            name.setIconTextGap(7);
-            name.setToolTipText(onServer ? "Uploaded - on the server (rate, comment, download)"
-                                         : "Local only - right-click to upload it to the server");
-            name.setText((l.vipOnly ? "[VIP] " : "") + l.name + "  v" + l.version);
-            String tags = (l.tags == null || l.tags.isEmpty()) ? "" : "  \u00b7  " + String.join(", ", l.tags);
-            meta.setText("by " + l.author + "  \u00b7  v" + String.format("%.1f", l.version)
-                    + "  \u00b7  " + (locked ? "VIP only \u2014 upgrade to view" : l.summarise()) + tags);
-
-            stars.setValues(l.avgRating, l.myRating);
-            stars.setHoverPreview(index == hoverRow ? hoverStar : -1);
-            if (l.ratingCount > 0) {
-                starText.setText(String.format("%.1f (%d)", l.avgRating, l.ratingCount));
-                starText.setForeground(Theme.ACCENT);
-            } else {
-                starText.setText("rate \u2192");
-                starText.setForeground(TEXT_DIM);
-            }
-            dl.setText(l.downloads + (l.downloads == 1 ? " download" : " downloads")
-                    + (l.myRating > 0 ? "   \u00b7 you: " + l.myRating + "/5" : ""));
-            dl.setForeground(TEXT_DIM);
-
-            // v1.32b: the per-row download button. Disabled (dim) for your own uploads and for
-            // listings with no bundle to import; active (green) otherwise.
-            // v1.49: LOCAL (market-ready) rows get a PUBLISH button (upload to the server); market
-            // rows get a DOWNLOAD button. Makes it obvious what each row can do.
-            boolean own = isOwnListing(l);
-            boolean isLocal = "local".equals(l.origin);
-            boolean hasTasks = l.bundle != null && l.bundle.tasks != null && !l.bundle.tasks.isEmpty();
-            if (isLocal) {
-                boolean canPublish = hasTasks && main.market.ServerAccount.isLoggedIn();
-                dlButton.setIcon(main.menu.components.UIIcons.publish(17,
-                        canPublish ? new Color(0x6F, 0xA8, 0xE0) : new Color(0x55, 0x55, 0x55)));
-                dlButton.setToolTipText(canPublish ? "Publish this market-ready item to the market"
-                        : (main.market.ServerAccount.isLoggedIn() ? "Nothing to publish"
-                        : "Log in to publish"));
-            } else {
-                dlButton.setIcon(main.menu.components.UIIcons.importIcon(17,
-                        hasTasks ? new Color(0x6F, 0xC2, 0x76) : new Color(0x55, 0x55, 0x55)));
-                dlButton.setToolTipText(!hasTasks ? (l.vipOnly ? "VIP only" : "No tasks to download")
-                        : own ? "Download your own upload (e.g. to another device)"
-                        : "Download / import into your library");
-            }
-
-            // v1.50: comments toggle + expanded thread (server rows only; one open at a time)
-            boolean serverRow = "server".equals(l.origin);
-            boolean expanded = serverRow && l.id != null && l.id.equals(expandedCommentsId);
-            commentsToggle.setVisible(serverRow);
-            commentsToggle.setText(expanded ? "[hide comments]" : "[comments]");
-            commentsToggle.setForeground(expanded ? Theme.ACCENT : new Color(0x7F, 0xA8, 0xC9));
-            favButton.setVisible(serverRow);
-            favButton.setIcon(drawnHeart(15, l.myFavorite));
-            favButton.setToolTipText((l.myFavorite ? "Unlove" : "Love") + "  (" + l.favorites + ")");
-            commentsBox.setVisible(expanded);
-            if (expanded)
-                commentsBox.setText(marketCommentsCache.getOrDefault(l.id, "Loading comments\u2026"));
-            else
-                commentsBox.setText("");
-
-            setBackground(selected ? new Color(46, 42, 30) : Theme.SURFACE_1);
-            name.setForeground(selected ? Theme.ACCENT : TEXT_MAIN);
-            meta.setForeground(TEXT_DIM);
-            setOpaque(true);
-            return this;
-        }
-
-        /**
-         * Precise star hit-test (Patch B.17). Lays this renderer out at the actual cell size and
-         * asks which star (1-5) sits under the point - so the click zones ARE the drawn shapes,
-         * instead of the old hand-tuned "right 130px / 22px each" guess that drifted whenever
-         * fonts, padding or the scrollbar changed.
-         *
-         * @param p point in CELL coordinates. @return star 1..5, or -1 when not on the strip.
-         */
-        int starAt(Point p, Rectangle cellBounds) {
-            setBounds(0, 0, cellBounds.width, cellBounds.height);
-            layoutTree(this);
-            Component deepest = SwingUtilities.getDeepestComponentAt(this, p.x, p.y);
-            if (deepest != stars) return -1;
-            Point sp = SwingUtilities.convertPoint(this, p, stars);
-            return stars.starIndexAt(sp.x);
-        }
-
-        /** v1.32b: true when the point is on the per-row download button (cell coordinates). */
-        boolean downloadAt(Point p, Rectangle cellBounds) {
-            setBounds(0, 0, cellBounds.width, cellBounds.height);
-            layoutTree(this);
-            return SwingUtilities.getDeepestComponentAt(this, p.x, p.y) == dlButton;
-        }
-
-        /** v1.59: true when the point is on the love-heart (cell coordinates). */
-        boolean favAt(Point p, Rectangle cellBounds) {
-            setBounds(0, 0, cellBounds.width, cellBounds.height);
-            layoutTree(this);
-            return SwingUtilities.getDeepestComponentAt(this, p.x, p.y) == favButton;
-        }
-
-        /** v1.50: true when the point is on the [comments] toggle (cell coordinates). */
-        boolean commentsAt(Point p, Rectangle cellBounds) {
-            setBounds(0, 0, cellBounds.width, cellBounds.height);
-            layoutTree(this);
-            return SwingUtilities.getDeepestComponentAt(this, p.x, p.y) == commentsToggle;
-        }
-
-        private void layoutTree(Component c) {
-            c.doLayout();
-            if (c instanceof Container)
-                for (Component k : ((Container) c).getComponents()) layoutTree(k);
-        }
-    }
-
     /** Import a listing into the Task Library, after showing exactly what it will add. */
-    private void importFromMarket(JComponent anchor) {
-        main.market.ScriptListing l = listMarket.getSelectedValue();
+    private void importListing(main.market.ScriptListing l, JComponent anchor) {
         if (l == null) { showToast("Pick a script first", anchor, false); return; }
         // v1.49: you CAN now download your own uploads (e.g. onto another device). Name-collision
         // handling below stops it from silently duplicating what you already have.
         if (l.bundle == null || l.bundle.tasks == null || l.bundle.tasks.isEmpty()) {
-            showToast("That listing has no tasks", anchor, false);
+            // Patch B.16: the server strips the bundle from VIP listings for non-VIP callers.
+            showToast(l.vipOnly ? "VIP only \u2014 upgrade to download this one"
+                    : "That listing has no tasks", anchor, false);
             return;
         }
 
@@ -4458,33 +4405,6 @@ public class DreamBotMenu extends JFrame {
         return merged;
     }
 
-    /** Rate the selected script 1-5. One rating per install; re-rating replaces it. */
-    private void rateSelected(JComponent anchor) {
-        main.market.ScriptListing l = listMarket.getSelectedValue();
-        if (l == null) { showToast("Pick a script first", anchor, false); return; }
-        if (marketRepo instanceof main.market.HttpRepository
-                && !ensureConsent(main.privacy.Consent.MARKET_BROWSE)) {
-            showToast("Nothing was sent", anchor, false);
-            return;
-        }
-
-        Object[] options = {"1 star", "2 stars", "3 stars", "4 stars", "5 stars"};
-        int choice = JOptionPane.showOptionDialog(this,
-                "How would you rate \"" + l.name + "\"?"
-                        + (l.myRating > 0 ? "\n(You rated it " + l.myRating + " before - this replaces it.)" : ""),
-                "Rate script", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null,
-                options, options[Math.max(0, l.myRating - 1)]);
-        if (choice < 0) return;
-
-        try {
-            marketRepo.rate(l.id, choice + 1);
-            reloadMarket();
-            showToast("Rated " + (choice + 1) + " stars", anchor, true);
-        } catch (Exception ex) {
-            showToast("Couldn't rate: " + ex.getMessage(), anchor, false);
-        }
-    }
-
     /** Publish the current queue to the market. */
     /**
      * Publishes ONE item (Patch B.16): a single library task when {@code single} is non-null, or
@@ -4509,7 +4429,8 @@ public class DreamBotMenu extends JFrame {
      * v1.33: stage a library task into the LOCAL market (your notes' "make market-ready").
      * Copies the task into local staging - it stays in the library - and lets you tag it as a
      * task (reusable building block) or a script (full single-purpose routine), which the server
-     * caps separately. From the market's Local view you can then upload it to the server.
+     * caps separately. It lands in the market-ready row at the bottom of the Market tab
+     * (v1.60), where each card has its own publish button.
      */
     private void makeMarketReady(Task t, JComponent anchor) {
         if (t == null) { showToast("Select a library task first", anchor, false); return; }
@@ -4556,8 +4477,8 @@ public class DreamBotMenu extends JFrame {
             t.setMarketReady(true);   // v1.49: drives the Market-Ready filter
             saveAll(false);
             refilterLibrary();
-            showToast("\"" + t.getName() + "\" is market-ready \u2014 see the market's Local view",
-                    anchor, true);
+            showToast("\"" + t.getName() + "\" is market-ready \u2014 see the row at the bottom "
+                    + "of the Market tab", anchor, true);
             reloadMarket();
         } catch (Exception ex) {
             showToast("Couldn't stage: " + ex.getMessage(), anchor, false);
@@ -4598,6 +4519,27 @@ public class DreamBotMenu extends JFrame {
         chkChecks.setOpaque(false);
         chkChecks.setForeground(TEXT_MAIN);
 
+        // v1.60: an optional card icon. The chooser enforces the server's 300 KB cap; the hint
+        // link is the roadmap's free resizer for getting a picture down to 128x128.
+        final String[] iconB64 = { null };
+        JButton btnIcon = createButton("Choose icon\u2026");
+        JLabel iconPrev = new JLabel(main.menu.components.UIIcons.image(26, TEXT_DIM));
+        iconPrev.setToolTipText("No icon yet (optional)");
+        btnIcon.addActionListener(ev -> {
+            String b = pickListingIcon(btnIcon);
+            if (b != null) {
+                iconB64[0] = b;
+                iconPrev.setIcon(main.menu.components.MarketCard.decodeIcon(b, 26));
+                iconPrev.setToolTipText("Icon attached");
+            }
+        });
+        JPanel iconRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        iconRow.setOpaque(false);
+        iconRow.add(btnIcon);
+        iconRow.add(iconPrev);
+        JLabel iconHint = linkLabel("128\u00d7128 PNG recommended \u00b7 free resizer: iloveimg.com",
+                ILOVEIMG_RESIZE_URL);
+
         JPanel form = new JPanel(new GridBagLayout());
         form.setOpaque(false);
         GridBagConstraints c = new GridBagConstraints();
@@ -4613,6 +4555,10 @@ public class DreamBotMenu extends JFrame {
         form.add(styledLabel("Tags:"), c);        c.gridx = 1; form.add(txtTags, c);
         c.gridx = 0; c.gridy++;
         form.add(styledLabel("Description:"), c); c.gridx = 1; form.add(new JScrollPane(txtDesc), c);
+        c.gridx = 0; c.gridy++;
+        form.add(styledLabel("Icon:"), c);        c.gridx = 1; form.add(iconRow, c);
+        c.gridx = 1; c.gridy++;
+        form.add(iconHint, c);
         c.gridx = 0; c.gridy++; c.gridwidth = 2;
         form.add(chkChecks, c);
         c.gridy++;
@@ -4632,6 +4578,7 @@ public class DreamBotMenu extends JFrame {
         listing.tags = new ArrayList<>();
         for (String t : txtTags.getText().split(","))
             if (!t.trim().isEmpty()) listing.tags.add(t.trim());
+        listing.icon = iconB64[0];   // v1.60: optional, base64; the server caps it at ~300 KB
 
         main.data.store.ScriptBundle b = new main.data.store.ScriptBundle();
         b.name = listing.name;
@@ -4663,7 +4610,9 @@ public class DreamBotMenu extends JFrame {
             reloadMarket();
             showToast("Published \"" + listing.name + "\"", anchor, true);
         } catch (Exception ex) {
-            showToast("Publish failed: " + ex.getMessage(), anchor, false);
+            // v1.60: the server's 409 (version already exists) and 403 (anti-plagiarism) answers
+            // carry a real explanation - show it whole instead of clipping it into a toast.
+            showPublishError(ex, anchor);
         }
     }
 
@@ -4682,12 +4631,12 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    /** v1.59: love/unlove a market listing on the server, then refresh its card. */
-    private void toggleFavorite(main.market.ScriptListing l, int idx) {
+    /** v1.59: love/unlove a market listing on the server, then refresh the grid. */
+    private void toggleFavorite(main.market.ScriptListing l) {
         if (l == null || !"server".equals(l.origin)) return;
         if (!(marketRepo instanceof main.market.HttpRepository)) return;
         if (!main.market.ServerAccount.isLoggedIn()) {
-            showToast("Log in to favorite scripts", listMarket, false);
+            showToast("Log in to favorite scripts", marketAnchor(), false);
             return;
         }
         final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
@@ -4705,33 +4654,15 @@ public class DreamBotMenu extends JFrame {
                 SwingUtilities.invokeLater(() -> {
                     l.myFavorite = ff;
                     l.favorites = fc;
-                    if (idx >= 0 && idx < modelMarket.size())
-                        modelMarket.setElementAt(modelMarket.get(idx), idx);
+                    // v1.60: a grid rebuild both updates the heart and re-floats loved cards to
+                    // the top (v1.59 behaviour); the open-comments card + scroll position survive.
+                    refreshMarketGrid();
                 });
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() ->
-                        showToast("Favorite failed: " + ex.getMessage(), listMarket, false));
+                        showToast("Favorite failed: " + ex.getMessage(), marketAnchor(), false));
             }
         }, "DreamMan-Favorite").start();
-    }
-
-    /** v1.59: drawn heart, outline or filled. */
-    private static javax.swing.Icon drawnHeart(int size, boolean filled) {
-        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(size, size,
-                java.awt.image.BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = img.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        java.awt.geom.Path2D.Float h = new java.awt.geom.Path2D.Float();
-        float w = size, t = size;
-        h.moveTo(w / 2f, t * 0.86f);
-        h.curveTo(-w * 0.18f, t * 0.42f, w * 0.16f, -t * 0.14f, w / 2f, t * 0.28f);
-        h.curveTo(w * 0.84f, -t * 0.14f, w * 1.18f, t * 0.42f, w / 2f, t * 0.86f);
-        h.closePath();
-        g.setColor(new Color(0xE0, 0x5A, 0x6B));
-        if (filled) g.fill(h);
-        else { g.setStroke(new BasicStroke(1.6f)); g.draw(h); }
-        g.dispose();
-        return new ImageIcon(img);
     }
 
     /** v1.49: flag any library task with this name as published (best-effort name match). */
@@ -4744,24 +4675,6 @@ public class DreamBotMenu extends JFrame {
                 any = true;
             }
         if (any) { saveAll(false); refilterLibrary(); }
-    }
-
-    /** Remove a listing (a shared folder has no ownership - hence the warning). */
-    private void removeFromMarket(JComponent anchor) {
-        main.market.ScriptListing l = listMarket.getSelectedValue();
-        if (l == null) { showToast("Pick a script first", anchor, false); return; }
-        int ok = JOptionPane.showConfirmDialog(this,
-                "Remove \"" + l.name + "\" from the market?\n\n"
-                        + "A shared folder has no logins, so this deletes it for everyone.",
-                "Remove listing", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-        if (ok != JOptionPane.YES_OPTION) return;
-        try {
-            marketRepo.remove(l.id);
-            reloadMarket();
-            showToast("Removed", anchor, true);
-        } catch (Exception ex) {
-            showToast("Couldn't remove: " + ex.getMessage(), anchor, false);
-        }
     }
 
     /** Point the market at a different folder (or a server, when one exists). */
@@ -4830,57 +4743,17 @@ public class DreamBotMenu extends JFrame {
         showToast("Server URL set", btnServerSource, true);
     }
 
-    /** The one renderer instance for the market list - also does the star hit-testing (B.17). */
-    private MarketCardRenderer marketCardRenderer;
     /** The one renderer instance for the task library - hosts the default-task star (v1.30). */
     private LibraryCardRenderer libraryCardRenderer;
     /** The one renderer instance for the queue - hosts the -/+ loop steppers (v1.31). */
     private TaskCardRenderer taskCardRenderer;
 
     /** Updates the renderer's hover row/star and repaints only when it actually changed. */
-    private void setMarketHover(int row, int star) {
-        if (marketCardRenderer == null) return;
-        if (marketCardRenderer.hoverRow == row && marketCardRenderer.hoverStar == star) return;
-        marketCardRenderer.hoverRow = row;
-        marketCardRenderer.hoverStar = star;
-        listMarket.repaint();
-    }
-
     /**
      * Click handling on a market row: clicking a star rates the script (B.16, fixed B.17).
      * The renderer is laid out at the real cell size and asked which star was hit, so the
      * clickable zones are exactly the star shapes the user sees.
      */
-    private void handleMarketRowClick(MouseEvent me) {
-        int idx = listMarket.locationToIndex(me.getPoint());
-        if (idx < 0) return;
-        Rectangle bounds = listMarket.getCellBounds(idx, idx);
-        if (bounds == null || !bounds.contains(me.getPoint())) return;
-        listMarket.setSelectedIndex(idx);
-        if (marketCardRenderer == null) return;
-        main.market.ScriptListing l = modelMarket.getElementAt(idx);
-        // v1.32b: right-click = the row's action menu (upload / rename / remove / comments).
-        if (SwingUtilities.isRightMouseButton(me)) { showMarketRowMenu(l, me); return; }
-        // v1.32b: double-click a row to download/import it (per-row download, no select-then-
-        // click-a-button dance).
-        if (me.getClickCount() == 2) { importFromMarket(listMarket); return; }
-        // configure the renderer for THIS row, then hit-test in cell coordinates
-        marketCardRenderer.getListCellRendererComponent(listMarket, l, idx, false, false);
-        Point cell = new Point(me.getX() - bounds.x, me.getY() - bounds.y);
-        // v1.59: the love-heart
-        if (marketCardRenderer.favAt(cell, bounds)) { toggleFavorite(l, idx); return; }
-        // v1.50: [comments] toggle expands the thread under this row
-        if (marketCardRenderer.commentsAt(cell, bounds)) { toggleRowComments(l); return; }
-        // v1.49: per-row button - publish for local/market-ready rows, download for market rows
-        if (marketCardRenderer.downloadAt(cell, bounds)) {
-            if ("local".equals(l.origin)) uploadLocalListing(l);
-            else importFromMarket(listMarket);
-            return;
-        }
-        int star = marketCardRenderer.starAt(cell, bounds);
-        if (star >= 1 && star <= 5) rateListing(l, star);
-    }
-
     /** True when this listing was uploaded by the signed-in user (can't rate/needs owner tools). */
     private boolean isOwnListing(main.market.ScriptListing l) {
         if (l == null || l.author == null) return false;
@@ -4891,22 +4764,218 @@ public class DreamBotMenu extends JFrame {
     /** Submit a rating for a listing (Patch B.16 - inline on the row). */
     private void rateListing(main.market.ScriptListing l, int stars) {
         if (l == null) return;
-        // v1.32b: rating + comments are for the LIVE MARKET only - not local staging, not your own.
+        // v1.60: rating is for PUBLISHED listings - the server's, or a shared folder's (the
+        // folder market keeps one rating file per install) - never your local staging or your own.
         if ("local".equals(l.origin)) {
-            showToast("Rating is for the live market only (not local staging)", listMarket, false);
+            showToast("Rating is for published listings (not your staging)", marketAnchor(), false);
             return;
         }
-        if (isOwnListing(l)) { showToast("You can't rate your own script", listMarket, false); return; }
+        if (isOwnListing(l)) {
+            showToast("You can't rate your own script", marketAnchor(), false);
+            return;
+        }
         if (marketRepo instanceof main.market.HttpRepository
                 && !ensureConsent(main.privacy.Consent.MARKET_BROWSE)) return;
         new Thread(() -> {
             try {
                 marketRepo.rate(l.id, stars);
-                SwingUtilities.invokeLater(() -> { reloadMarket(); showToast("Rated " + stars + "\u2605", listMarket, true); });
+                SwingUtilities.invokeLater(() -> {
+                    reloadMarket();
+                    showToast("Rated " + stars + "\u2605", marketAnchor(), true);
+                });
             } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> showToast("Couldn't rate: " + ex.getMessage(), listMarket, false));
+                SwingUtilities.invokeLater(() ->
+                        showToast("Couldn't rate: " + ex.getMessage(), marketAnchor(), false));
             }
         }, "DreamMan-Rate").start();
+    }
+
+    /**
+     * v1.60: unpublish one of YOUR server listings - it comes off the market immediately and a
+     * copy is staged back into the market-ready strip, so nothing is lost. The dialog warns about
+     * the one genuinely surprising rule: the server keeps the stats for this name+version, so an
+     * edited script re-uploaded WITHOUT a version bump re-attaches the old numbers.
+     *
+     * <p>Order matters: stage the local copy FIRST and abort if that fails - we never delete the
+     * only copy of someone's script.
+     */
+    private void unpublishListing(main.market.ScriptListing l, JComponent src) {
+        if (l == null || !"server".equals(l.origin) || !isOwnListing(l)) return;
+        if (!(marketRepo instanceof main.market.HttpRepository)) return;
+        int ok = JOptionPane.showConfirmDialog(this,
+                "<html><b>Unpublish \u201c" + escapeHtml(l.name) + "\u201d v" + l.version + "?</b>"
+                + "<br><br>\u00b7 Other players stop seeing it immediately."
+                + "<br>\u00b7 A copy is staged back into your MARKET-READY row, so nothing is lost."
+                + "<br><br><b>Heads up about stats:</b> its downloads \u00b7 ratings \u00b7 "
+                + "favorites stay stored on the server for this name + version. If you edit the "
+                + "script and re-upload it <b>without bumping the version</b>, those old stats "
+                + "re-attach to the changed script \u2014 bump the version when you change it."
+                + "</html>",
+                "Unpublish \u2014 back to market-ready",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (ok != JOptionPane.OK_OPTION) return;
+
+        // stage the copy locally first (fresh local id - the server assigns its own on republish)
+        main.market.ScriptListing copy = new main.market.ScriptListing();
+        copy.id = null;
+        copy.name = l.name;
+        copy.author = l.author;
+        copy.description = l.description;
+        copy.version = l.version;
+        copy.tags = l.tags == null ? new ArrayList<>() : new ArrayList<>(l.tags);
+        copy.icon = l.icon;
+        copy.kind = l.kind;
+        copy.vipOnly = l.vipOnly;
+        copy.bundle = l.bundle;
+        copy.origin = "local";
+        try {
+            localMarketRepo.publish(copy);
+        } catch (Exception ex) {
+            showToast("Couldn't stage a local copy - NOT unpublished: " + ex.getMessage(),
+                    src, false);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                marketRepo.remove(l.id);
+                SwingUtilities.invokeLater(() -> {
+                    reloadMarket();
+                    showToast("\u201c" + l.name + "\u201d is back in your market-ready row",
+                            marketAnchor(), true);
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> {
+                    reloadMarket();   // the staged copy exists either way
+                    showToast("Couldn't remove from the server: " + ex.getMessage(),
+                            marketAnchor(), false);
+                });
+            }
+        }, "DreamMan-Unpublish").start();
+    }
+
+    /** v1.60: delete a market-ready staging copy (the strip card's x, and the context menu). */
+    private void deleteLocalListing(main.market.ScriptListing l) {
+        if (l == null || !"local".equals(l.origin)) return;
+        if (JOptionPane.showConfirmDialog(this,
+                "Delete the local file for \"" + l.name + "\"?", "Delete local script",
+                JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION)
+            return;
+        try {
+            localMarketRepo.remove(l.id);
+            reloadMarket();
+            showToast("Deleted local copy of \"" + l.name + "\"", marketAnchor(), true);
+        } catch (Exception ex) {
+            showToast("Couldn't delete: " + ex.getMessage(), marketAnchor(), false);
+        }
+    }
+
+    /** v1.60: set/replace the icon on a staged listing (click its icon in the strip). */
+    private void chooseIconForLocal(main.market.ScriptListing l) {
+        if (l == null || !"local".equals(l.origin)) return;
+        String b = pickListingIcon(marketAnchor());
+        if (b == null) return;
+        l.icon = b;
+        try {
+            localMarketRepo.publish(l);
+            refreshReadyStrip();
+            showToast("Icon set on \"" + l.name + "\" - it publishes with the script",
+                    marketAnchor(), true);
+        } catch (Exception ex) {
+            showToast("Couldn't save the icon: " + ex.getMessage(), marketAnchor(), false);
+        }
+    }
+
+    /**
+     * v1.60: pick an image file and return it as base64 (or null). Enforces the server's ~300 KB
+     * icon cap up front, and the too-big dialog carries the roadmap's free-resizer link so the
+     * fix is one click away.
+     */
+    private String pickListingIcon(JComponent anchor) {
+        JFileChooser fc = new JFileChooser();
+        fc.setDialogTitle("Pick a listing icon (128\u00d7128 recommended)");
+        fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "Images (png, jpg)", "png", "jpg", "jpeg"));
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return null;
+        try {
+            byte[] bytes = java.nio.file.Files.readAllBytes(fc.getSelectedFile().toPath());
+            if (bytes.length > LISTING_ICON_MAX_BYTES) {
+                JPanel p = new JPanel(new GridLayout(0, 1, 0, 4));
+                p.setOpaque(false);
+                p.add(new JLabel("That image is " + (bytes.length / 1024)
+                        + " KB - the market caps icons at 300 KB."));
+                p.add(new JLabel("Resize it to about 128\u00d7128 first - free online:"));
+                p.add(linkLabel("iloveimg.com \u2192 resize image (pixels)", ILOVEIMG_RESIZE_URL));
+                JOptionPane.showMessageDialog(this, p, "Icon too big",
+                        JOptionPane.WARNING_MESSAGE);
+                return null;
+            }
+            return java.util.Base64.getEncoder().encodeToString(bytes);
+        } catch (Exception ex) {
+            showToast("Couldn't read that image: " + ex.getMessage(), anchor, false);
+            return null;
+        }
+    }
+
+    /** v1.60: a clickable link label - opens the browser, or copies the URL if that's blocked. */
+    private JLabel linkLabel(String text, String url) {
+        JLabel l = new JLabel("<html><u>" + escapeHtml(text) + "</u></html>");
+        l.setForeground(Theme.BLUE);
+        l.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        l.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        l.setToolTipText(url);
+        l.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                try {
+                    Desktop.getDesktop().browse(new java.net.URI(url));
+                } catch (Throwable t) {
+                    // headless / sandboxed launcher: put the URL on the clipboard instead
+                    try {
+                        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                                new java.awt.datatransfer.StringSelection(url), null);
+                        showToast("Link copied to clipboard", l, true);
+                    } catch (Throwable ignored) {}
+                }
+            }
+        });
+        return l;
+    }
+
+    /**
+     * v1.60: publish failures the server explains - 409 (that name+version already exists, the
+     * version-integrity rule) and 403 (the anti-plagiarism fingerprint matched someone else's
+     * listing) - get a real dialog with the server's own message; everything else stays a toast.
+     * The client never tries to work around either: bumping the version or actually changing the
+     * script is the fix, and the dialog says so.
+     */
+    private void showPublishError(Exception ex, JComponent anchor) {
+        String msg = ex == null || ex.getMessage() == null ? "Unknown error" : ex.getMessage();
+        boolean conflict = msg.contains("Server said 409");
+        boolean blocked = msg.contains("Server said 403");
+        if (!conflict && !blocked) {
+            showToast("Publish failed: " + msg, anchor, false);
+            return;
+        }
+        String body = msg;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"(?:error|message)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").matcher(msg);
+        if (m.find())
+            body = m.group(1).replace("\\\"", "\"").replace("\\n", "\n");
+        JOptionPane.showMessageDialog(this,
+                "<html><b>" + (conflict ? "Version conflict (409)" : "Publish blocked (403)")
+                + "</b><br><br>" + escapeHtml(body) + "<br><br>"
+                + (conflict
+                    ? "Bump the version number, or unpublish the existing copy first \u2014 two "
+                        + "<i>different</i> versions of the same name can coexist."
+                    : "The server matched this content to someone else's listing. Any real change "
+                        + "to the tasks publishes fine \u2014 renaming alone doesn't.")
+                + "</html>",
+                conflict ? "Already on the market at this version" : "Publish blocked",
+                JOptionPane.WARNING_MESSAGE);
+    }
+
+    /** Minimal HTML escape for text we place inside JOptionPane html. */
+    private static String escapeHtml(String s) {
+        return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     /** Publish ONE item at a time (Patch B.16): the selected library task, or the whole queue. */

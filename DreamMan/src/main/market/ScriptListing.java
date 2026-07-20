@@ -29,6 +29,13 @@ public class ScriptListing {
     /** Free-text tags, e.g. "combat", "ironman", "f2p". */
     public List<String> tags = new ArrayList<>();
 
+    /**
+     * v1.60: an optional card icon as base64 image bytes (raw base64 or a full {@code data:} URI -
+     * the client decodes both). 128x128 PNG recommended; the server caps it at ~300 KB and just
+     * stores/echoes it, so an unreadable blob degrades to the drawn placeholder, never an error.
+     */
+    public String icon;
+
     /** The script itself. */
     public ScriptBundle bundle;
 
