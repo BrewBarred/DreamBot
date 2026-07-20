@@ -417,5 +417,50 @@ public final class UIIcons {
             }
         };
     }
+    /** v1.63: a "structure/outline" glyph - a parent node with two indented child rows. */
+    public static Icon structure(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int x0 = (int) (s * 0.20);
+                int y0 = (int) (s * 0.22);
+                // parent bar
+                g2.drawLine(x0, y0, (int) (s * 0.80), y0);
+                // the trunk down the left
+                g2.drawLine(x0, y0, x0, (int) (s * 0.74));
+                // two child branches + their bars
+                int cx = (int) (s * 0.42);
+                int y1 = (int) (s * 0.48), y2 = (int) (s * 0.74);
+                g2.drawLine(x0, y1, cx, y1);
+                g2.drawLine(cx, y1, (int) (s * 0.82), y1);
+                g2.drawLine(x0, y2, cx, y2);
+                g2.drawLine(cx, y2, (int) (s * 0.82), y2);
+            }
+        };
+    }
+    /** v1.63: an info "(i)" glyph - a circle with a dot and a stem. */
+    public static Icon info(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int m = Math.max(1, s / 10);
+                g2.drawOval(m, m, s - 2 * m, s - 2 * m);
+                int cx = s / 2;
+                g2.fillOval(cx - Math.max(1, s / 14), (int) (s * 0.28), Math.max(2, s / 7), Math.max(2, s / 7)); // dot
+                int stemTop = (int) (s * 0.46), stemBot = (int) (s * 0.72);
+                g2.drawLine(cx, stemTop, cx, stemBot);   // stem
+            }
+        };
+    }
+
+    /** v1.63: a "more" glyph - three horizontal dots (overflow menu). */
+    public static Icon more(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int r = Math.max(2, s / 8), y = s / 2 - r / 2;
+                g2.fillOval((int) (s * 0.18) - r / 2, y, r, r);
+                g2.fillOval(s / 2 - r / 2, y, r, r);
+                g2.fillOval((int) (s * 0.82) - r / 2, y, r, r);
+            }
+        };
+    }
 }
 

@@ -394,6 +394,7 @@ public class CardBuilderDialog extends JDialog {
         @Override public void onRate(ScriptListing l, int stars) {}
         @Override public void onToggleFavorite(ScriptListing l) {}
         @Override public void onToggleComments(ScriptListing l, MarketCard card) {}
+        @Override public void onToggleStructure(ScriptListing l, MarketCard card) {}
         @Override public void onPostComment(ScriptListing l, String body, MarketCard card) {}
         @Override public void onSetIcon(ScriptListing l) {}
         @Override public void onBuildCard(ScriptListing l) {}

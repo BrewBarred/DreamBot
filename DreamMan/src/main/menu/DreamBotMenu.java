@@ -205,6 +205,7 @@ public class DreamBotMenu extends JFrame {
     private main.market.ScriptRepository marketRepo;
     private JButton btnMyUploads;   // v1.32b: hidden unless the server market is active
     private String expandedCommentsId;   // v1.50: the card whose comments are open (one at a time)
+    private String expandedStructureId;  // v1.63: the card whose structure outline is open
     private final java.util.Map<String, String> marketCommentsCache = new java.util.HashMap<>();
     private final List<main.market.ScriptListing> marketAll = new ArrayList<>();
     private JTextField marketSearchField;
@@ -3804,6 +3805,10 @@ public class DreamBotMenu extends JFrame {
                                                main.menu.components.MarketCard card) {
             toggleCardComments(l);
         }
+        @Override public void onToggleStructure(main.market.ScriptListing l,
+                                                main.menu.components.MarketCard card) {
+            toggleCardStructure(l);
+        }
         @Override public void onPostComment(main.market.ScriptListing l, String body,
                                             main.menu.components.MarketCard card) {
             postCardComment(l, body, card);
@@ -3835,6 +3840,31 @@ public class DreamBotMenu extends JFrame {
                     && main.market.ServerAccount.isLoggedIn();
         }
     };
+
+    /**
+     * v1.63: expand/collapse a card's tasks -> actions -> triggers outline. Accordion-style like
+     * comments (one open at a time) so the grid doesn't fill with tall expanded cards. Works for
+     * any origin that carries a bundle - server listings, shared-folder listings, and local
+     * staged items all qualify; a VIP listing whose bundle the server withheld shows a disabled
+     * button instead (handled in the card).
+     */
+    private void toggleCardStructure(main.market.ScriptListing l) {
+        if (l == null || l.id == null) return;
+        String prev = expandedStructureId;
+        expandedStructureId = l.id.equals(prev) ? null : l.id;
+        if (prev != null) {
+            main.menu.components.MarketCard was = marketCardById.get(prev);
+            if (was != null) was.setStructureExpanded(false);
+        }
+        if (expandedStructureId != null) {
+            main.menu.components.MarketCard now = marketCardById.get(expandedStructureId);
+            if (now != null) now.setStructureExpanded(true);
+        }
+        if (marketGridPanel != null) {
+            marketGridPanel.revalidate();
+            marketGridPanel.repaint();
+        }
+    }
 
     /** v1.50: expand/collapse a row's comments (one row at a time, accordion-style). */
     private void toggleCardComments(main.market.ScriptListing l) {
@@ -4001,7 +4031,9 @@ public class DreamBotMenu extends JFrame {
                 menu.add(miRemove);
             }
         }
-        menu.show(src, me.getX(), me.getY());
+        // v1.63: the "..." more-button passes a null event - anchor the popup under the button.
+        if (me != null) menu.show(src, me.getX(), me.getY());
+        else menu.show(src, 0, src.getHeight());
     }
 
     /** v1.32b: pushes a LOCAL script to the server (quota + auth enforced server-side). */

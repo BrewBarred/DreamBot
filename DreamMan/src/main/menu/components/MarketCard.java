@@ -41,6 +41,8 @@ public class MarketCard extends JPanel {
         void onRate(ScriptListing l, int stars);
         void onToggleFavorite(ScriptListing l);
         void onToggleComments(ScriptListing l, MarketCard card);
+        /** v1.63: expand/collapse the card's tasks -> actions -> triggers outline. */
+        void onToggleStructure(ScriptListing l, MarketCard card);
         void onPostComment(ScriptListing l, String body, MarketCard card);
         void onSetIcon(ScriptListing l);
         /** v1.61: open the Card Builder for a staged listing (strip card button / context menu). */
@@ -54,6 +56,8 @@ public class MarketCard extends JPanel {
 
     private static final int GRID_W = 236;
     private static final int STRIP_W = 208;
+    /** v1.63: cap for the expanded structure outline; taller content scrolls. */
+    private static final int STRUCT_MAX_H = 260;
     private static final Color CARD_BG = Theme.SURFACE_2_ALT;
     private static final Color CARD_BORDER = Theme.BORDER;
 
@@ -74,6 +78,32 @@ public class MarketCard extends JPanel {
     private JButton commentBtn;
     private JPanel commentsPanel;      // collapsible south
     private JTextArea commentsArea;
+    private JPanel structurePanel;     // v1.63: collapsible tasks->actions->triggers outline
+    private JButton structureBtn;      // v1.63
+    private boolean structureExpanded; // v1.63
+    /** v1.63: minimum (collapsed) card height; sections add to this when they open. */
+    private int collapsedFloor = 150;
+
+    /**
+     * v1.63: width stays fixed (for the WrapLayout grid) but height follows the content, so the
+     * card grows when its collapsible sections (structure outline, comments) open and shrinks
+     * back when they close. A floor keeps the collapsed card looking exactly as it did before.
+     */
+    @Override
+    public Dimension getPreferredSize() {
+        int w = (mode == Mode.GRID) ? GRID_W : STRIP_W;
+        int h;
+        java.awt.LayoutManager lm = getLayout();
+        if (lm != null) {
+            java.awt.Insets in = getInsets();
+            h = lm.preferredLayoutSize(this).height;   // BorderLayout height incl. visible SOUTH
+            // preferredLayoutSize already accounts for insets via the container; keep as-is
+            h = Math.max(h, in.top + in.bottom);
+        } else {
+            h = collapsedFloor;
+        }
+        return new Dimension(w, Math.max(collapsedFloor, h));
+    }
     private JTextField commentInput;
     private boolean commentsExpanded;
 
@@ -87,7 +117,9 @@ public class MarketCard extends JPanel {
                 BorderFactory.createLineBorder(CARD_BORDER),
                 new EmptyBorder(8, 9, 8, 9)));
         int w = (mode == Mode.GRID) ? GRID_W : STRIP_W;
-        setPreferredSize(new Dimension(w, mode == Mode.GRID ? 150 : 112));
+        // v1.63: height is dynamic now (see getPreferredSize) so the card can grow when its
+        // collapsible sections open. Width stays fixed for a tidy WrapLayout grid.
+        this.collapsedFloor = (mode == Mode.GRID) ? 150 : 112;
         if (mode == Mode.GRID) buildGrid(); else buildStrip();
         wireCommonMouse();
     }
@@ -176,13 +208,28 @@ public class MarketCard extends JPanel {
         commentBtn = smallButton(UIIcons.comment(15, Theme.TEXT_DIM), "Comments");
         commentBtn.addActionListener(e -> cb.onToggleComments(listing, this));
         actions.add(commentBtn);
+        // v1.63: (i) opens the "what's inside" outline (tasks -> actions -> checks). Right-clicking
+        // the card does the same. Disabled when the bundle is withheld (VIP hidden from non-VIP).
+        boolean haveBundle = listing.bundle != null;
+        structureBtn = smallButton(UIIcons.info(15, Theme.TEXT_DIM),
+                haveBundle ? "What's inside (tasks, actions, checks) \u2014 or right-click the card"
+                           : "Details unavailable \u2014 download to view");
+        structureBtn.setEnabled(haveBundle);
+        structureBtn.addActionListener(e -> cb.onToggleStructure(listing, this));
+        actions.add(structureBtn);
         // Patch B.16 carried forward: the server sends VIP bundles as null to non-VIP callers
         boolean lockedVip = listing.vipOnly && listing.bundle == null;
         JButton dl = smallButton(UIIcons.importIcon(15, lockedVip ? Theme.TEXT_MUTED : Theme.GREEN),
-                lockedVip ? "VIP only \u2014 upgrade to download" : "Download");
+                lockedVip ? "VIP only \u2014 upgrade to download"
+                          : "Download (or double-click the card)");
         dl.setEnabled(!lockedVip);
         dl.addActionListener(e -> cb.onDownload(listing));
         actions.add(dl);
+        // v1.63: right-click used to open the management menu; it now opens the outline, so the
+        // menu moved to this explicit "more" button (rename / publish / unpublish / remove / ...).
+        JButton moreBtn = smallButton(UIIcons.more(15, Theme.TEXT_DIM), "More actions\u2026");
+        moreBtn.addActionListener(e -> cb.onContextMenu(listing, null, moreBtn));
+        actions.add(moreBtn);
         if (cb.isOwn(listing) && "server".equals(listing.origin)) {
             JButton unpub = smallButton(UIIcons.publish(15, Theme.AMBER), "Unpublish");
             unpub.addActionListener(e -> cb.onUnpublish(listing, unpub));
@@ -192,12 +239,195 @@ public class MarketCard extends JPanel {
 
         add(body, BorderLayout.CENTER);
 
-        // south: collapsible comments
+        // south: collapsible sections (v1.63 structure outline, then the comments box), stacked
+        JPanel south = new JPanel();
+        south.setOpaque(false);
+        south.setLayout(new BoxLayout(south, BoxLayout.Y_AXIS));
+        structurePanel = buildStructurePanel();
+        structurePanel.setVisible(false);
+        structurePanel.setAlignmentX(LEFT_ALIGNMENT);
         commentsPanel = buildCommentsPanel();
         commentsPanel.setVisible(false);
-        add(commentsPanel, BorderLayout.SOUTH);
+        commentsPanel.setAlignmentX(LEFT_ALIGNMENT);
+        south.add(structurePanel);
+        south.add(commentsPanel);
+        add(south, BorderLayout.SOUTH);
 
         refreshFromListing();
+    }
+
+    /** v1.63: the collapsible outline of what a listing contains - tasks, their actions, checks. */
+    private JPanel buildStructurePanel() {
+        JPanel p = new JPanel(new BorderLayout());
+        p.setOpaque(false);
+        p.setBorder(new EmptyBorder(8, 0, 0, 0));
+
+        JPanel outline = new JPanel();
+        outline.setOpaque(false);
+        outline.setLayout(new BoxLayout(outline, BoxLayout.Y_AXIS));
+
+        JScrollPane sp = new JScrollPane(outline,
+                ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        sp.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+        sp.getViewport().setOpaque(false);
+        sp.setOpaque(false);
+        sp.getVerticalScrollBar().setUnitIncrement(14);
+
+        main.data.store.ScriptBundle b = listing.bundle;
+        if (b == null) {
+            outline.add(outlineLabel("Structure isn't available for this listing.", 0, false,
+                    Theme.TEXT_DIM));
+        } else {
+            java.util.List<main.data.store.TaskData> tasks = b.tasks;
+            int taskCount = (tasks == null) ? 0 : tasks.size();
+            String loops = (b.loops <= 0) ? "loops forever"
+                    : (b.loops == 1 ? "runs once" : "runs \u00d7" + b.loops);
+            outline.add(outlineLabel("Tasks (" + taskCount + ")  \u00b7  queue " + loops, 0,
+                    true, Theme.ACCENT));
+            if (tasks != null) {
+                for (int i = 0; i < tasks.size(); i++) {
+                    main.data.store.TaskData t = tasks.get(i);
+                    if (t == null) continue;
+                    outline.add(buildTaskNode(i + 1, t, sp, outline));   // v1.63: collapsible
+                }
+            }
+            java.util.List<String> checks = describeTriggers(b.globalTriggers);
+            outline.add(outlineLabel("Always-on checks (" + checks.size() + ")", 0, true,
+                    Theme.ACCENT));
+            if (checks.isEmpty()) {
+                outline.add(outlineLabel("(none)", 1, false, Theme.TEXT_MUTED));
+            } else {
+                for (String c : checks)
+                    outline.add(outlineLabel("\u2022 " + c, 1, false, Theme.TEXT_DIM));
+            }
+        }
+
+        resizeStructureScroll(sp, outline);
+        p.add(sp, BorderLayout.CENTER);
+        return p;
+    }
+
+    /**
+     * v1.63: one collapsible task - a clickable header (arrow + "N. name xR") over its actions.
+     * Actions are shown by default (everything expanded for transparency); clicking the header
+     * collapses/expands just that task, and the card re-grows to fit (or the outline scrolls).
+     */
+    private JPanel buildTaskNode(int index, main.data.store.TaskData t,
+                                 JScrollPane sp, JPanel outline) {
+        JPanel node = new JPanel();
+        node.setOpaque(false);
+        node.setLayout(new BoxLayout(node, BoxLayout.Y_AXIS));
+        node.setAlignmentX(LEFT_ALIGNMENT);
+
+        String rep = (t.repeat > 1) ? "  \u00d7" + t.repeat : "";
+        String nm = (t.name == null || t.name.isEmpty()) ? "(unnamed task)" : t.name;
+
+        JPanel acts = new JPanel();
+        acts.setOpaque(false);
+        acts.setLayout(new BoxLayout(acts, BoxLayout.Y_AXIS));
+        acts.setAlignmentX(LEFT_ALIGNMENT);
+        java.util.List<main.data.ActionData> list = t.actions;
+        if (list == null || list.isEmpty()) {
+            acts.add(outlineLabel("(no actions)", 2, false, Theme.TEXT_MUTED));
+        } else {
+            for (main.data.ActionData a : list)
+                acts.add(outlineLabel("\u2022 " + describeAction(a), 2, false, Theme.TEXT_DIM));
+        }
+        acts.setVisible(true);   // expanded by default
+
+        String label = index + ". " + nm + rep;
+        JLabel header = outlineLabel("\u25be  " + label, 1, true, Theme.TEXT);
+        header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        header.setToolTipText("Click to collapse / expand this task's actions");
+        header.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                boolean show = !acts.isVisible();
+                acts.setVisible(show);
+                header.setText((show ? "\u25be" : "\u25b8") + "  " + label);
+                resizeStructureScroll(sp, outline);
+                regrowCard();
+            }
+        });
+
+        node.add(header);
+        node.add(acts);
+        return node;
+    }
+
+    /** Sizes the outline scroller to its content up to {@link #STRUCT_MAX_H}, then it scrolls. */
+    private void resizeStructureScroll(JScrollPane sp, JPanel outline) {
+        // A task collapsing changes nested BoxLayout sizes; clear their caches so the height we
+        // read below is fresh (invalidate() alone doesn't recurse into the child nodes).
+        invalidateTree(outline);
+        int wanted = outline.getPreferredSize().height + 6;
+        sp.setPreferredSize(new Dimension(GRID_W - 20,
+                Math.min(STRUCT_MAX_H, Math.max(40, wanted))));
+        sp.invalidate();
+    }
+
+    private static void invalidateTree(java.awt.Component c) {
+        c.invalidate();
+        if (c instanceof java.awt.Container)
+            for (java.awt.Component ch : ((java.awt.Container) c).getComponents())
+                invalidateTree(ch);
+    }
+
+    /** Re-lay the card and everything above it so a task collapsing changes the card's height. */
+    private void regrowCard() {
+        // Clear every layout cache inside the card (the SOUTH BoxLayout sits ABOVE the outline and
+        // caches child sizes, so invalidating just the outline isn't enough) before we re-measure.
+        invalidateTree(this);
+        revalidate();
+        repaint();
+        java.awt.Container c = getParent();
+        while (c != null) { c.revalidate(); c.repaint(); c = c.getParent(); }
+    }
+
+    /** One indented outline row. level 0/1/2 = section / task / action indentation. */
+    private JLabel outlineLabel(String text, int level, boolean bold, Color fg) {
+        JLabel l = new JLabel(text);
+        l.setFont(bold ? Theme.fontBold(11) : Theme.font(11));
+        l.setForeground(fg);
+        l.setBorder(new EmptyBorder(1, 6 + level * 16, 1, 4));
+        l.setAlignmentX(LEFT_ALIGNMENT);
+        return l;
+    }
+
+    /** A compact one-line description of an action: its type plus a hint of its main parameter. */
+    private static String describeAction(main.data.ActionData a) {
+        if (a == null) return "(action)";
+        String type = a.getType() == null ? "Action" : a.getType();
+        java.util.Map<String, String> p = a.getParams();
+        String hint = "";
+        if (p != null && !p.isEmpty()) {
+            // prefer a recognisable target-ish key, else just the first value
+            for (String k : new String[]{"Target", "Name", "Item", "Item(s)", "Object", "NPC",
+                    "TaskName", "Mode", "Spell", "Bone type (exact)"}) {
+                if (p.containsKey(k) && p.get(k) != null && !p.get(k).isEmpty()) {
+                    hint = p.get(k);
+                    break;
+                }
+            }
+            if (hint.isEmpty()) {
+                for (String v : p.values())
+                    if (v != null && !v.isEmpty()) { hint = v; break; }
+            }
+        }
+        return hint.isEmpty() ? type : type + " \u2192 " + hint;
+    }
+
+    /** Parses the bundle's trigger JSON into human-readable descriptions (best-effort). */
+    private static java.util.List<String> describeTriggers(String json) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (json == null || json.trim().isEmpty()) return out;
+        try {
+            for (main.watchers.Trigger t : main.watchers.TriggerCodec.fromJson(json))
+                if (t != null) out.add(t.describe());
+        } catch (Exception ignored) {
+            // malformed / unknown trigger payload - just show nothing rather than break the card
+        }
+        return out;
     }
 
     private JPanel buildCommentsPanel() {
@@ -352,6 +582,19 @@ public class MarketCard extends JPanel {
 
     public boolean isCommentsExpanded() { return commentsExpanded; }
 
+    // ── v1.63 structure API (driven by the menu, accordion-style like comments) ──────────────
+
+    public void setStructureExpanded(boolean expanded) {
+        this.structureExpanded = expanded;
+        if (structurePanel != null) structurePanel.setVisible(expanded);
+        if (structureBtn != null)
+            structureBtn.setIcon(UIIcons.info(15, expanded ? Theme.ACCENT : Theme.TEXT_DIM));
+        revalidate();
+        repaint();
+    }
+
+    public boolean isStructureExpanded() { return structureExpanded; }
+
     public void setCommentsText(String text) {
         if (commentsArea != null) {
             commentsArea.setText(text == null ? "" : text);
@@ -377,19 +620,29 @@ public class MarketCard extends JPanel {
                         BorderFactory.createLineBorder(CARD_BORDER),
                         new EmptyBorder(8, 9, 8, 9)));
             }
+            private void handlePopup(MouseEvent e) {
+                // v1.63: in the GRID, right-click opens the "what's inside" outline (the management
+                // menu moved to the card's "..." button). STRIP cards keep their right-click menu.
+                if (mode == Mode.GRID) {
+                    if (structureBtn != null && structureBtn.isEnabled())
+                        cb.onToggleStructure(listing, MarketCard.this);
+                } else {
+                    cb.onContextMenu(listing, e, MarketCard.this);
+                }
+            }
             @Override public void mouseClicked(MouseEvent e) {
                 if (e.isPopupTrigger() || SwingUtilities.isRightMouseButton(e)) {
-                    cb.onContextMenu(listing, e, MarketCard.this);
+                    handlePopup(e);
                 } else if (mode == Mode.GRID && e.getClickCount() == 2
                         && SwingUtilities.isLeftMouseButton(e)) {
-                    cb.onDownload(listing);
+                    cb.onDownload(listing);   // double-left-click still downloads
                 }
             }
             @Override public void mousePressed(MouseEvent e) {
-                if (e.isPopupTrigger()) cb.onContextMenu(listing, e, MarketCard.this);
+                if (e.isPopupTrigger()) handlePopup(e);
             }
             @Override public void mouseReleased(MouseEvent e) {
-                if (e.isPopupTrigger()) cb.onContextMenu(listing, e, MarketCard.this);
+                if (e.isPopupTrigger()) handlePopup(e);
             }
         };
         addMouseListener(ma);
