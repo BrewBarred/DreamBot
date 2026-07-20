@@ -329,4 +329,42 @@ public final class UIIcons {
             }
         };
     }
+    /** v1.61: a "market card" glyph - a card outline with an icon square + text lines. */
+    public static Icon card(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int m = Math.max(1, s / 9);
+                int w = s - m * 2, h = s - m * 2;
+                g2.drawRoundRect(m, m, w, h, s / 5, s / 5);
+                int q = Math.max(3, (int) (h * 0.34));
+                g2.drawRect(m + (int) (w * 0.16), m + (int) (h * 0.16), q, q);   // the icon
+                int tx = m + (int) (w * 0.16) + q + Math.max(2, s / 10);
+                int ty1 = m + (int) (h * 0.26), ty2 = m + (int) (h * 0.46);
+                g2.drawLine(tx, ty1, m + (int) (w * 0.86), ty1);                 // title line
+                g2.drawLine(tx, ty2, m + (int) (w * 0.70), ty2);                 // meta line
+                int by = m + (int) (h * 0.78);
+                g2.drawLine(m + (int) (w * 0.16), by, m + (int) (w * 0.86), by); // tag row
+            }
+        };
+    }
+
+    /** v1.61: a die (five pips) - the card builder's "generate a random icon" button. */
+    public static Icon dice(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int m = Math.max(1, s / 8);
+                int w = s - m * 2;
+                g2.drawRoundRect(m, m, w, w, s / 5, s / 5);
+                int r = Math.max(2, s / 9);
+                int a = m + (int) (w * 0.24) - r / 2, b = m + (int) (w * 0.76) - r / 2;
+                int mid = m + w / 2 - r / 2;
+                g2.fillOval(a, a, r, r);
+                g2.fillOval(b, a, r, r);
+                g2.fillOval(mid, mid, r, r);
+                g2.fillOval(a, b, r, r);
+                g2.fillOval(b, b, r, r);
+            }
+        };
+    }
 }
+

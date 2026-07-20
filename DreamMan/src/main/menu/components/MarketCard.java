@@ -43,6 +43,8 @@ public class MarketCard extends JPanel {
         void onToggleComments(ScriptListing l, MarketCard card);
         void onPostComment(ScriptListing l, String body, MarketCard card);
         void onSetIcon(ScriptListing l);
+        /** v1.61: open the Card Builder for a staged listing (strip card button / context menu). */
+        void onBuildCard(ScriptListing l);
         void onDeleteLocal(ScriptListing l);
         void onContextMenu(ScriptListing l, MouseEvent e, JComponent src);
         boolean isOwn(ScriptListing l);
@@ -85,7 +87,7 @@ public class MarketCard extends JPanel {
                 BorderFactory.createLineBorder(CARD_BORDER),
                 new EmptyBorder(8, 9, 8, 9)));
         int w = (mode == Mode.GRID) ? GRID_W : STRIP_W;
-        setPreferredSize(new Dimension(w, mode == Mode.GRID ? 150 : 96));
+        setPreferredSize(new Dimension(w, mode == Mode.GRID ? 150 : 112));
         if (mode == Mode.GRID) buildGrid(); else buildStrip();
         wireCommonMouse();
     }
@@ -247,7 +249,7 @@ public class MarketCard extends JPanel {
 
         iconLabel = new JLabel(decodeIcon(listing.icon, 40));
         iconLabel.setPreferredSize(new Dimension(40, 40));
-        iconLabel.setToolTipText("Click to set an icon");
+        iconLabel.setToolTipText("Click to build this item's card (icon, details, ready state)");
         iconLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         iconLabel.addMouseListener(new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) {
@@ -273,16 +275,34 @@ public class MarketCard extends JPanel {
         col.add(titleLabel);
         col.add(Box.createVerticalStrut(2));
         col.add(metaLabel);
+        // v1.61: the card state, worn on the sleeve - the publish gate should never surprise
+        col.add(Box.createVerticalStrut(3));
+        JPanel stateRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        stateRow.setOpaque(false);
+        stateRow.setAlignmentX(LEFT_ALIGNMENT);
+        stateRow.add(listing.cardReady
+                ? chip("CARD \u2713", Theme.GREEN, Theme.BG_APP)
+                : chip("NO CARD", Theme.AMBER, Theme.AMBER_TINT));
+        col.add(stateRow);
         top.add(col, BorderLayout.CENTER);
 
         add(top, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         actions.setOpaque(false);
-        JButton pub = smallButton(UIIcons.publish(16, Theme.GREEN), "Publish");
+        // v1.61: build/edit the card - amber until a card exists, to pull the eye to step one
+        JButton card = smallButton(UIIcons.card(15, listing.cardReady ? Theme.TEXT_DIM : Theme.AMBER),
+                listing.cardReady ? "Edit this item's card" : "Build this item's card");
+        card.addActionListener(e -> cb.onBuildCard(listing));
+        // v1.61: publishing is gated on a finished card - the button says so before you click
+        JButton pub = smallButton(
+                UIIcons.publish(16, listing.cardReady ? Theme.GREEN : Theme.TEXT_MUTED),
+                listing.cardReady ? "Publish"
+                        : "A finished card is required first \u2014 click to open the card builder");
         pub.addActionListener(e -> cb.onPublish(listing));
         JButton del = smallButton(UIIcons.cross(14, Theme.DANGER), "Remove from market-ready");
         del.addActionListener(e -> cb.onDeleteLocal(listing));
+        actions.add(card);
         actions.add(pub);
         actions.add(del);
         add(actions, BorderLayout.SOUTH);

@@ -1574,7 +1574,8 @@ public class DreamBotMenu extends JFrame {
             try {
                 localMarketRepo.publish(st);
                 reloadMarket();
-                showToast("Also staged \"" + st.name + "\" as a market-ready " + st.kind, mainTabs, true);
+                showToast("Also staged \"" + st.name + "\" as a market-ready " + st.kind
+                        + " \u2014 build its card before publishing", mainTabs, true);
             } catch (Exception sx) {
                 showToast("Staging failed: " + sx.getMessage(), mainTabs, false);
             }
@@ -3216,8 +3217,9 @@ public class DreamBotMenu extends JFrame {
         stripLeft.add(readySortLabel);
 
         JButton btnPublish = createButton("Publish\u2026", new Color(25, 60, 75), null);
-        btnPublish.setToolTipText("Publish one of your presets, the current queue, or the selected "
-                + "library task \u2014 pick from the list");
+        btnPublish.setToolTipText("Pick a preset, the current queue, or the selected library "
+                + "task \u2014 it stages into the row below and opens the card builder "
+                + "(a finished card is required to publish)");
         btnPublish.addActionListener(e -> publishOneItem(btnPublish));
         JPanel stripRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         stripRight.setOpaque(false);
@@ -3480,7 +3482,7 @@ public class DreamBotMenu extends JFrame {
         readyCardsPanel.removeAll();
         if (readyAll.isEmpty()) {
             JLabel hint = new JLabel("Nothing staged \u2014 use the Library's "
-                    + "\"\u2191 Market-ready\" button, then publish from here.");
+                    + "\"\u2191 Market-ready\" button, build its card, then publish from here.");
             hint.setForeground(TEXT_DIM);
             hint.setFont(new Font("Segoe UI", Font.ITALIC, 11));
             hint.setBorder(new EmptyBorder(10, 4, 10, 4));
@@ -3507,7 +3509,7 @@ public class DreamBotMenu extends JFrame {
             importListing(l, marketAnchor());
         }
         @Override public void onPublish(main.market.ScriptListing l) {
-            uploadLocalListing(l);
+            publishStagedListing(l);
         }
         @Override public void onUnpublish(main.market.ScriptListing l, JComponent src) {
             unpublishListing(l, src);
@@ -3527,7 +3529,11 @@ public class DreamBotMenu extends JFrame {
             postCardComment(l, body, card);
         }
         @Override public void onSetIcon(main.market.ScriptListing l) {
-            chooseIconForLocal(l);
+            // v1.61: the icon lives on the card now - one surface for everything card-shaped
+            openCardBuilder(l);
+        }
+        @Override public void onBuildCard(main.market.ScriptListing l) {
+            openCardBuilder(l);
         }
         @Override public void onDeleteLocal(main.market.ScriptListing l) {
             deleteLocalListing(l);
@@ -3641,25 +3647,14 @@ public class DreamBotMenu extends JFrame {
         menu.add(miImport);
 
         if ("local".equals(l.origin)) {
-            JMenuItem miUpload = new JMenuItem("Upload to server\u2026");
-            miUpload.addActionListener(a -> uploadLocalListing(l));
+            JMenuItem miUpload = new JMenuItem("Publish\u2026");
+            miUpload.addActionListener(a -> publishStagedListing(l));
             menu.add(miUpload);
-            JMenuItem miIcon = new JMenuItem("Set icon\u2026");
-            miIcon.addActionListener(a -> chooseIconForLocal(l));
-            menu.add(miIcon);
-            if (l.icon != null && !l.icon.isEmpty()) {
-                JMenuItem miNoIcon = new JMenuItem("Remove icon");
-                miNoIcon.addActionListener(a -> {
-                    l.icon = null;
-                    try {
-                        localMarketRepo.publish(l);
-                        refreshReadyStrip();
-                    } catch (Exception ex) {
-                        showToast("Couldn't save: " + ex.getMessage(), src, false);
-                    }
-                });
-                menu.add(miNoIcon);
-            }
+            // v1.61: icon setting/removal moved into the Card Builder - one surface for the card
+            JMenuItem miCard = new JMenuItem(l.cardReady
+                    ? "Edit card\u2026" : "Build card\u2026 (required to publish)");
+            miCard.addActionListener(a -> openCardBuilder(l));
+            menu.add(miCard);
             JMenuItem miDeleteLocal = new JMenuItem("Delete local copy");
             miDeleteLocal.addActionListener(a -> deleteLocalListing(l));
             menu.add(miDeleteLocal);
@@ -3730,11 +3725,53 @@ public class DreamBotMenu extends JFrame {
     }
 
     /** v1.32b: pushes a LOCAL script to the server (quota + auth enforced server-side). */
-    private void uploadLocalListing(main.market.ScriptListing l) {
-        if (!(marketRepo instanceof main.market.HttpRepository)) {
-            showToast("Switch to the server source first (the server icon)", marketAnchor(), false);
+    /**
+     * v1.61: THE publish gate. Every path that pushes a staged item to a market lands here first,
+     * and an item without a finished card doesn't get past it - the roadmap's rule is that a
+     * built card is a prerequisite for publishing, surfaced up front rather than failing at
+     * upload time. Cardless items are offered the Card Builder on the spot (where a default or
+     * random icon is one click), and card-ready items are dispatched to the right worker for
+     * the current market source: the server, or a shared folder.
+     */
+    private void publishStagedListing(main.market.ScriptListing l) {
+        if (l == null || !"local".equals(l.origin)) return;
+        if (!l.cardReady) {
+            Object[] opts = {"Open card builder", "Not now"};
+            int r = JOptionPane.showOptionDialog(this,
+                    "<html><b>\u201c" + escapeHtml(l.name) + "\u201d doesn't have a finished card "
+                    + "yet.</b><br><br>Every market listing needs a built card before it can be "
+                    + "published \u2014 an icon plus the details the market grid shows.<br>"
+                    + "The builder makes the icon a one-click job (defaults, or a random one)."
+                    + "</html>",
+                    "Card required to publish", JOptionPane.DEFAULT_OPTION,
+                    JOptionPane.WARNING_MESSAGE, null, opts, opts[0]);
+            if (r == 0) openCardBuilder(l);
             return;
         }
+        if (marketRepo instanceof main.market.HttpRepository) {
+            uploadToServer(l);
+        } else if (marketRepo instanceof main.market.FolderRepository) {
+            if (isStagingFolderTarget()) {
+                showToast("The market source IS your staging folder \u2014 it's already there. "
+                        + "Pick the server or a shared folder to publish somewhere.",
+                        marketAnchor(), false);
+                return;
+            }
+            publishToFolderMarket(l);
+        } else {
+            showToast("Pick a market source first (the server or folder icon)",
+                    marketAnchor(), false);
+        }
+    }
+
+    /** True when the folder market points at the local staging folder itself (v1.32b default). */
+    private boolean isStagingFolderTarget() {
+        return marketRepo instanceof main.market.FolderRepository && localMarketRepo != null
+                && marketRepo.describe().equals(localMarketRepo.describe());
+    }
+
+    /** The server worker - assumes the card gate has already passed. */
+    private void uploadToServer(main.market.ScriptListing l) {
         if (!main.market.ServerAccount.isLoggedIn()) {
             showToast("Log in to upload scripts", marketAnchor(), false);
             return;
@@ -3748,6 +3785,7 @@ public class DreamBotMenu extends JFrame {
             try {
                 marketRepo.publish(l);
                 SwingUtilities.invokeLater(() -> {
+                    markLibraryPublished(l.name);   // v1.49: drives the Published filter/tag
                     reloadMarket();
                     showToast("Uploaded \"" + l.name + "\" to the server", marketAnchor(), true);
                 });
@@ -3757,6 +3795,61 @@ public class DreamBotMenu extends JFrame {
                 SwingUtilities.invokeLater(() -> showPublishError(ex, marketAnchor()));
             }
         }, "DreamMan-Upload").start();
+    }
+
+    /**
+     * The shared-folder worker (v1.61) - assumes the card gate has already passed. Before this,
+     * a staged item could only reach a folder market through the old direct-publish dialog;
+     * routing it here keeps folder publishing alive under the mandatory-card rule. Publishing
+     * keeps the staging id on purpose: the merged market view dedupes on id, so the item shows
+     * once (as the folder card with its live stats), exactly like a server upload does.
+     */
+    private void publishToFolderMarket(main.market.ScriptListing l) {
+        if (l.bundle == null) {
+            showToast("That local file has no bundle to publish", marketAnchor(), false);
+            return;
+        }
+        try {
+            marketRepo.publish(l);
+            markLibraryPublished(l.name);   // v1.49: drives the Published filter/tag
+            reloadMarket();
+            showToast("Published \"" + l.name + "\" to the shared folder", marketAnchor(), true);
+        } catch (Exception ex) {
+            showToast("Publish failed: " + ex.getMessage(), marketAnchor(), false);
+        }
+    }
+
+    /**
+     * v1.61: opens the Card Builder on a staged listing - the one surface for the icon, the
+     * card's details, and the ready/not-ready switch the publish gate reads. The dialog stays a
+     * pure view; this Host wiring is where its buttons actually touch the app.
+     */
+    private void openCardBuilder(main.market.ScriptListing l) {
+        if (l == null || !"local".equals(l.origin)) return;
+        main.menu.components.CardBuilderDialog.Host host =
+                new main.menu.components.CardBuilderDialog.Host() {
+            @Override public void saveListing(main.market.ScriptListing x) throws Exception {
+                localMarketRepo.publish(x);   // same id = save-in-place in the staging folder
+                reloadMarket();
+            }
+            @Override public void publishListing(main.market.ScriptListing x) {
+                publishStagedListing(x);      // re-runs the gate (now card-ready) and dispatches
+            }
+            @Override public boolean canPublishNow() {
+                if (marketRepo instanceof main.market.HttpRepository)
+                    return main.market.ServerAccount.isLoggedIn();
+                return marketRepo instanceof main.market.FolderRepository
+                        && !isStagingFolderTarget();
+            }
+            @Override public String publishTargetName() {
+                return marketRepo == null ? "\u2014" : marketRepo.describe();
+            }
+            @Override public String pickIconFile(JComponent anchor) {
+                return pickListingIcon(anchor);
+            }
+        };
+        new main.menu.components.CardBuilderDialog(
+                SwingUtilities.getWindowAncestor(this), l, host).setVisible(true);
     }
 
     /**
@@ -4405,32 +4498,13 @@ public class DreamBotMenu extends JFrame {
         return merged;
     }
 
-    /** Publish the current queue to the market. */
-    /**
-     * Publishes ONE item (Patch B.16): a single library task when {@code single} is non-null, or
-     * the whole queue when it's null. Builds a one-task bundle for the single case so a listing is
-     * always self-contained.
-     */
-    private void publishItem(Task single, JComponent anchor) {
-        // thin wrapper kept for the older call sites
-        List<Task> tasks = new ArrayList<>();
-        if (single == null) {
-            for (int i = 0; i < modelTaskList.size(); i++) tasks.add(modelTaskList.get(i));
-        } else tasks.add(single);
-        publishTasks(single == null ? "My Script" : single.getName(), tasks, anchor);
-    }
-
-    /**
-     * v1.32b: the general publish core - any named set of tasks (a preset, the queue, one
-     * library task). The form's name defaults to what you're publishing (preset/first-task
-     * name), the author is the signed-in account, loops are reset to 1 as always.
-     */
     /**
      * v1.33: stage a library task into the LOCAL market (your notes' "make market-ready").
      * Copies the task into local staging - it stays in the library - and lets you tag it as a
      * task (reusable building block) or a script (full single-purpose routine), which the server
      * caps separately. It lands in the market-ready row at the bottom of the Market tab
-     * (v1.60), where each card has its own publish button.
+     * (v1.60), and v1.61 drops you straight into its Card Builder, since a finished card is
+     * now what makes it publishable.
      */
     private void makeMarketReady(Task t, JComponent anchor) {
         if (t == null) { showToast("Select a library task first", anchor, false); return; }
@@ -4477,144 +4551,97 @@ public class DreamBotMenu extends JFrame {
             t.setMarketReady(true);   // v1.49: drives the Market-Ready filter
             saveAll(false);
             refilterLibrary();
-            showToast("\"" + t.getName() + "\" is market-ready \u2014 see the row at the bottom "
-                    + "of the Market tab", anchor, true);
             reloadMarket();
+            // v1.61: publishing now requires a finished card, so go straight into building it -
+            // the builder's Cancel still leaves the item staged (just card-less, shown as such)
+            showToast("\"" + t.getName() + "\" is staged \u2014 build its card to make it "
+                    + "publishable", anchor, true);
+            openCardBuilder(listing);
         } catch (Exception ex) {
             showToast("Couldn't stage: " + ex.getMessage(), anchor, false);
         }
     }
 
-    private void publishTasks(String defaultName, List<Task> tasks, JComponent anchor) {
+    /**
+     * v1.61: the direct-publish path is retired - publishing anything now goes through staging
+     * and the Card Builder, because a listing without a finished card can't be published at all.
+     * This replaces the old publishItem/publishTasks pair: it stages a named set of tasks (a
+     * preset, the queue, one library task) into the market-ready strip and drops straight into
+     * the Card Builder, whose "Save & publish" completes what used to be the one-dialog flow.
+     * Kind defaults sensibly (one task = task, several = script) and stays editable in the
+     * builder; loop counts travel intact per the v1.49 runtime-clamp rule.
+     */
+    private void stageForCardBuilder(String defaultName, List<Task> tasks, JComponent anchor) {
         if (tasks == null || tasks.isEmpty()) {
-            showToast("Nothing to publish - it's empty", anchor, false);
+            showToast("Nothing to stage - it's empty", anchor, false);
             return;
         }
-        if (marketRepo instanceof main.market.HttpRepository
-                && !ensureConsent(main.privacy.Consent.MARKET_PUBLISH)) {
-            showToast("Nothing was sent", anchor, false);
-            return;
+        String name = defaultName == null || defaultName.isBlank() ? "My Script" : defaultName;
+
+        // already staged under this name? then this IS its card-builder shortcut - never
+        // silently pile up a second staging copy of the same thing
+        for (main.market.ScriptListing ex : marketAll) {
+            if (ex != null && "local".equals(ex.origin) && ex.name != null
+                    && ex.name.equalsIgnoreCase(name)) {
+                showToast("\"" + name + "\" is already staged - opening its card",
+                        anchor, true);
+                openCardBuilder(ex);
+                return;
+            }
         }
 
-        JTextField txtName = new JTextField(
-                defaultName == null || defaultName.isBlank() ? "My Script" : defaultName, 22);
-        // v1.32: author is linked to the signed-in account and read-only (publishing requires
-        // login, and the server authors it from the token regardless).
+        // v1.32: the author is the signed-in account (the server authors from the token anyway)
         String acctName = main.market.ServerAccount.isLoggedIn()
                 ? main.market.ServerAccount.username() : null;
         String who = safePlayerName();
-        String authorName = (acctName != null && !acctName.isEmpty()) ? acctName
+        String author = (acctName != null && !acctName.isEmpty()) ? acctName
                 : (who == null || who.isEmpty() ? "Anonymous" : who);
-        JTextField txtAuthor = new JTextField(authorName, 22);
-        txtAuthor.setEditable(false);
-        txtAuthor.setToolTipText("Linked to your account - can't be changed here.");
-        JSpinner spVersion = new JSpinner(new SpinnerNumberModel(1.0, 0.1, 999.0, 0.1));
-        JTextField txtTags = new JTextField("", 22);
-        txtTags.setToolTipText("Comma-separated, e.g. combat, ironman, f2p");
-        JTextArea txtDesc = new JTextArea(3, 22);
-        txtDesc.setLineWrap(true);
-        txtDesc.setWrapStyleWord(true);
-        JCheckBox chkChecks = new JCheckBox("Include my always-on checks (" + globalTriggers.size() + ")",
-                !globalTriggers.isEmpty());
-        chkChecks.setOpaque(false);
-        chkChecks.setForeground(TEXT_MAIN);
-
-        // v1.60: an optional card icon. The chooser enforces the server's 300 KB cap; the hint
-        // link is the roadmap's free resizer for getting a picture down to 128x128.
-        final String[] iconB64 = { null };
-        JButton btnIcon = createButton("Choose icon\u2026");
-        JLabel iconPrev = new JLabel(main.menu.components.UIIcons.image(26, TEXT_DIM));
-        iconPrev.setToolTipText("No icon yet (optional)");
-        btnIcon.addActionListener(ev -> {
-            String b = pickListingIcon(btnIcon);
-            if (b != null) {
-                iconB64[0] = b;
-                iconPrev.setIcon(main.menu.components.MarketCard.decodeIcon(b, 26));
-                iconPrev.setToolTipText("Icon attached");
-            }
-        });
-        JPanel iconRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        iconRow.setOpaque(false);
-        iconRow.add(btnIcon);
-        iconRow.add(iconPrev);
-        JLabel iconHint = linkLabel("128\u00d7128 PNG recommended \u00b7 free resizer: iloveimg.com",
-                ILOVEIMG_RESIZE_URL);
-
-        JPanel form = new JPanel(new GridBagLayout());
-        form.setOpaque(false);
-        GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(4, 4, 4, 4);
-        c.anchor = GridBagConstraints.WEST;
-        c.gridx = 0; c.gridy = 0;
-        form.add(styledLabel("Name:"), c);        c.gridx = 1; form.add(txtName, c);
-        c.gridx = 0; c.gridy++;
-        form.add(styledLabel("Author:"), c);      c.gridx = 1; form.add(txtAuthor, c);
-        c.gridx = 0; c.gridy++;
-        form.add(styledLabel("Version:"), c);     c.gridx = 1; form.add(spVersion, c);
-        c.gridx = 0; c.gridy++;
-        form.add(styledLabel("Tags:"), c);        c.gridx = 1; form.add(txtTags, c);
-        c.gridx = 0; c.gridy++;
-        form.add(styledLabel("Description:"), c); c.gridx = 1; form.add(new JScrollPane(txtDesc), c);
-        c.gridx = 0; c.gridy++;
-        form.add(styledLabel("Icon:"), c);        c.gridx = 1; form.add(iconRow, c);
-        c.gridx = 1; c.gridy++;
-        form.add(iconHint, c);
-        c.gridx = 0; c.gridy++; c.gridwidth = 2;
-        form.add(chkChecks, c);
-        c.gridy++;
-        JLabel note = new JLabel("Publishes to: " + marketRepo.describe());
-        note.setForeground(TEXT_DIM);
-        form.add(note, c);
-
-        int r = JOptionPane.showConfirmDialog(this, form, "Publish to the market",
-                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-        if (r != JOptionPane.OK_OPTION) return;
 
         main.market.ScriptListing listing = new main.market.ScriptListing();
-        listing.name = txtName.getText().trim();
-        listing.author = txtAuthor.getText().trim();
-        listing.version = ((Number) spVersion.getValue()).doubleValue();
-        listing.description = txtDesc.getText().trim();
-        listing.tags = new ArrayList<>();
-        for (String t : txtTags.getText().split(","))
-            if (!t.trim().isEmpty()) listing.tags.add(t.trim());
-        listing.icon = iconB64[0];   // v1.60: optional, base64; the server caps it at ~300 KB
+        listing.name = name;
+        listing.author = author;
+        listing.version = 1.0;
+        listing.kind = tasks.size() > 1 ? "script" : "task";   // editable in the builder
+        listing.origin = "local";
+        // v1.51: tags travel - seed the card with the union of the tasks' own tags
+        java.util.LinkedHashSet<String> tagset = new java.util.LinkedHashSet<>();
+        for (Task qt : tasks)
+            if (qt != null) tagset.addAll(qt.getTags());
+        listing.tags = new ArrayList<>(tagset);
 
         main.data.store.ScriptBundle b = new main.data.store.ScriptBundle();
         b.name = listing.name;
-        b.author = listing.author;
+        b.author = author;
         b.version = listing.version;
-        b.description = listing.description;
-        // v1.49: preserve the author's loop counts (queue loops + per-task repeat). Previously
-        // these were flattened to 1 to stop free users multiplying past their cap - but that
-        // silently broke legitimate scripts. The tier cap is now enforced at RUNTIME instead
-        // (a downloaded task's repeat is clamped to the runner's max loops when it executes),
-        // so the intended loops travel with the script and only over-cap use is prevented.
-        b.loops = 1;   // queue-level loops default to 1; the importer picks their own
+        b.description = "";
+        // v1.49: preserve the author's loop counts (queue loops + per-task repeat) - the tier
+        // cap is enforced at RUNTIME on the runner's side, so intended loops travel with the
+        // script and only over-cap use is prevented. Queue-level loops still default to 1 so
+        // the importer picks their own.
+        b.loops = 1;
         b.tasks = ProfileCodec.tasksToData(tasks);
-        if (chkChecks.isSelected())
-            b.globalTriggers = main.watchers.TriggerCodec.toJson(new ArrayList<>(globalTriggers));
+        // the old publish dialog's "include my always-on checks" box, as a one-question ask
+        if (!globalTriggers.isEmpty()) {
+            int inc = JOptionPane.showConfirmDialog(this,
+                    "Bundle your " + globalTriggers.size() + " always-on check"
+                    + (globalTriggers.size() == 1 ? "" : "s") + " into it?\n"
+                    + "(They travel with the script and run for whoever downloads it.)",
+                    "Include checks?", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+            if (inc == JOptionPane.YES_OPTION)
+                b.globalTriggers = main.watchers.TriggerCodec.toJson(
+                        new ArrayList<>(globalTriggers));
+        }
         listing.bundle = b;
 
         try {
-            // v1.32b: publishing sends your script to the server - make sure that consent is
-            // granted (prompt inline if not) instead of failing deep in the repo. Logging in
-            // grants browse + sync but NOT publish, which is why publishes were rejected.
-            if (marketRepo instanceof main.market.HttpRepository
-                    && !ensureConsent(main.privacy.Consent.MARKET_PUBLISH)) {
-                showToast("Publishing needs your permission - not published", anchor, false);
-                return;
-            }
-            marketRepo.publish(listing);
-            markLibraryPublished(listing.name);   // v1.49: drives the Published filter/tag
+            localMarketRepo.publish(listing);
             reloadMarket();
-            showToast("Published \"" + listing.name + "\"", anchor, true);
+            openCardBuilder(listing);   // publish happens from here, once the card is finished
         } catch (Exception ex) {
-            // v1.60: the server's 409 (version already exists) and 403 (anti-plagiarism) answers
-            // carry a real explanation - show it whole instead of clipping it into a toast.
-            showPublishError(ex, anchor);
+            showToast("Couldn't stage: " + ex.getMessage(), anchor, false);
         }
     }
+
 
     /** v1.49: a library name not already in use - appends " (2)", " (3)"… until unique. */
     private String uniqueLibraryName(String base) {
@@ -4826,6 +4853,10 @@ public class DreamBotMenu extends JFrame {
         copy.icon = l.icon;
         copy.kind = l.kind;
         copy.vipOnly = l.vipOnly;
+        // v1.61: it was live, so its card was finished - keep it publishable in one click. The
+        // only exception is a pre-1.61 listing published before icons were mandatory: that one
+        // comes back card-less and goes through the builder like anything else.
+        copy.cardReady = l.icon != null && !l.icon.isEmpty();
         copy.bundle = l.bundle;
         copy.origin = "local";
         try {
@@ -4869,21 +4900,9 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    /** v1.60: set/replace the icon on a staged listing (click its icon in the strip). */
-    private void chooseIconForLocal(main.market.ScriptListing l) {
-        if (l == null || !"local".equals(l.origin)) return;
-        String b = pickListingIcon(marketAnchor());
-        if (b == null) return;
-        l.icon = b;
-        try {
-            localMarketRepo.publish(l);
-            refreshReadyStrip();
-            showToast("Icon set on \"" + l.name + "\" - it publishes with the script",
-                    marketAnchor(), true);
-        } catch (Exception ex) {
-            showToast("Couldn't save the icon: " + ex.getMessage(), marketAnchor(), false);
-        }
-    }
+    // v1.61: chooseIconForLocal is gone - the strip icon click and the context menu both open
+    // the Card Builder now, so the icon, the card's details and the ready switch live in one
+    // place instead of three. pickListingIcon below stays: it's the builder's file picker.
 
     /**
      * v1.60: pick an image file and return it as base64 (or null). Enforces the server's ~300 KB
@@ -4980,10 +4999,12 @@ public class DreamBotMenu extends JFrame {
 
     /** Publish ONE item at a time (Patch B.16): the selected library task, or the whole queue. */
     /**
-     * v1.32b: the publish chooser is now a LIST of your publishable items - every non-empty
-     * preset, the current queue, and the selected library task - each with a one-click publish
-     * (up-arrow) button. Items already on the server under your name show a server badge and a
-     * disabled button instead, so what's published is visible at a glance.
+     * v1.32b: the publish chooser is a LIST of your publishable items - every non-empty
+     * preset, the current queue, and the selected library task. v1.61: the up-arrow no longer
+     * publishes directly - it stages the item and opens its Card Builder, because a finished
+     * card is now a prerequisite for publishing. Items already on the server under your name
+     * show a server badge and a disabled button instead, so what's published is visible at a
+     * glance.
      */
     private void publishOneItem(JComponent anchor) {
         // what's already mine on the server? (from the last market load - no extra request)
@@ -5025,7 +5046,8 @@ public class DreamBotMenu extends JFrame {
         JPanel root = new JPanel(new BorderLayout(0, 8));
         root.setBorder(new EmptyBorder(12, 12, 12, 12));
         root.setBackground(BG_BASE);
-        JLabel head = new JLabel("Your publishable items - click the arrow to publish one:");
+        JLabel head = new JLabel("Your publishable items \u2014 the arrow stages one and opens "
+                + "its card builder:");
         head.setForeground(TEXT_DIM);
         root.add(head, BorderLayout.NORTH);
 
@@ -5054,8 +5076,9 @@ public class DreamBotMenu extends JFrame {
             r.add(lbl, BorderLayout.CENTER);
             JButton up = iconButton(main.menu.components.UIIcons.publish(18,
                     already ? TEXT_DIM : new Color(0x6F, 0xC2, 0x76)),
-                    already ? "Already published" : "Publish \"" + name + "\"",
-                    () -> { dlg.dispose(); publishTasks(name, tasks, anchor); });
+                    already ? "Already published"
+                            : "Stage \"" + name + "\" & build its card",
+                    () -> { dlg.dispose(); stageForCardBuilder(name, tasks, anchor); });
             up.setEnabled(!already);
             r.add(up, BorderLayout.EAST);
             list.add(r);

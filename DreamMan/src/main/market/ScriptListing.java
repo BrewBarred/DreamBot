@@ -36,6 +36,14 @@ public class ScriptListing {
      */
     public String icon;
 
+    /**
+     * v1.61: "the card is finished" - set by the Card Builder, and the gate every publish path
+     * checks. Only meaningful while {@code origin == "local"} (it persists in the staging JSON);
+     * a server listing by definition had a finished card, and the field just rides along
+     * harmlessly in the publish payload (the server stores only the columns it knows).
+     */
+    public boolean cardReady = false;
+
     /** The script itself. */
     public ScriptBundle bundle;
 
