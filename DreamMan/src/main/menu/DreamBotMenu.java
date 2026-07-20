@@ -317,7 +317,7 @@ public class DreamBotMenu extends JFrame {
     // ── Patch B.3: Task Library modernization ──
     private JComboBox<String> librarySortCombo;
     private Map<String, Integer> libraryUseCounts = new HashMap<>();
-    private JLabel inspName, inspMeta, inspStatus;
+    private JLabel inspName, inspMeta, inspStatus, inspTags;   // v1.62: inspTags = full tag list
     private JTextArea inspDesc, inspAttrs;
     // Patch B.4: always-on watchers - checked between every action while the player is safe.
     private final List<main.watchers.Trigger> globalTriggers =
@@ -2096,6 +2096,9 @@ public class DreamBotMenu extends JFrame {
         // v1.30: admin star clicks toggle default-task status; laid-out hit test so the
         // clickable zone is exactly the drawn star.
         listTaskLibrary.addMouseListener(new MouseAdapter() {
+            /** v1.62: like the Task List, the context menu waits ~280ms so a double-RIGHT can win. */
+            private javax.swing.Timer popupTimer;
+
             @Override public void mouseClicked(MouseEvent me) {
                 int idx = listTaskLibrary.locationToIndex(me.getPoint());
                 if (idx < 0) return;
@@ -2118,7 +2121,19 @@ public class DreamBotMenu extends JFrame {
                     return;
                 }
 
+                // v1.62: double-RIGHT-click opens the task in the builder for editing (the
+                // shortcut kept from the old behaviour). The single-right context menu below is
+                // held back briefly so this can land first.
+                if (SwingUtilities.isRightMouseButton(me) && me.getClickCount() == 2) {
+                    if (popupTimer != null) popupTimer.stop();
+                    listTaskLibrary.setSelectedIndex(idx);
+                    loadIntoBuilder(t);
+                    mainTabs.setSelectedIndex(2);
+                    return;
+                }
+
                 // admins: single-click the star to toggle a default task
+                if (!SwingUtilities.isLeftMouseButton(me)) return;
                 if (!main.market.Tier.isAdmin()) return;
                 libraryCardRenderer.getListCellRendererComponent(listTaskLibrary, t, idx, false, false);
                 libraryCardRenderer.setBounds(0, 0, b.width, b.height);
@@ -2130,6 +2145,22 @@ public class DreamBotMenu extends JFrame {
                 listTaskLibrary.repaint();
                 showToast(now ? "\"" + t.getName() + "\" is now a DEFAULT task"
                               : "\"" + t.getName() + "\" removed from defaults", listTaskLibrary, true);
+            }
+
+            @Override public void mousePressed(MouseEvent me)  { maybePopup(me); }
+            @Override public void mouseReleased(MouseEvent me) { maybePopup(me); }
+            private void maybePopup(MouseEvent me) {
+                if (!me.isPopupTrigger() || me.getClickCount() != 1) return;
+                int idx = listTaskLibrary.locationToIndex(me.getPoint());
+                if (idx < 0) return;
+                Rectangle b = listTaskLibrary.getCellBounds(idx, idx);
+                if (b == null || !b.contains(me.getPoint())) return;
+                listTaskLibrary.setSelectedIndex(idx);
+                final int px = me.getX(), py = me.getY();
+                if (popupTimer != null) popupTimer.stop();
+                popupTimer = new javax.swing.Timer(280, ev -> showLibraryContextMenu(idx, px, py));
+                popupTimer.setRepeats(false);
+                popupTimer.start();
             }
         });
         listTaskLibrary.setFixedCellHeight(-1);
@@ -2210,16 +2241,9 @@ public class DreamBotMenu extends JFrame {
         JButton btnTaskLibrarySave = createButton("Save");
         btnTaskLibrarySave.addActionListener(e -> saveAll());
 
-        ///  Create Task Library add button
-        JButton btnTaskLibraryAdd = createButton("Add", COLOR_LIGHT_GREEN, null);
-        btnTaskLibraryAdd.addActionListener(e -> {
-            if(listTaskLibrary.getSelectedValue() != null) {
-                // deep-copy so editing/executing the queued task never mutates the library original
-                int pos = insertIntoQueue(listTaskLibrary.getSelectedValue());
-                listTaskList.setSelectedIndex(pos);
-                this.showToast("Added to position " + (pos + 1) + " of the queue", btnTaskLibraryAdd, true);
-            }
-        });
+        // v1.62: the library's "Add" button is gone - adding a library task to the current list
+        // now happens by double-clicking it (below) or from the Task List's "+" picker. Its
+        // deep-copy-into-queue behaviour lives in insertIntoQueue, shared by both those paths.
 
         // v1.62: the "Insert: End/After" text dropdown moved to the Task List panel as a single
         // insert-mode toggle icon button. The shared insertAfterSelected flag still drives adds;
@@ -2273,37 +2297,22 @@ public class DreamBotMenu extends JFrame {
         btnMarketReady.addActionListener(e ->
                 makeMarketReady(listTaskLibrary.getSelectedValue(), btnMarketReady));
 
-        JButton btnQuickAdd = createButton("Quick add\u2026", new Color(35, 55, 70), null);
-        btnQuickAdd.setToolTipText("Search the library and add several tasks fast without leaving");
-        btnQuickAdd.addActionListener(e -> openLibraryQuickAdd());
+        // v1.62: "Duplicate" - deep-copy the selected library task under an incremented name, so
+        // you can extend a task without rebuilding it. Shared with the right-click context menu.
+        JButton btnTaskLibraryDuplicate = createButton("Duplicate", COLOR_LIGHT_GREEN, null);
+        btnTaskLibraryDuplicate.setToolTipText("Deep-copy the selected task under a new name");
+        btnTaskLibraryDuplicate.addActionListener(e ->
+                duplicateLibraryTask(listTaskLibrary.getSelectedValue(), btnTaskLibraryDuplicate));
 
         btnSection.add(btnTaskLibrarySave);
-        btnSection.add(btnTaskLibraryAdd);
-        btnSection.add(btnQuickAdd);
+        btnSection.add(btnTaskLibraryDuplicate);
         btnSection.add(btnTaskLibraryDelete);
         btnSection.add(btnTaskLibraryEdit);
         btnSection.add(btnTaskLibraryExport);
         btnSection.add(btnTaskLibraryImport);
-        JButton btnTags = createButton("Tags…", new Color(55, 45, 65), null);
-        btnTags.setToolTipText("Comma-separated tags for the selected task - search filters for the library + market");
-        btnTags.addActionListener(e -> {
-            Task sel = listTaskLibrary.getSelectedValue();
-            if (sel == null) { showToast("Select a library task first", btnTags, false); return; }
-            String cur = String.join(", ", sel.getTags());
-            String in = (String) JOptionPane.showInputDialog(this,
-                    "Tags for \"" + sel.getName() + "\" (comma-separated):",
-                    "Edit tags", JOptionPane.PLAIN_MESSAGE, null, null, cur);
-            if (in == null) return;
-            java.util.List<String> parsed = new ArrayList<>();
-            for (String part : in.split(","))
-                if (!part.trim().isEmpty()) parsed.add(part.trim());
-            sel.setTags(parsed);
-            saveAll(false);
-            refilterLibrary();
-            showToast(parsed.isEmpty() ? "Tags cleared" : "Tags: " + String.join(", ", parsed), btnTags, true);
-        });
+        // v1.62: the "Tags…" button moved to the library's right-click context menu (and, later,
+        // a Task Builder step). editLibraryTags holds the logic both entry points call.
         btnSection.add(btnMarketReady);
-        btnSection.add(btnTags);
 
         panelCenterEastLibraryTab.add(buildLibraryInspector(), BorderLayout.CENTER);
 
@@ -2713,10 +2722,16 @@ public class DreamBotMenu extends JFrame {
             String dateStr = t.getCreatedAt() > 0
                     ? new java.text.SimpleDateFormat("yyyy-MM-dd").format(new Date(t.getCreatedAt()))
                     : "";
-            // v1.51: version + tags on the small line under the title
+            // v1.51: version + tags on the small line under the title. v1.62: cap the card to a
+            // few tags (the full set lives in the inspector) so long tag lists don't blow out the
+            // row - the first three, then a "+N" marker.
             java.util.List<String> bits = new java.util.ArrayList<>();
             bits.add("v" + String.format("%.1f", t.getVersion()));
-            if (!t.getTags().isEmpty()) bits.add(String.join(", ", t.getTags()));
+            java.util.List<String> tg = t.getTags();
+            if (!tg.isEmpty()) {
+                if (tg.size() <= 3) bits.add(String.join(", ", tg));
+                else bits.add(String.join(", ", tg.subList(0, 3)) + " +" + (tg.size() - 3));
+            }
             if (tag != null) bits.add(tag);
             if (!dateStr.isEmpty()) bits.add(dateStr);
             date.setText(String.join("  ·  ", bits));
@@ -2738,6 +2753,78 @@ public class DreamBotMenu extends JFrame {
      * This is where creators explain their work, not just store it. [Edit in builder] hands the
      * task to the builder ready to overwrite everywhere ("Save changes").
      */
+    /**
+     * v1.62: deep-copy a library task under an incremented, collision-free name and drop the copy
+     * into the library. Everything else is carried over verbatim; the copy gets a fresh id so it's
+     * its own logical task (editing it never rewrites the original). Shared by the Duplicate button
+     * and the right-click menu.
+     */
+    private void duplicateLibraryTask(Task src, JComponent anchor) {
+        if (src == null) { showToast("Select a library task first", anchor, false); return; }
+        Task copy = new Task(src);              // deep copy (same ctor the queue-duplicate uses)
+        copy.regenerateId();                    // its own identity, so edits don't bleed across
+        copy.setName(uniqueLibraryName(src.getName()));   // "Name" -> "Name (2)" -> "Name (3)"...
+        copy.setMarketReady(false);             // a fresh copy isn't staged/published/exported yet
+        libraryAdd(copy);
+        saveAll(false);
+        refreshTaskLibrary();
+        // land the selection on the new copy so it's obvious what happened
+        listTaskLibrary.setSelectedValue(copy, true);
+        showToast("Duplicated as \"" + copy.getName() + "\"", anchor, true);
+    }
+
+    /**
+     * v1.62: edit a library task's tags (comma-separated). Extracted from the old "Tags…" button
+     * so the right-click menu - and, later, a Task Builder step - can share one implementation.
+     * Tags drive the library + market search filters.
+     */
+    private void editLibraryTags(Task sel, JComponent anchor) {
+        if (sel == null) { showToast("Select a library task first", anchor, false); return; }
+        String cur = String.join(", ", sel.getTags());
+        String in = (String) JOptionPane.showInputDialog(this,
+                "Tags for \"" + sel.getName() + "\" (comma-separated):",
+                "Edit tags", JOptionPane.PLAIN_MESSAGE, null, null, cur);
+        if (in == null) return;
+        java.util.List<String> parsed = new ArrayList<>();
+        for (String part : in.split(","))
+            if (!part.trim().isEmpty()) parsed.add(part.trim());
+        sel.setTags(parsed);
+        saveAll(false);
+        refilterLibrary();
+        populateInspector(listTaskLibrary.getSelectedValue());   // reflect new tags immediately
+        showToast(parsed.isEmpty() ? "Tags cleared" : "Tags: " + String.join(", ", parsed),
+                anchor, true);
+    }
+
+    /** v1.62: the library list's right-click menu - edit, tag, duplicate, delete in one place. */
+    private void showLibraryContextMenu(int index, int x, int y) {
+        if (index < 0 || index >= modelTaskLibrary.getSize()) return;
+        Task t = modelTaskLibrary.getElementAt(index);
+        if (t == null) return;
+        listTaskLibrary.setSelectedIndex(index);
+
+        JPopupMenu menu = new JPopupMenu();
+        JMenuItem miEdit = new JMenuItem("Edit in builder\u2026");
+        miEdit.addActionListener(a -> { loadIntoBuilder(t); mainTabs.setSelectedIndex(2); });
+        JMenuItem miTags = new JMenuItem(t.getTags().isEmpty()
+                ? "Add tags\u2026" : "Edit tags\u2026");
+        miTags.addActionListener(a -> editLibraryTags(t, listTaskLibrary));
+        JMenuItem miDup = new JMenuItem("Duplicate");
+        miDup.addActionListener(a -> duplicateLibraryTask(t, listTaskLibrary));
+        JMenuItem miDelete = new JMenuItem("Delete");
+        miDelete.addActionListener(a -> {
+            libraryRemove(t);
+            refreshTaskLibrary();
+            showToast("Deleted \"" + t.getName() + "\"", listTaskLibrary, true);
+        });
+        menu.add(miEdit);
+        menu.add(miTags);
+        menu.add(miDup);
+        menu.addSeparator();
+        menu.add(miDelete);
+        menu.show(listTaskLibrary, x, y);
+    }
+
     private JPanel buildLibraryInspector() {
         JPanel root = new JPanel(new BorderLayout(0, 8));
         root.setOpaque(false);
@@ -2754,11 +2841,17 @@ public class DreamBotMenu extends JFrame {
         inspStatus = new JLabel(" ");
         inspStatus.setForeground(TEXT_MAIN);
         inspStatus.setFont(new Font("Segoe UI", Font.ITALIC, 12));
+        // v1.62: the full tag list (the card only shows a few) - the "breakdown" tag view
+        inspTags = new JLabel(" ");
+        inspTags.setForeground(Theme.ACCENT);
+        inspTags.setFont(new Font("Consolas", Font.PLAIN, 11));
         head.add(inspName);
         head.add(Box.createVerticalStrut(2));
         head.add(inspMeta);
         head.add(Box.createVerticalStrut(2));
         head.add(inspStatus);
+        head.add(Box.createVerticalStrut(2));
+        head.add(inspTags);
 
         inspDesc = new JTextArea(3, 20);
         inspDesc.setEditable(false);
@@ -2831,6 +2924,7 @@ public class DreamBotMenu extends JFrame {
             if (inspName != null) inspName.setText("Select a task");
             if (inspMeta != null) inspMeta.setText(" ");
             if (inspStatus != null) inspStatus.setText(" ");
+            if (inspTags != null) inspTags.setText(" ");
             if (inspDesc != null) inspDesc.setText("");
             if (inspAttrs != null) inspAttrs.setText("");
             return;
@@ -2844,6 +2938,9 @@ public class DreamBotMenu extends JFrame {
                 + "   \u00b7   " + (t.getActions() == null ? 0 : t.getActions().size()) + " action(s)"
                 + "   \u00b7   repeat \u00d7" + Math.max(1, t.getRepeat()));
         inspStatus.setText("Status while running: \"" + t.getStatus() + "\"");
+        if (inspTags != null)
+            inspTags.setText(t.getTags().isEmpty() ? "Tags: (none)"
+                    : "Tags: " + String.join(", ", t.getTags()));
         inspDesc.setText(t.getDescription() == null ? "" : t.getDescription());
         inspDesc.setCaretPosition(0);
         if (t.getActions() != null)
