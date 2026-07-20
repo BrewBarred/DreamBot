@@ -366,5 +366,56 @@ public final class UIIcons {
             }
         };
     }
+    /** v1.62: "insert at end" - a stack of rows with the new one landing at the bottom. */
+    public static Icon insertEnd(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int lx = (int) (s * 0.22), rx = (int) (s * 0.78);
+                g2.drawLine(lx, (int) (s * 0.24), rx, (int) (s * 0.24));   // existing rows
+                g2.drawLine(lx, (int) (s * 0.42), rx, (int) (s * 0.42));
+                float dash = Math.max(2f, s / 10f);
+                g2.setStroke(new BasicStroke(Math.max(1.6f, s / 11f), BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND, 10f, new float[]{dash, dash}, 0f));
+                g2.drawLine(lx, (int) (s * 0.74), rx, (int) (s * 0.74)); // the new one, at the END
+                // a little down-arrow pointing to where it lands
+                g2.setStroke(new BasicStroke(Math.max(1.6f, s / 11f), BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND));
+                int cx = s / 2;
+                g2.drawLine(cx, (int) (s * 0.52), cx, (int) (s * 0.66));
+                g2.drawLine(cx - s / 10, (int) (s * 0.60), cx, (int) (s * 0.66));
+                g2.drawLine(cx + s / 10, (int) (s * 0.60), cx, (int) (s * 0.66));
+            }
+        };
+    }
+
+    /** v1.62: "insert after selected" - the new row slots in just below a highlighted row. */
+    public static Icon insertAfter(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int lx = (int) (s * 0.22), rx = (int) (s * 0.78);
+                g2.drawLine(lx, (int) (s * 0.22), rx, (int) (s * 0.22));   // a row above
+                // the selected row - drawn as a filled bar so it reads as "here"
+                g2.fillRect(lx, (int) (s * 0.36), rx - lx, Math.max(2, (int) (s * 0.12)));
+                float dash = Math.max(2f, s / 10f);
+                g2.setStroke(new BasicStroke(Math.max(1.6f, s / 11f), BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND, 10f, new float[]{dash, dash}, 0f));
+                g2.drawLine(lx, (int) (s * 0.62), rx, (int) (s * 0.62)); // new one, right AFTER it
+                g2.setStroke(new BasicStroke(Math.max(1.6f, s / 11f), BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND));
+                g2.drawLine(lx, (int) (s * 0.80), rx, (int) (s * 0.80));   // a row below
+            }
+        };
+    }
+
+    /** v1.62: a plus sign - the Task List's "add from library" button. */
+    public static Icon plus(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                int m = (int) (s * 0.24);
+                g2.drawLine(s / 2, m, s / 2, s - m);
+                g2.drawLine(m, s / 2, s - m, s / 2);
+            }
+        };
+    }
 }
 

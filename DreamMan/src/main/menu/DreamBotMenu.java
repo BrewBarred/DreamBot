@@ -713,11 +713,15 @@ public class DreamBotMenu extends JFrame {
         });
 
         // Patch B.2: auto-wait between tasks - the small humanised pause you'd add manually
-        // after every task anyway. Range in ms; persisted with the profile.
-        chkQueueWait = new JCheckBox("Auto-wait");
+        // after every task anyway. Range in ms; persisted with the profile. v1.62: confirmed
+        // live (it feeds a real gap via onTaskRunComplete), so kept - just labelled clearly as
+        // an automatic background pause rather than the ambiguous "Auto-wait".
+        chkQueueWait = new JCheckBox("Pause between tasks");
         chkQueueWait.setOpaque(false);
         chkQueueWait.setForeground(TEXT_MAIN);
-        chkQueueWait.setToolTipText("Pause a random amount (below, in ms) after each completed task");
+        chkQueueWait.setToolTipText("<html>When on, a random pause (the ms range at right) is "
+                + "added <b>automatically in the background after every completed task</b>,<br>"
+                + "so the queue looks less robotic. Applies to the whole queue while it runs.</html>");
         chkQueueWait.addActionListener(e -> {
             queueAutoWait = chkQueueWait.isSelected();
             queueWaitMinInput.setEnabled(queueAutoWait);
@@ -725,6 +729,8 @@ public class DreamBotMenu extends JFrame {
         });
         queueWaitMinInput = new JTextField("400", 4);
         queueWaitMaxInput = new JTextField("1200", 4);
+        queueWaitMinInput.setToolTipText("Shortest auto-pause after a task (ms)");
+        queueWaitMaxInput.setToolTipText("Longest auto-pause after a task (ms)");
         KeyAdapter qwSync = new KeyAdapter() {
             @Override public void keyReleased(KeyEvent e) {
                 try { queueAutoWaitMinMs = Integer.parseInt(queueWaitMinInput.getText().trim()); } catch (Exception ignored) {}
@@ -741,9 +747,15 @@ public class DreamBotMenu extends JFrame {
         left.add(lblLoop);
         left.add(loopQueueSpinner);
         left.add(loopInfiniteCheck);
+        JLabel lblWaitTo = new JLabel("to");
+        lblWaitTo.setForeground(TEXT_DIM);
+        JLabel lblWaitMs = new JLabel("ms");
+        lblWaitMs.setForeground(TEXT_DIM);
         left.add(chkQueueWait);
         left.add(queueWaitMinInput);
+        left.add(lblWaitTo);
         left.add(queueWaitMaxInput);
+        left.add(lblWaitMs);
 
         // ---- right: skip / run-from-here + live indicator ----
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
@@ -1449,6 +1461,46 @@ public class DreamBotMenu extends JFrame {
      * One-click script export (Patch B.10). Packages the current queue - tasks, loop count and
      * your always-on checks - into a standalone .jar that DreamBot lists and runs by itself.
      */
+    /**
+     * v1.62: the export dialog's "Triggers..." picker, split out of the cramped export form into
+     * its own dialog. The caller owns the checkbox list (their selected state IS the choice); this
+     * just presents the same boxes at a readable size with select-all / none helpers. Returns when
+     * closed - the caller re-reads the checkboxes.
+     */
+    private void openExportTriggersDialog(java.util.List<JCheckBox> trigPicks, JComponent anchor) {
+        if (trigPicks.isEmpty()) {
+            showToast("You have no always-on checks to include", anchor, false);
+            return;
+        }
+        JPanel trigPanel = new JPanel();
+        trigPanel.setLayout(new BoxLayout(trigPanel, BoxLayout.Y_AXIS));
+        trigPanel.setOpaque(false);
+        for (JCheckBox cb : trigPicks) trigPanel.add(cb);   // same instances the caller reads
+        JScrollPane trigScroll = Theme.thinScrollbars(new JScrollPane(trigPanel));
+        trigScroll.setPreferredSize(new Dimension(360,
+                Math.min(320, 26 * trigPicks.size() + 12)));
+
+        JPanel bulk = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+        bulk.setOpaque(false);
+        JButton all = createButton("Select all", new Color(35, 55, 45), null);
+        all.addActionListener(e -> { for (JCheckBox cb : trigPicks) cb.setSelected(true); });
+        JButton none = createButton("Select none", new Color(55, 45, 45), null);
+        none.addActionListener(e -> { for (JCheckBox cb : trigPicks) cb.setSelected(false); });
+        bulk.add(all);
+        bulk.add(none);
+
+        JPanel root = new JPanel(new BorderLayout(0, 8));
+        root.setOpaque(false);
+        JLabel head = styledLabel("Ticked checks travel with the exported script:");
+        root.add(head, BorderLayout.NORTH);
+        root.add(trigScroll, BorderLayout.CENTER);
+        root.add(bulk, BorderLayout.SOUTH);
+
+        JOptionPane.showOptionDialog(this, root, "Checks to include",
+                JOptionPane.DEFAULT_OPTION, JOptionPane.PLAIN_MESSAGE, null,
+                new Object[]{"Done"}, "Done");
+    }
+
     private void openExportDialog(JComponent anchor) {
         if (modelTaskList.isEmpty()) {
             showToast("Add some tasks to the queue first", anchor, false);
@@ -1475,10 +1527,10 @@ public class DreamBotMenu extends JFrame {
 
         // v1.51: pick WHICH checks travel with the export - all listed, the currently-enabled
         // ones pre-ticked (the old single checkbox blindly included everything).
-        java.util.List<JCheckBox> trigPicks = new ArrayList<>();
-        JPanel trigPanel = new JPanel();
-        trigPanel.setLayout(new BoxLayout(trigPanel, BoxLayout.Y_AXIS));
-        trigPanel.setOpaque(false);
+        // v1.62: the checkbox list was unreadable squashed into this form, so it now lives behind
+        // a "Triggers..." button that opens it as its own dialog. The checkboxes are built once
+        // here and their state is read after the export dialog closes, exactly as before.
+        final java.util.List<JCheckBox> trigPicks = new ArrayList<>();
         for (main.watchers.Trigger gt : globalTriggers) {
             if (gt == null) continue;
             JCheckBox cb = new JCheckBox(gt.describe(), gt.isEnabled());
@@ -1486,11 +1538,19 @@ public class DreamBotMenu extends JFrame {
             cb.setForeground(TEXT_MAIN);
             cb.putClientProperty("trigger", gt);
             trigPicks.add(cb);
-            trigPanel.add(cb);
         }
-        JScrollPane trigScroll = Theme.thinScrollbars(new JScrollPane(trigPanel));
-        trigScroll.setPreferredSize(new Dimension(330,
-                Math.min(120, 24 * Math.max(1, trigPicks.size()) + 10)));
+        final int[] trigChosen = { (int) trigPicks.stream().filter(AbstractButton::isSelected).count() };
+        JButton btnTriggers = createButton("Triggers\u2026", new Color(55, 45, 65), null);
+        Runnable updateTrigBtn = () -> btnTriggers.setText(trigPicks.isEmpty()
+                ? "Triggers\u2026 (none)"
+                : "Triggers\u2026 (" + trigChosen[0] + " of " + trigPicks.size() + ")");
+        updateTrigBtn.run();
+        btnTriggers.setToolTipText("Choose which always-on checks travel with the script");
+        btnTriggers.addActionListener(ev -> {
+            openExportTriggersDialog(trigPicks, btnTriggers);
+            trigChosen[0] = (int) trigPicks.stream().filter(AbstractButton::isSelected).count();
+            updateTrigBtn.run();
+        });
         // v1.51: optionally stage this same export straight into the local market (off by default)
         JComboBox<String> cmbStage = new JComboBox<>(new String[]{
                 "Don't add to market-ready",
@@ -1521,9 +1581,9 @@ public class DreamBotMenu extends JFrame {
         form.add(styledLabel("Description:"), c);
         c.gridx = 1; form.add(new JScrollPane(txtDesc), c);
         c.gridx = 0; c.gridy++; c.gridwidth = 2;
-        form.add(styledLabel("Checks to include (ticked ones travel with the script):"), c);
+        form.add(styledLabel("Always-on checks that travel with the script:"), c);
         c.gridy++;
-        form.add(trigScroll, c);
+        form.add(btnTriggers, c);
         c.gridy++;
         form.add(cmbStage, c);
         c.gridy++;
@@ -1816,8 +1876,8 @@ public class DreamBotMenu extends JFrame {
         JPanel south = new JPanel(new BorderLayout(0, 10));
         south.setOpaque(false);
 
-        // Sub-panel for the original buttons
-        JPanel southButtons = new JPanel(new GridLayout(1, 5, 5, 0)); // Adjusted from 6 to 5 since Del Preset is removed
+        // Sub-panel for the original buttons (v1.62: +2 columns for "+ Add" and the insert toggle)
+        JPanel southButtons = new JPanel(new GridLayout(1, 7, 5, 0));
         southButtons.setOpaque(false);
 
         ///  Create Task List save button
@@ -1949,12 +2009,30 @@ public class DreamBotMenu extends JFrame {
         btnExportScript.setToolTipText("Package this queue into a .jar DreamBot can run on its own");
         btnExportScript.addActionListener(e -> openExportDialog(btnExportScript));
 
+        // v1.62: "+" opens the library picker popup - double-click a task to add it to THIS list.
+        // This is what lets the Task Library's own "add" button and the Quick-add menu retire.
+        JButton btnAddFromLib = createButton("+ Add\u2026", new Color(35, 55, 70), null);
+        btnAddFromLib.setToolTipText("Add tasks from your library (and append or start presets)");
+        btnAddFromLib.addActionListener(e -> openLibraryQuickAdd());
+
+        // v1.62: insert position as a single toggle icon button - "insert last" and "insert
+        // after" swap in place (only one shown at a time, minimal noise). Whatever's showing is
+        // the mode a library add uses. Replaces the old "Insert: End" text dropdown.
+        btnInsertToggle = iconButton(
+                insertAfterSelected ? main.menu.components.UIIcons.insertAfter(18, Theme.ACCENT)
+                                    : main.menu.components.UIIcons.insertEnd(18, Theme.ACCENT),
+                insertAfterSelected ? "Adding AFTER the selected task \u2014 click for: at the end"
+                                    : "Adding at the END \u2014 click for: after the selected task",
+                this::toggleInsertMode);
+
         ///  Add all buttons
+        southButtons.add(btnAddFromLib);
         southButtons.add(btnTaskListSave);
         southButtons.add(btnTaskListDuplicate);
         southButtons.add(btnTaskListRemove);
         southButtons.add(btnTaskListTimer);
         southButtons.add(btnExportScript);
+        southButtons.add(btnInsertToggle);
         southButtons.add(btnTaskListView);
         // UI preset delete button was removed here as per instructions
         southButtons.add(btnResetAllPresets);
@@ -2143,13 +2221,9 @@ public class DreamBotMenu extends JFrame {
             }
         });
 
-        // v1.33: toggle where library adds land - end of the queue, or after the selected item.
-        JButton btnInsertPos = createButton("Insert: End", new Color(45, 45, 55), null);
-        btnInsertPos.setToolTipText("Where added tasks go in the queue - click to toggle");
-        btnInsertPos.addActionListener(e -> {
-            insertAfterSelected = !insertAfterSelected;
-            btnInsertPos.setText(insertAfterSelected ? "Insert: After selected" : "Insert: End");
-        });
+        // v1.62: the "Insert: End/After" text dropdown moved to the Task List panel as a single
+        // insert-mode toggle icon button. The shared insertAfterSelected flag still drives adds;
+        // this button is gone from the Library.
 
         ///  Create Task Library delete button
         JButton btnTaskLibraryDelete = createButton("Delete", COLOR_FAILURE, null);
@@ -2206,7 +2280,6 @@ public class DreamBotMenu extends JFrame {
         btnSection.add(btnTaskLibrarySave);
         btnSection.add(btnTaskLibraryAdd);
         btnSection.add(btnQuickAdd);
-        btnSection.add(btnInsertPos);
         btnSection.add(btnTaskLibraryDelete);
         btnSection.add(btnTaskLibraryEdit);
         btnSection.add(btnTaskLibraryExport);
@@ -2285,9 +2358,29 @@ public class DreamBotMenu extends JFrame {
 
     /**
      * v1.33: where library adds land in the queue - false = end, true = right after the currently
-     * selected queue item. Toggled by the "Insert" button in the library.
+     * selected queue item. v1.62: toggled by the Task List's insert-mode icon button (the old
+     * "Insert: End" text dropdown in the Library is gone).
      */
     private boolean insertAfterSelected = false;
+
+    /** v1.62: the Task List's insert-mode toggle - swaps its own icon/tooltip between the modes. */
+    private JButton btnInsertToggle;
+
+    /** v1.62: flip end <-> after-selected, repainting the single toggle button to match. */
+    private void toggleInsertMode() {
+        insertAfterSelected = !insertAfterSelected;
+        if (btnInsertToggle != null) {
+            btnInsertToggle.setIcon(insertAfterSelected
+                    ? main.menu.components.UIIcons.insertAfter(18, Theme.ACCENT)
+                    : main.menu.components.UIIcons.insertEnd(18, Theme.ACCENT));
+            btnInsertToggle.setToolTipText(insertAfterSelected
+                    ? "Adding AFTER the selected task \u2014 click for: at the end"
+                    : "Adding at the END \u2014 click for: after the selected task");
+        }
+        showToast(insertAfterSelected
+                ? "Library adds now land AFTER the selected task"
+                : "Library adds now land at the END of the list", btnInsertToggle, true);
+    }
 
     /** Deep-copies {@code t} into the queue at the chosen position; returns the landed index. */
     private int insertIntoQueue(Task t) {
@@ -2308,9 +2401,17 @@ public class DreamBotMenu extends JFrame {
      * double-clicking a task adds it to the queue WITHOUT closing, so you can rattle off a preset
      * quickly. A live label shows the queue size and how many you've added this session.
      */
+    /**
+     * v1.62: the Task List's "+" popup - the single place to build the current list. It carries
+     * forward the old Quick-add search-and-double-click-to-add flow (the window stays open so you
+     * can rattle off several), and adds the two things that let the standalone Quick-add button
+     * AND the Library's own "add" button retire: it can also <b>append a saved preset</b> into the
+     * current list, or <b>start a new preset in a fresh slot</b> by naming it. Adds respect the
+     * Task List's insert-mode toggle (end vs after-selected).
+     */
     private void openLibraryQuickAdd() {
         JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(this),
-                "Quick add from library", java.awt.Dialog.ModalityType.APPLICATION_MODAL);
+                "Add to Task List", java.awt.Dialog.ModalityType.APPLICATION_MODAL);
         dlg.setAlwaysOnTop(true);
 
         JTextField search = new JTextField();
@@ -2323,8 +2424,9 @@ public class DreamBotMenu extends JFrame {
         count.setForeground(Theme.ACCENT);
         count.setBorder(new EmptyBorder(6, 4, 6, 4));
         final int[] added = {0};
-        Runnable updateCount = () -> count.setText("Queue: " + modelTaskList.size()
-                + " tasks   \u00b7   added this session: " + added[0]);
+        Runnable updateCount = () -> count.setText("Task List: " + modelTaskList.size()
+                + " tasks   \u00b7   added this session: " + added[0]
+                + "   \u00b7   adding at: " + (insertAfterSelected ? "after selected" : "end"));
         updateCount.run();
 
         Runnable refill = () -> {
@@ -2367,6 +2469,73 @@ public class DreamBotMenu extends JFrame {
         top.add(new JLabel("Search:"), BorderLayout.WEST);
         top.add(search, BorderLayout.CENTER);
 
+        // v1.62: preset controls - append a saved preset into the current list, or spin the
+        // current list out into a brand-new preset slot. This is what replaces the Quick-add menu.
+        JPanel presetRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+        presetRow.setOpaque(false);
+        presetRow.setBorder(new EmptyBorder(0, 8, 2, 8));
+        JLabel presetLbl = new JLabel("Presets:");
+        presetLbl.setForeground(Theme.TEXT_DIM);
+        JComboBox<String> cmbPreset = new JComboBox<>();
+        Runnable fillPresets = () -> {
+            cmbPreset.removeAllItems();
+            for (int i = 0; i < modelPresets.size(); i++) {
+                Preset p = modelPresets.get(i);
+                if (p != null && p.tasks != null && !p.tasks.isEmpty())
+                    cmbPreset.addItem((i + 1) + ": " + p.name + "  (" + p.tasks.size() + ")");
+            }
+        };
+        fillPresets.run();
+        JButton btnAppendPreset = createButton("Append", new Color(35, 55, 70), null);
+        btnAppendPreset.setToolTipText("Add every task from the chosen preset onto the current list");
+        btnAppendPreset.addActionListener(e -> {
+            int sel = cmbPreset.getSelectedIndex();
+            if (sel < 0) { showToast("No saved presets to append", btnAppendPreset, false); return; }
+            // map the visible (non-empty) index back to the real preset index
+            int realIdx = -1, seen = -1;
+            for (int i = 0; i < modelPresets.size(); i++) {
+                Preset p = modelPresets.get(i);
+                if (p != null && p.tasks != null && !p.tasks.isEmpty()) {
+                    seen++;
+                    if (seen == sel) { realIdx = i; break; }
+                }
+            }
+            if (realIdx < 0) return;
+            Preset p = modelPresets.get(realIdx);
+            int n = 0;
+            for (Task t : p.tasks) { modelTaskList.addElement(new Task(t)); n++; }
+            added[0] += n;
+            updateCount.run();
+            refreshTaskListTab();
+            showToast("Appended " + n + " task" + (n == 1 ? "" : "s") + " from " + p.name,
+                    btnAppendPreset, true);
+        });
+        JButton btnNewPreset = createButton("New slot\u2026", new Color(45, 55, 45), null);
+        btnNewPreset.setToolTipText("Save the current Task List as a new preset in the next free slot");
+        btnNewPreset.addActionListener(e -> {
+            if (modelTaskList.isEmpty()) {
+                showToast("The Task List is empty - nothing to save as a preset", btnNewPreset, false);
+                return;
+            }
+            String name = JOptionPane.showInputDialog(dlg, "Name the new preset:",
+                    "New preset", JOptionPane.PLAIN_MESSAGE);
+            if (name == null || name.trim().isEmpty()) return;
+            List<Task> tasks = new ArrayList<>();
+            for (int i = 0; i < modelTaskList.size(); i++)
+                tasks.add(new Task(modelTaskList.getElementAt(i)));
+            modelPresets.addElement(new Preset(name.trim(), tasks, queueLoopTarget));
+            selectedPresetIndex = modelPresets.size() - 1;
+            saveAll(false);
+            refreshPresetButtonLabels();
+            fillPresets.run();
+            showToast("Saved \"" + name.trim() + "\" as preset " + modelPresets.size(),
+                    btnNewPreset, true);
+        });
+        presetRow.add(presetLbl);
+        presetRow.add(cmbPreset);
+        presetRow.add(btnAppendPreset);
+        presetRow.add(btnNewPreset);
+
         JButton close = createButton("Done", new Color(30, 60, 40), null);
         close.addActionListener(e -> dlg.dispose());
         JPanel bottom = new JPanel(new BorderLayout());
@@ -2378,18 +2547,23 @@ public class DreamBotMenu extends JFrame {
         closeWrap.add(close);
         bottom.add(closeWrap, BorderLayout.EAST);
 
+        JPanel south = new JPanel(new BorderLayout());
+        south.setOpaque(false);
+        south.add(presetRow, BorderLayout.NORTH);
+        south.add(bottom, BorderLayout.CENTER);
+        JLabel hint = new JLabel("  Double-click a task to add it - the window stays open so you can add several.");
+        hint.setForeground(Theme.TEXT_DIM);
+        hint.setBorder(new EmptyBorder(0, 8, 6, 8));
+        south.add(hint, BorderLayout.SOUTH);
+
         JPanel root = new JPanel(new BorderLayout());
         root.setBackground(BG_BASE);
         root.add(top, BorderLayout.NORTH);
         root.add(Theme.thinScrollbars(new JScrollPane(qList)), BorderLayout.CENTER);
-        root.add(bottom, BorderLayout.SOUTH);
-        JLabel hint = new JLabel("  Double-click a task to add it - the window stays open so you can add several.");
-        hint.setForeground(Theme.TEXT_DIM);
-        hint.setBorder(new EmptyBorder(0, 8, 6, 8));
-        root.add(hint, BorderLayout.PAGE_END);
+        root.add(south, BorderLayout.SOUTH);
 
         dlg.setContentPane(root);
-        dlg.setSize(560, 560);
+        dlg.setSize(560, 600);
         dlg.setLocationRelativeTo(this);
         dlg.toFront();
         SwingUtilities.invokeLater(search::requestFocusInWindow);
@@ -8253,6 +8427,21 @@ public class DreamBotMenu extends JFrame {
 
             /// Normal click to load
         } else {
+            // v1.62: don't yank the list out from under a running script. Loading a preset
+            // REPLACES the whole Task List; doing that mid-run would desync the live execution
+            // pointer, so while a script is actively playing (not merely paused) a preset click
+            // asks first. Paused/idle loads straight through as before.
+            if (currentExecutionIndex != -1 && !isMenuPaused()) {
+                int go = JOptionPane.showConfirmDialog(this,
+                        "A script is running. Loading a preset will stop it and replace the "
+                        + "whole Task List.\nStop and load anyway?",
+                        "Script is running", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                if (go != JOptionPane.YES_OPTION) return;
+                isMenuPaused(true);            // halt the queue cleanly (same as the account-switch
+                resetLoopProgress();          // path) before the list is swapped out from under it
+                setCurrentExecutionIndex(-1);
+            }
+
             // fetch the selected preset object using the preset buttons index
             Preset preset = modelPresets.get(actualIndex);
 
