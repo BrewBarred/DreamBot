@@ -1,10 +1,13 @@
 package main.actions;
 
 import main.components.JParamTextField;
+import main.menu.components.JParamComboField;
 import main.menu.DreamBotMenu;
 import org.dreambot.api.utilities.Logger;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -12,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
 import static main.menu.MenuHandler.createParameterPanel;
 
@@ -43,6 +47,13 @@ public class TaskRef extends Action {
 
     public static void setResolver(BiFunction<String, String, DreamBotMenu.Task> r) {
         RESOLVER = r;
+    }
+
+    /** v1.62: set by the menu - supplies current library task names for the param dropdown. */
+    private static volatile Supplier<List<String>> NAMES_SUPPLIER;
+
+    public static void setNamesSupplier(Supplier<List<String>> s) {
+        NAMES_SUPPLIER = s;
     }
 
     /** The library task's id (name is the user-facing parameter; id locks on first resolve). */
@@ -201,11 +212,30 @@ public class TaskRef extends Action {
 
     @Override
     public JPanel createParamPanel() {
+        // v1.62: the library reference is now a pick-from-list dropdown instead of a free-text
+        // field. The combo is populated from the current Task Library, but stays editable so a
+        // name that isn't in the library yet still works (backward-compatible with old refs).
+        // It syncs into the base paramTarget on every change, so serialize/apply are unchanged.
+        JParamComboField combo = new JParamComboField(paramTarget.getParam());
+        Supplier<List<String>> names = NAMES_SUPPLIER;
+        if (names != null) {
+            try { combo.setItemsPreservingValue(names.get()); } catch (Exception ignored) {}
+        }
+        java.awt.Component ed = combo.getEditor() != null ? combo.getEditor().getEditorComponent() : null;
+        if (ed instanceof javax.swing.text.JTextComponent) {
+            ((javax.swing.text.JTextComponent) ed).getDocument().addDocumentListener(
+                    new DocumentListener() {
+                        private void sync() { paramTarget.setParam(combo.getParam()); }
+                        public void insertUpdate(DocumentEvent e)  { sync(); }
+                        public void removeUpdate(DocumentEvent e)  { sync(); }
+                        public void changedUpdate(DocumentEvent e) { sync(); }
+                    });
+        }
         return createParameterPanel("Library task:",
                 "Runs a task from your Task Library as one step - chain tested tasks into bigger"
                         + " scripts. Resolved live: edit the library task and every script using"
                         + " it updates automatically. Its ×N repeat is honoured.",
-                paramTarget, "  exact task name, e.g. \"Kill cows\", \"Bank trip\"");
+                combo, "  pick from your library, or type a task name");
     }
 
     @Override

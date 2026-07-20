@@ -248,12 +248,13 @@ public class DreamBotMenu extends JFrame {
         if (t == null) return;
         libraryAll.add(t);
         refilterLibrary();
+        requestAutosave();   // v1.62: autosave on change (no Save button)
     }
 
     /** Removes from the master library and refreshes the view. @return removed? */
     public boolean libraryRemove(Task t) {
         boolean ok = libraryAll.remove(t);
-        if (ok) refilterLibrary();
+        if (ok) { refilterLibrary(); requestAutosave(); }   // v1.62: autosave on change
         return ok;
     }
 
@@ -291,6 +292,7 @@ public class DreamBotMenu extends JFrame {
             }
         }
         if (touched > 0) refilterLibrary();
+        if (touched > 0) requestAutosave();   // v1.62: an edit is a change - autosave it
         return touched;
     }
 
@@ -466,6 +468,8 @@ public class DreamBotMenu extends JFrame {
         actionSelector = new JActionSelector();
         // Patch B.2: TaskRef actions resolve library tasks live, by id, through the menu
         main.actions.TaskRef.setResolver(this::findLibraryTask);
+        // v1.62: TaskRef's parameter is a pick-from-library dropdown - feed it current task names
+        main.actions.TaskRef.setNamesSupplier(this::libraryTaskNames);
         taskBuilder = new TaskBuilder(this);
         libraryPanel = new LibraryPanel();
 
@@ -578,13 +582,22 @@ public class DreamBotMenu extends JFrame {
             });
             scanTimer.start();
 
-            ///  Start a third timer to auto-save everything periodically
-            saveTimer = new Timer(60000, e -> {
-                // auto-save every n seconds (if auto-save feature is enabled in settings)
-                if (chkAutoSave != null && chkAutoSave.isSelected())
-                    saveAll(false);
-            });
+            ///  Start a third timer to auto-save everything periodically (v1.62: always on - the
+            ///  manual Save buttons are gone, so autosave is no longer an opt-in toggle). This is
+            ///  the BACKSTOP; most saves happen promptly via requestAutosave() on change.
+            saveTimer = new Timer(60000, e -> saveAll(false));
             saveTimer.start();
+
+            // v1.62: queue add/remove/reorder autosaves (the Task List Save button is gone). The
+            // per-Task field edits (repeat, loops, tags) already call saveAll(false)/requestAutosave
+            // at their own sites; this covers the structural changes the Save button used to catch.
+            modelTaskList.addListDataListener(new javax.swing.event.ListDataListener() {
+                public void intervalAdded(javax.swing.event.ListDataEvent e)   { requestAutosave(); }
+                public void intervalRemoved(javax.swing.event.ListDataEvent e) { requestAutosave(); }
+                public void contentsChanged(javax.swing.event.ListDataEvent e) { requestAutosave(); }
+            });
+
+            autosaveReady = true;   // v1.62: from here on, model changes trigger a debounced save
 
         });
 
@@ -1880,9 +1893,8 @@ public class DreamBotMenu extends JFrame {
         JPanel southButtons = new JPanel(new GridLayout(1, 7, 5, 0));
         southButtons.setOpaque(false);
 
-        ///  Create Task List save button
-        JButton btnTaskListSave = createButton("Save");
-        btnTaskListSave.addActionListener(e -> saveAll());
+        // v1.62: the Task List "Save" button is gone - the queue autosaves on change (add / remove
+        // / reorder via the model listener) plus a 60s backstop and a save on exit.
 
         ///  Create Task List duplicate button
         JButton btnTaskListDuplicate = createButton("Duplicate");
@@ -2027,7 +2039,6 @@ public class DreamBotMenu extends JFrame {
 
         ///  Add all buttons
         southButtons.add(btnAddFromLib);
-        southButtons.add(btnTaskListSave);
         southButtons.add(btnTaskListDuplicate);
         southButtons.add(btnTaskListRemove);
         southButtons.add(btnTaskListTimer);
@@ -2237,9 +2248,8 @@ public class DreamBotMenu extends JFrame {
         panelCenterEastLibraryTab.setOpaque(false);
         btnSection.setOpaque(false);
 
-        ///  Create Task Library save button
-        JButton btnTaskLibrarySave = createButton("Save");
-        btnTaskLibrarySave.addActionListener(e -> saveAll());
+        // v1.62: the Task Library "Save" button is gone too - library add / delete / duplicate /
+        // tag edits all autosave on change (via libraryAdd/Remove/propagate + the tag editor).
 
         // v1.62: the library's "Add" button is gone - adding a library task to the current list
         // now happens by double-clicking it (below) or from the Task List's "+" picker. Its
@@ -2304,7 +2314,6 @@ public class DreamBotMenu extends JFrame {
         btnTaskLibraryDuplicate.addActionListener(e ->
                 duplicateLibraryTask(listTaskLibrary.getSelectedValue(), btnTaskLibraryDuplicate));
 
-        btnSection.add(btnTaskLibrarySave);
         btnSection.add(btnTaskLibraryDuplicate);
         btnSection.add(btnTaskLibraryDelete);
         btnSection.add(btnTaskLibraryEdit);
@@ -5522,6 +5531,15 @@ public class DreamBotMenu extends JFrame {
         return a == null ? null : a.copy();
     }
 
+    /** v1.62: current library task names (sorted, de-duped) for the TaskRef param dropdown. */
+    private List<String> libraryTaskNames() {
+        java.util.TreeSet<String> names = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        for (Task t : libraryAll)
+            if (t != null && t.getName() != null && !t.getName().isEmpty())
+                names.add(t.getName());
+        return new ArrayList<>(names);
+    }
+
     /** Bound TaskRef entries for every library task (shared by all selector instances, B.5). */
     private List<main.actions.TaskRef> buildLibraryEntries() {
         List<main.actions.TaskRef> entries = new ArrayList<>();
@@ -7471,22 +7489,10 @@ public class DreamBotMenu extends JFrame {
                         exitOnStopWarning, e ->
                                 // fixed: was inverted; label renamed to match what it actually does
                                 exitOnStopWarning = settingClientChkExitOnStopWarning.isSelected()
-                ),
-
-                chkAutoSave = createSettingCheck("Auto Save", true, e -> {
-                    // Check the ACTUAL checkmark state
-                    boolean isChecked = ((JCheckBox)e.getSource()).isSelected();
-
-                    if (isChecked) {
-                        saveAll(); // Only trigger the heavy save when turned ON
-                        if (saveTimer != null)
-                            saveTimer.start();
-                    } else {
-                        if (saveTimer != null)
-                            saveTimer.stop();
-                        showToast("Auto-save Disabled", chkAutoSave, false);
-                    }
-                })
+                )
+                // v1.62: the "Auto Save" toggle is gone - autosave is always on now (the manual
+                // Save buttons were removed), so there's no opt-out to expose. Changes persist via
+                // requestAutosave() on edit plus a 60s backstop and a save on exit.
         );
     }
 
@@ -7814,6 +7820,27 @@ public class DreamBotMenu extends JFrame {
 
     public void saveAll() {
         saveAll(true);
+    }
+
+    /** v1.62: coalesces bursts of edits into a single write ~1.5s after the last change. */
+    private Timer autosaveDebounce;
+    /** v1.62: false until construction finishes, so model wiring during startup doesn't save. */
+    private volatile boolean autosaveReady = false;
+
+    /**
+     * v1.62: the on-change autosave. The manual Save buttons are gone, so every meaningful change
+     * (queue add/remove/reorder, library add/remove/edit) calls this. It debounces - a rapid burst
+     * of changes results in one save shortly after the last one - and routes through saveAll(false),
+     * which writes via LocalStore under {@code <scripts.path>/DreamMan} (SDN-compliant) and is
+     * guarded so an empty workspace never overwrites a non-empty saved profile.
+     */
+    public void requestAutosave() {
+        if (!autosaveReady) return;                 // ignore churn during construction/load wiring
+        if (autosaveDebounce == null) {
+            autosaveDebounce = new Timer(1500, e -> saveAll(false));
+            autosaveDebounce.setRepeats(false);
+        }
+        autosaveDebounce.restart();                 // fire ~1.5s after the LAST change
     }
 
     /**
