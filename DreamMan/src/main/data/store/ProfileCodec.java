@@ -158,6 +158,7 @@ public final class ProfileCodec {
         PresetData d = new PresetData();
         d.name = preset.getName();
         d.loops = preset.getLoops();
+        d.scriptTriggers = preset.getScriptTriggers();   // v1.64
         d.tasks = new ArrayList<>();
         if (preset.getTasks() != null)
             for (DreamBotMenu.Task t : preset.getTasks())
@@ -178,6 +179,7 @@ public final class ProfileCodec {
             }
         DreamBotMenu.Preset p = new DreamBotMenu.Preset(d.name, tasks);
         p.setLoops(d.loops);
+        p.setScriptTriggers(d.scriptTriggers);   // v1.64
         return p;
     }
 

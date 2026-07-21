@@ -27,4 +27,12 @@ public class ScriptBundle {
 
     /** The author's always-on checks, as TriggerCodec JSON. */
     public String globalTriggers = "";
+
+    /**
+     * v1.64: SCRIPT triggers - always-on checks the author designated to run only while THIS
+     * script runs (set in the Task List tab), as opposed to {@code globalTriggers} which the
+     * publisher optionally folds in from their always-on set. Per-ACTION triggers travel inside
+     * the tasks themselves (Action's reserved __triggers key), so all three tiers are carried.
+     */
+    public String scriptTriggers = "";
 }

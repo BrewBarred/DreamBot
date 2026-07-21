@@ -44,6 +44,9 @@ public class ProfileData {
     /** Patch B.4: always-on watchers, serialized to a JSON string via TriggerCodec. */
     public String globalTriggers;
 
+    /** v1.64: the current queue's SCRIPT triggers (JSON) - active only while the queue runs. */
+    public String scriptTriggers;
+
     /** Patch B.2: auto-wait between completed tasks. */
     public boolean queueAutoWait = false;
     public int queueAutoWaitMinMs = 400;

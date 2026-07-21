@@ -330,7 +330,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             // Consult globals + this action's own triggers. If a watcher is mid-response, or an
             // "instead" watcher just fired, we do NOT run the queue action this loop.
             main.watchers.WatcherEngine.Outcome wo = watchers.service(
-                    menu.getGlobalTriggers(),
+                    menu.getRuntimeTriggers(),                       // v1.64: globals + script triggers
                     action != null ? action.getTriggers() : null);
             if (wo == main.watchers.WatcherEngine.Outcome.RUNNING)
                 return Rand.nextInt(180, 420);   // let the response chain breathe
@@ -576,7 +576,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
 
         // checks run during a timed task too (globals + the action's own)
         main.watchers.WatcherEngine.Outcome wo = watchers.service(
-                menu.getGlobalTriggers(), action != null ? action.getTriggers() : null);
+                menu.getRuntimeTriggers(), action != null ? action.getTriggers() : null);   // v1.64
         if (wo == main.watchers.WatcherEngine.Outcome.RUNNING)
             return Rand.nextInt(180, 420);
         if (wo == main.watchers.WatcherEngine.Outcome.REPLACED) {

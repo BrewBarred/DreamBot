@@ -93,8 +93,10 @@ public class CardBuilderDialog extends JDialog {
         txtName = new JTextField(l.name == null ? "" : l.name, 18);
         double v0 = Math.max(0.1, Math.min(999.0, l.version <= 0 ? 1.0 : l.version));
         spVersion = new JSpinner(new SpinnerNumberModel(v0, 0.1, 999.0, 0.1));
-        cmbKind = new JComboBox<>(new String[]{"Task (building block)", "Script (full routine)"});
-        cmbKind.setSelectedIndex("script".equalsIgnoreCase(l.kind) ? 1 : 0);
+        // v1.64: triggers are a third publishable kind - one always-on check per listing
+        cmbKind = new JComboBox<>(new String[]{
+                "Task (building block)", "Script (full routine)", "Trigger (always-on check)"});
+        cmbKind.setSelectedIndex(kindIndex(l.kind));
         chkVip = new JCheckBox("VIP-only listing", l.vipOnly);
         chkVip.setOpaque(false);
         chkVip.setForeground(Theme.TEXT);
@@ -288,7 +290,7 @@ public class CardBuilderDialog extends JDialog {
         // mirror the controls into the preview listing and rebuild the live card
         preview.name = txtName.getText().trim();
         preview.version = ((Number) spVersion.getValue()).doubleValue();
-        preview.kind = cmbKind.getSelectedIndex() == 1 ? "script" : "task";
+        preview.kind = kindAt(cmbKind.getSelectedIndex());
         preview.vipOnly = chkVip.isSelected();
         preview.tags = parseTags();
         preview.description = txtDesc.getText().trim();
@@ -315,7 +317,7 @@ public class CardBuilderDialog extends JDialog {
         }
         listing.name = name;
         listing.version = ((Number) spVersion.getValue()).doubleValue();
-        listing.kind = cmbKind.getSelectedIndex() == 1 ? "script" : "task";
+        listing.kind = kindAt(cmbKind.getSelectedIndex());
         listing.vipOnly = chkVip.isSelected();
         listing.tags = parseTags();
         listing.description = txtDesc.getText().trim();
@@ -334,6 +336,17 @@ public class CardBuilderDialog extends JDialog {
                     "Card builder", JOptionPane.ERROR_MESSAGE);
             return false;
         }
+    }
+
+    /** v1.64: kind string <-> combo index, now that "trigger" is a third kind. */
+    private static int kindIndex(String kind) {
+        if ("script".equalsIgnoreCase(kind)) return 1;
+        if ("trigger".equalsIgnoreCase(kind)) return 2;
+        return 0;
+    }
+
+    private static String kindAt(int index) {
+        return index == 1 ? "script" : (index == 2 ? "trigger" : "task");
     }
 
     private java.util.List<String> parseTags() {
@@ -393,8 +406,7 @@ public class CardBuilderDialog extends JDialog {
         @Override public void onUnpublish(ScriptListing l, JComponent src) {}
         @Override public void onRate(ScriptListing l, int stars) {}
         @Override public void onToggleFavorite(ScriptListing l) {}
-        @Override public void onToggleComments(ScriptListing l, MarketCard card) {}
-        @Override public void onToggleStructure(ScriptListing l, MarketCard card) {}
+        @Override public void onOpenDetails(ScriptListing l, boolean focusComments) {}
         @Override public void onOpenProfile(ScriptListing l) {}
         @Override public void onPostComment(ScriptListing l, String body, MarketCard card) {}
         @Override public void onSetIcon(ScriptListing l) {}

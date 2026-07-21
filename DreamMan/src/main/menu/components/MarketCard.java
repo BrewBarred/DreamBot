@@ -40,9 +40,11 @@ public class MarketCard extends JPanel {
         void onUnpublish(ScriptListing l, JComponent src);
         void onRate(ScriptListing l, int stars);
         void onToggleFavorite(ScriptListing l);
-        void onToggleComments(ScriptListing l, MarketCard card);
-        /** v1.63: expand/collapse the card's tasks -> actions -> triggers outline. */
-        void onToggleStructure(ScriptListing l, MarketCard card);
+        /**
+         * v1.64: open the full DETAIL view for a listing (replaces the old in-card comment and
+         * structure accordions). focusComments scrolls the view to the comment thread.
+         */
+        void onOpenDetails(ScriptListing l, boolean focusComments);
         /** v1.63: open the author's public profile (author-link click on a server listing). */
         void onOpenProfile(ScriptListing l);
         void onPostComment(ScriptListing l, String body, MarketCard card);
@@ -58,8 +60,6 @@ public class MarketCard extends JPanel {
 
     private static final int GRID_W = 236;
     private static final int STRIP_W = 208;
-    /** v1.63: cap for the expanded structure outline; taller content scrolls. */
-    private static final int STRUCT_MAX_H = 260;
     private static final Color CARD_BG = Theme.SURFACE_2_ALT;
     private static final Color CARD_BORDER = Theme.BORDER;
 
@@ -79,11 +79,7 @@ public class MarketCard extends JPanel {
     private JLabel downloadsLabel;
     private FavoriteButton favButton;
     private JButton commentBtn;
-    private JPanel commentsPanel;      // collapsible south
-    private JTextArea commentsArea;
-    private JPanel structurePanel;     // v1.63: collapsible tasks->actions->triggers outline
-    private JButton structureBtn;      // v1.63
-    private boolean structureExpanded; // v1.63
+    private JButton structureBtn;      // v1.63/64: the (i) details button
     /** v1.63: minimum (collapsed) card height; sections add to this when they open. */
     private int collapsedFloor = 150;
 
@@ -107,8 +103,6 @@ public class MarketCard extends JPanel {
         }
         return new Dimension(w, Math.max(collapsedFloor, h));
     }
-    private JTextField commentInput;
-    private boolean commentsExpanded;
 
     public MarketCard(ScriptListing l, Mode mode, Callbacks cb) {
         this.listing = l;
@@ -223,17 +217,14 @@ public class MarketCard extends JPanel {
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         actions.setOpaque(false);
         actions.setAlignmentX(LEFT_ALIGNMENT);
+        // v1.64: both of these open the full DETAIL view (which took over from the old in-card
+        // accordions): the comment bubble lands on the thread, the (i) lands at the top.
         commentBtn = smallButton(UIIcons.comment(15, Theme.TEXT_DIM), "Comments");
-        commentBtn.addActionListener(e -> cb.onToggleComments(listing, this));
+        commentBtn.addActionListener(e -> cb.onOpenDetails(listing, true));
         actions.add(commentBtn);
-        // v1.63: (i) opens the "what's inside" outline (tasks -> actions -> checks). Right-clicking
-        // the card does the same. Disabled when the bundle is withheld (VIP hidden from non-VIP).
-        boolean haveBundle = listing.bundle != null;
         structureBtn = smallButton(UIIcons.info(15, Theme.TEXT_DIM),
-                haveBundle ? "What's inside (tasks, actions, checks) \u2014 or right-click the card"
-                           : "Details unavailable \u2014 download to view");
-        structureBtn.setEnabled(haveBundle);
-        structureBtn.addActionListener(e -> cb.onToggleStructure(listing, this));
+                "Details \u2014 what's inside, full description, comments (or right-click)");
+        structureBtn.addActionListener(e -> cb.onOpenDetails(listing, false));
         actions.add(structureBtn);
         // Patch B.16 carried forward: the server sends VIP bundles as null to non-VIP callers
         boolean lockedVip = listing.vipOnly && listing.bundle == null;
@@ -256,241 +247,101 @@ public class MarketCard extends JPanel {
         body.add(actions);
 
         add(body, BorderLayout.CENTER);
-
-        // south: collapsible sections (v1.63 structure outline, then the comments box), stacked
-        JPanel south = new JPanel();
-        south.setOpaque(false);
-        south.setLayout(new BoxLayout(south, BoxLayout.Y_AXIS));
-        structurePanel = buildStructurePanel();
-        structurePanel.setVisible(false);
-        structurePanel.setAlignmentX(LEFT_ALIGNMENT);
-        commentsPanel = buildCommentsPanel();
-        commentsPanel.setVisible(false);
-        commentsPanel.setAlignmentX(LEFT_ALIGNMENT);
-        south.add(structurePanel);
-        south.add(commentsPanel);
-        add(south, BorderLayout.SOUTH);
+        // v1.64: the in-card comment/structure accordions are gone - the DETAIL view owns them
 
         refreshFromListing();
     }
 
-    /** v1.63: the collapsible outline of what a listing contains - tasks, their actions, checks. */
-    private JPanel buildStructurePanel() {
-        JPanel p = new JPanel(new BorderLayout());
-        p.setOpaque(false);
-        p.setBorder(new EmptyBorder(8, 0, 0, 0));
 
-        JPanel outline = new JPanel();
-        outline.setOpaque(false);
-        outline.setLayout(new BoxLayout(outline, BoxLayout.Y_AXIS));
+    public ScriptListing getListing() { return listing; }
 
-        JScrollPane sp = new JScrollPane(outline,
-                ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        sp.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
-        sp.getViewport().setOpaque(false);
-        sp.setOpaque(false);
-        sp.getVerticalScrollBar().setUnitIncrement(14);
+    public void setListing(ScriptListing l) { this.listing = l; }
 
-        main.data.store.ScriptBundle b = listing.bundle;
-        if (b == null) {
-            outline.add(outlineLabel("Structure isn't available for this listing.", 0, false,
-                    Theme.TEXT_DIM));
-        } else {
-            java.util.List<main.data.store.TaskData> tasks = b.tasks;
-            int taskCount = (tasks == null) ? 0 : tasks.size();
-            String loops = (b.loops <= 0) ? "loops forever"
-                    : (b.loops == 1 ? "runs once" : "runs \u00d7" + b.loops);
-            outline.add(outlineLabel("Tasks (" + taskCount + ")  \u00b7  queue " + loops, 0,
-                    true, Theme.ACCENT));
-            if (tasks != null) {
-                for (int i = 0; i < tasks.size(); i++) {
-                    main.data.store.TaskData t = tasks.get(i);
-                    if (t == null) continue;
-                    outline.add(buildTaskNode(i + 1, t, sp, outline));   // v1.63: collapsible
+    // ── shared bits ─────────────────────────────────────────────────────────────────────────
+
+    private void wireCommonMouse() {
+        MouseAdapter ma = new MouseAdapter() {
+            @Override public void mouseEntered(MouseEvent e) {
+                setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(Theme.BORDER_STRONG),
+                        new EmptyBorder(8, 9, 8, 9)));
+            }
+            @Override public void mouseExited(MouseEvent e) {
+                setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(CARD_BORDER),
+                        new EmptyBorder(8, 9, 8, 9)));
+            }
+            private void handlePopup(MouseEvent e) {
+                // v1.64: in the GRID, right-click opens the DETAIL view (the management menu
+                // moved to the card's "..." button). STRIP cards keep their right-click menu.
+                if (mode == Mode.GRID) cb.onOpenDetails(listing, false);
+                else cb.onContextMenu(listing, e, MarketCard.this);
+            }
+            @Override public void mouseClicked(MouseEvent e) {
+                if (e.isPopupTrigger() || SwingUtilities.isRightMouseButton(e)) {
+                    handlePopup(e);
+                } else if (mode == Mode.GRID && e.getClickCount() == 2
+                        && SwingUtilities.isLeftMouseButton(e)) {
+                    cb.onDownload(listing);   // double-left-click still downloads
                 }
             }
-            java.util.List<String> checks = describeTriggers(b.globalTriggers);
-            outline.add(outlineLabel("Always-on checks (" + checks.size() + ")", 0, true,
-                    Theme.ACCENT));
-            if (checks.isEmpty()) {
-                outline.add(outlineLabel("(none)", 1, false, Theme.TEXT_MUTED));
-            } else {
-                for (String c : checks)
-                    outline.add(outlineLabel("\u2022 " + c, 1, false, Theme.TEXT_DIM));
+            @Override public void mousePressed(MouseEvent e) {
+                if (e.isPopupTrigger()) handlePopup(e);
             }
-        }
-
-        resizeStructureScroll(sp, outline);
-        p.add(sp, BorderLayout.CENTER);
-        return p;
-    }
-
-    /**
-     * v1.63: one collapsible task - a clickable header (arrow + "N. name xR") over its actions.
-     * Actions are shown by default (everything expanded for transparency); clicking the header
-     * collapses/expands just that task, and the card re-grows to fit (or the outline scrolls).
-     */
-    private JPanel buildTaskNode(int index, main.data.store.TaskData t,
-                                 JScrollPane sp, JPanel outline) {
-        JPanel node = new JPanel();
-        node.setOpaque(false);
-        node.setLayout(new BoxLayout(node, BoxLayout.Y_AXIS));
-        node.setAlignmentX(LEFT_ALIGNMENT);
-
-        String rep = (t.repeat > 1) ? "  \u00d7" + t.repeat : "";
-        String nm = (t.name == null || t.name.isEmpty()) ? "(unnamed task)" : t.name;
-
-        JPanel acts = new JPanel();
-        acts.setOpaque(false);
-        acts.setLayout(new BoxLayout(acts, BoxLayout.Y_AXIS));
-        acts.setAlignmentX(LEFT_ALIGNMENT);
-        java.util.List<main.data.ActionData> list = t.actions;
-        if (list == null || list.isEmpty()) {
-            acts.add(outlineLabel("(no actions)", 2, false, Theme.TEXT_MUTED));
-        } else {
-            for (main.data.ActionData a : list)
-                acts.add(outlineLabel("\u2022 " + describeAction(a), 2, false, Theme.TEXT_DIM));
-        }
-        acts.setVisible(true);   // expanded by default
-
-        String label = index + ". " + nm + rep;
-        JLabel header = outlineLabel("\u25be  " + label, 1, true, Theme.TEXT);
-        header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        header.setToolTipText("Click to collapse / expand this task's actions");
-        header.addMouseListener(new MouseAdapter() {
-            @Override public void mouseClicked(MouseEvent e) {
-                boolean show = !acts.isVisible();
-                acts.setVisible(show);
-                header.setText((show ? "\u25be" : "\u25b8") + "  " + label);
-                resizeStructureScroll(sp, outline);
-                regrowCard();
+            @Override public void mouseReleased(MouseEvent e) {
+                if (e.isPopupTrigger()) handlePopup(e);
             }
-        });
-
-        node.add(header);
-        node.add(acts);
-        return node;
+        };
+        addMouseListener(ma);
     }
 
-    /** Sizes the outline scroller to its content up to {@link #STRUCT_MAX_H}, then it scrolls. */
-    private void resizeStructureScroll(JScrollPane sp, JPanel outline) {
-        // A task collapsing changes nested BoxLayout sizes; clear their caches so the height we
-        // read below is fresh (invalidate() alone doesn't recurse into the child nodes).
-        invalidateTree(outline);
-        int wanted = outline.getPreferredSize().height + 6;
-        sp.setPreferredSize(new Dimension(GRID_W - 20,
-                Math.min(STRUCT_MAX_H, Math.max(40, wanted))));
-        sp.invalidate();
+    private JButton smallButton(Icon icon, String tip) {
+        JButton b = new JButton(icon);
+        b.setToolTipText(tip);
+        b.setPreferredSize(new Dimension(30, 26));
+        b.setFocusPainted(false);
+        b.setMargin(new Insets(1, 1, 1, 1));
+        b.setBackground(Theme.SURFACE_2);
+        return b;
     }
 
-    private static void invalidateTree(java.awt.Component c) {
-        c.invalidate();
-        if (c instanceof java.awt.Container)
-            for (java.awt.Component ch : ((java.awt.Container) c).getComponents())
-                invalidateTree(ch);
-    }
-
-    /** Re-lay the card and everything above it so a task collapsing changes the card's height. */
-    private void regrowCard() {
-        // Clear every layout cache inside the card (the SOUTH BoxLayout sits ABOVE the outline and
-        // caches child sizes, so invalidating just the outline isn't enough) before we re-measure.
-        invalidateTree(this);
-        revalidate();
-        repaint();
-        java.awt.Container c = getParent();
-        while (c != null) { c.revalidate(); c.repaint(); c = c.getParent(); }
-    }
-
-    /** One indented outline row. level 0/1/2 = section / task / action indentation. */
-    private JLabel outlineLabel(String text, int level, boolean bold, Color fg) {
+    private JLabel chip(String text, Color fg, Color bg) {
         JLabel l = new JLabel(text);
-        l.setFont(bold ? Theme.fontBold(11) : Theme.font(11));
+        l.setFont(Theme.fontBold(10));
         l.setForeground(fg);
-        l.setBorder(new EmptyBorder(1, 6 + level * 16, 1, 4));
-        l.setAlignmentX(LEFT_ALIGNMENT);
+        l.setOpaque(true);
+        l.setBackground(bg);
+        l.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(fg.darker()),
+                new EmptyBorder(1, 5, 1, 5)));
         return l;
     }
 
-    /** A compact one-line description of an action: its type plus a hint of its main parameter. */
-    private static String describeAction(main.data.ActionData a) {
-        if (a == null) return "(action)";
-        String type = a.getType() == null ? "Action" : a.getType();
-        java.util.Map<String, String> p = a.getParams();
-        String hint = "";
-        if (p != null && !p.isEmpty()) {
-            // prefer a recognisable target-ish key, else just the first value
-            for (String k : new String[]{"Target", "Name", "Item", "Item(s)", "Object", "NPC",
-                    "TaskName", "Mode", "Spell", "Bone type (exact)"}) {
-                if (p.containsKey(k) && p.get(k) != null && !p.get(k).isEmpty()) {
-                    hint = p.get(k);
-                    break;
-                }
-            }
-            if (hint.isEmpty()) {
-                for (String v : p.values())
-                    if (v != null && !v.isEmpty()) { hint = v; break; }
-            }
-        }
-        return hint.isEmpty() ? type : type + " \u2192 " + hint;
-    }
-
-    /** Parses the bundle's trigger JSON into human-readable descriptions (best-effort). */
-    private static java.util.List<String> describeTriggers(String json) {
-        java.util.List<String> out = new java.util.ArrayList<>();
-        if (json == null || json.trim().isEmpty()) return out;
-        try {
-            for (main.watchers.Trigger t : main.watchers.TriggerCodec.fromJson(json))
-                if (t != null) out.add(t.describe());
-        } catch (Exception ignored) {
-            // malformed / unknown trigger payload - just show nothing rather than break the card
-        }
+    private static String[] prefixHash(java.util.List<String> tags) {
+        int n = Math.min(tags.size(), 4);
+        String[] out = new String[n];
+        for (int i = 0; i < n; i++) out[i] = "#" + tags.get(i);
         return out;
     }
 
-    private JPanel buildCommentsPanel() {
-        JPanel p = new JPanel(new BorderLayout(0, 4));
-        p.setOpaque(false);
-        p.setBorder(new EmptyBorder(8, 0, 0, 0));
-
-        commentsArea = new JTextArea(4, 18);
-        commentsArea.setEditable(false);
-        commentsArea.setLineWrap(true);
-        commentsArea.setWrapStyleWord(true);
-        commentsArea.setFont(Theme.font(11));
-        commentsArea.setForeground(Theme.TEXT);
-        commentsArea.setBackground(Theme.BG_APP);
-        commentsArea.setText("Loading comments\u2026");
-        JScrollPane sp = new JScrollPane(commentsArea);
-        sp.setPreferredSize(new Dimension(GRID_W - 20, 84));
-        sp.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
-        p.add(sp, BorderLayout.CENTER);
-
-        JPanel postRow = new JPanel(new BorderLayout(4, 0));
-        postRow.setOpaque(false);
-        commentInput = new JTextField();
-        commentInput.setFont(Theme.font(11));
-        boolean can = cb.canComment(listing);
-        commentInput.setEnabled(can);
-        if (!can) commentInput.setText("Log in to comment");
-        JButton post = smallButton(UIIcons.publish(14, Theme.ACCENT), "Post comment");
-        post.setEnabled(can);
-        Runnable doPost = () -> {
-            String body = commentInput.getText().trim();
-            if (body.isEmpty()) return;
-            commentInput.setText("");
-            cb.onPostComment(listing, body, this);
-        };
-        post.addActionListener(e -> doPost.run());
-        commentInput.addActionListener(e -> doPost.run());
-        postRow.add(commentInput, BorderLayout.CENTER);
-        postRow.add(post, BorderLayout.EAST);
-        p.add(postRow, BorderLayout.SOUTH);
-        return p;
+    private static String clip(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max - 1) + "\u2026";
     }
 
-    // ── STRIP ───────────────────────────────────────────────────────────────────────────────
+    static String trimVersion(double v) {
+        if (v == Math.floor(v)) return String.valueOf((int) v);
+        return String.valueOf(v);
+    }
 
+    static String shortDate(long millis) {
+        if (millis <= 0) return "\u2014";
+        return new java.text.SimpleDateFormat("d MMM yyyy").format(new java.util.Date(millis));
+    }
+
+    // ── favourite heart button ──────────────────────────────────────────────────────────────
+
+    /** A tiny heart toggle that shows the favourite count beside it. */
     private void buildStrip() {
         JPanel top = new JPanel(new BorderLayout(8, 0));
         top.setOpaque(false);
@@ -596,134 +447,8 @@ public class MarketCard extends JPanel {
         repaint();
     }
 
-    // ── comments API (driven by the menu) ───────────────────────────────────────────────────
 
-    public void setCommentsExpanded(boolean expanded) {
-        this.commentsExpanded = expanded;
-        if (commentsPanel != null) {
-            commentsPanel.setVisible(expanded);
-            commentBtn.setIcon(UIIcons.comment(15, expanded ? Theme.ACCENT : Theme.TEXT_DIM));
-        }
-        revalidate();
-        repaint();
-    }
-
-    public boolean isCommentsExpanded() { return commentsExpanded; }
-
-    // ── v1.63 structure API (driven by the menu, accordion-style like comments) ──────────────
-
-    public void setStructureExpanded(boolean expanded) {
-        this.structureExpanded = expanded;
-        if (structurePanel != null) structurePanel.setVisible(expanded);
-        if (structureBtn != null)
-            structureBtn.setIcon(UIIcons.info(15, expanded ? Theme.ACCENT : Theme.TEXT_DIM));
-        revalidate();
-        repaint();
-    }
-
-    public boolean isStructureExpanded() { return structureExpanded; }
-
-    public void setCommentsText(String text) {
-        if (commentsArea != null) {
-            commentsArea.setText(text == null ? "" : text);
-            commentsArea.setCaretPosition(0);
-        }
-    }
-
-    public ScriptListing getListing() { return listing; }
-
-    public void setListing(ScriptListing l) { this.listing = l; }
-
-    // ── shared bits ─────────────────────────────────────────────────────────────────────────
-
-    private void wireCommonMouse() {
-        MouseAdapter ma = new MouseAdapter() {
-            @Override public void mouseEntered(MouseEvent e) {
-                setBorder(BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(Theme.BORDER_STRONG),
-                        new EmptyBorder(8, 9, 8, 9)));
-            }
-            @Override public void mouseExited(MouseEvent e) {
-                setBorder(BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(CARD_BORDER),
-                        new EmptyBorder(8, 9, 8, 9)));
-            }
-            private void handlePopup(MouseEvent e) {
-                // v1.63: in the GRID, right-click opens the "what's inside" outline (the management
-                // menu moved to the card's "..." button). STRIP cards keep their right-click menu.
-                if (mode == Mode.GRID) {
-                    if (structureBtn != null && structureBtn.isEnabled())
-                        cb.onToggleStructure(listing, MarketCard.this);
-                } else {
-                    cb.onContextMenu(listing, e, MarketCard.this);
-                }
-            }
-            @Override public void mouseClicked(MouseEvent e) {
-                if (e.isPopupTrigger() || SwingUtilities.isRightMouseButton(e)) {
-                    handlePopup(e);
-                } else if (mode == Mode.GRID && e.getClickCount() == 2
-                        && SwingUtilities.isLeftMouseButton(e)) {
-                    cb.onDownload(listing);   // double-left-click still downloads
-                }
-            }
-            @Override public void mousePressed(MouseEvent e) {
-                if (e.isPopupTrigger()) handlePopup(e);
-            }
-            @Override public void mouseReleased(MouseEvent e) {
-                if (e.isPopupTrigger()) handlePopup(e);
-            }
-        };
-        addMouseListener(ma);
-    }
-
-    private JButton smallButton(Icon icon, String tip) {
-        JButton b = new JButton(icon);
-        b.setToolTipText(tip);
-        b.setPreferredSize(new Dimension(30, 26));
-        b.setFocusPainted(false);
-        b.setMargin(new Insets(1, 1, 1, 1));
-        b.setBackground(Theme.SURFACE_2);
-        return b;
-    }
-
-    private JLabel chip(String text, Color fg, Color bg) {
-        JLabel l = new JLabel(text);
-        l.setFont(Theme.fontBold(10));
-        l.setForeground(fg);
-        l.setOpaque(true);
-        l.setBackground(bg);
-        l.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(fg.darker()),
-                new EmptyBorder(1, 5, 1, 5)));
-        return l;
-    }
-
-    private static String[] prefixHash(java.util.List<String> tags) {
-        int n = Math.min(tags.size(), 4);
-        String[] out = new String[n];
-        for (int i = 0; i < n; i++) out[i] = "#" + tags.get(i);
-        return out;
-    }
-
-    private static String clip(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max - 1) + "\u2026";
-    }
-
-    private static String trimVersion(double v) {
-        if (v == Math.floor(v)) return String.valueOf((int) v);
-        return String.valueOf(v);
-    }
-
-    private static String shortDate(long millis) {
-        if (millis <= 0) return "\u2014";
-        return new java.text.SimpleDateFormat("d MMM yyyy").format(new java.util.Date(millis));
-    }
-
-    // ── favourite heart button ──────────────────────────────────────────────────────────────
-
-    /** A tiny heart toggle that shows the favourite count beside it. */
-    private static class FavoriteButton extends JButton {
+    static class FavoriteButton extends JButton {
         private boolean favorited;
         private int count;
         FavoriteButton() {

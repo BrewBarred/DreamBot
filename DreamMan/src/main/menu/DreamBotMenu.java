@@ -204,8 +204,11 @@ public class DreamBotMenu extends JFrame {
     // ── Patch B.11: the script market (v1.60: rebuilt as a card grid) ──
     private main.market.ScriptRepository marketRepo;
     private JButton btnMyUploads;   // v1.32b: hidden unless the server market is active
-    private String expandedCommentsId;   // v1.50: the card whose comments are open (one at a time)
-    private String expandedStructureId;  // v1.63: the card whose structure outline is open
+    // v1.64: the DETAIL view replaced the v1.50/v1.63 in-card accordions. One listing's detail
+    // shows at a time, swapped over the grid via a CardLayout; these track that state.
+    private JPanel marketCenterCards;                                  // "grid" | "detail"
+    private main.menu.components.ListingDetailPanel marketDetail;      // the open detail, or null
+    private String detailListingId;                                    // its listing id, or null
     private final java.util.Map<String, String> marketCommentsCache = new java.util.HashMap<>();
     private final List<main.market.ScriptListing> marketAll = new ArrayList<>();
     private JTextField marketSearchField;
@@ -328,6 +331,132 @@ public class DreamBotMenu extends JFrame {
 
     /** Always-on watchers (the "default background triggers"); read by the engine each loop. */
     public List<main.watchers.Trigger> getGlobalTriggers() { return globalTriggers; }
+
+    /**
+     * v1.64: SCRIPT triggers - always-on checks that apply only while THE CURRENT QUEUE is running
+     * (set in the Task List tab), drawn from the global set. Copies, not references, so a script's
+     * checks are a snapshot that persists with its preset and travels when it's published. They
+     * save with the queue draft and per-preset, and load back when a preset is loaded.
+     */
+    private final List<main.watchers.Trigger> scriptTriggers =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public List<main.watchers.Trigger> getScriptTriggers() { return scriptTriggers; }
+
+    /**
+     * v1.64: the trigger set the runtime should evaluate - the always-on globals PLUS the running
+     * script's own script triggers. DreamBotMan calls this only while executing the queue, so the
+     * script triggers are correctly scoped: they never fire when no script is running.
+     */
+    /**
+     * v1.64: choose which always-on global checks apply while THIS task list runs (script
+     * triggers). Pick from the global set; the picks are stored as a snapshot on the current
+     * queue (a COPY per check, so editing the global later doesn't silently change a saved
+     * script). They save with the queue draft and per-preset, and travel when the script is
+     * published. Global checks still run always; these run additionally, only while this list is
+     * executing.
+     */
+    private void openScriptTriggersDialog(JComponent anchor) {
+        java.util.List<main.watchers.Trigger> globals = new ArrayList<>();
+        for (main.watchers.Trigger t : globalTriggers) if (t != null) globals.add(t);
+        if (globals.isEmpty()) {
+            showToast("You have no always-on checks yet \u2014 build some on the Checks tab first, "
+                    + "then pick which apply to this script", anchor, false);
+            return;
+        }
+        // a script trigger "matches" a global if it's the same check (by description snapshot)
+        java.util.Set<String> active = new java.util.HashSet<>();
+        for (main.watchers.Trigger st : scriptTriggers)
+            if (st != null) active.add(st.describe());
+
+        java.util.List<JCheckBox> boxes = new ArrayList<>();
+        JPanel list = new JPanel();
+        list.setLayout(new BoxLayout(list, BoxLayout.Y_AXIS));
+        list.setOpaque(false);
+        for (main.watchers.Trigger t : globals) {
+            JCheckBox cb = new JCheckBox(t.describe(), active.contains(t.describe()));
+            cb.setOpaque(false);
+            cb.setForeground(TEXT_MAIN);
+            boxes.add(cb);
+            list.add(cb);
+        }
+        JScrollPane sp = Theme.thinScrollbars(new JScrollPane(list));
+        sp.setPreferredSize(new Dimension(380, Math.min(320, 26 * globals.size() + 16)));
+
+        JPanel root = new JPanel(new BorderLayout(0, 6));
+        root.add(styledLabel("<html>Checks that run <b>only while this task list is running</b>:"
+                + "<br><span style='color:#999'>(Global checks on the Checks tab always run; these "
+                + "run additionally, just for this script.)</span></html>"), BorderLayout.NORTH);
+        root.add(sp, BorderLayout.CENTER);
+
+        int r = JOptionPane.showConfirmDialog(this, root, "Script triggers",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (r != JOptionPane.OK_OPTION) return;
+
+        // rebuild the script-trigger set from the ticked globals (fresh enabled copies)
+        scriptTriggers.clear();
+        int n = 0;
+        for (int i = 0; i < boxes.size(); i++) {
+            if (!boxes.get(i).isSelected()) continue;
+            main.watchers.Trigger copy = new main.watchers.Trigger(globals.get(i));
+            copy.setEnabled(true);   // chosen to apply -> active while this script runs
+            scriptTriggers.add(copy);
+            n++;
+        }
+        requestAutosave();
+        showToast(n == 0 ? "No script triggers \u2014 this list runs with global checks only"
+                : n + " script trigger" + (n == 1 ? "" : "s") + " will run while this list plays",
+                anchor, true);
+    }
+
+    /** v1.64: the live script-trigger set as JSON, for saving into a preset/bundle. */
+    private String currentScriptTriggersJson() {
+        return main.watchers.TriggerCodec.toJson(new ArrayList<>(scriptTriggers));
+    }
+
+    /**
+     * v1.64: let the author choose WHICH of their always-on global checks to fold into a publish
+     * (the roadmap's "allow the user to select which of the global triggers are included if they
+     * want to include any at all"). Returns the picked list (possibly empty = include none), or
+     * null if they cancelled the publish entirely.
+     */
+    private java.util.List<main.watchers.Trigger> pickGlobalTriggersToBundle() {
+        java.util.List<main.watchers.Trigger> live = new ArrayList<>();
+        for (main.watchers.Trigger t : globalTriggers) if (t != null) live.add(t);
+        java.util.List<JCheckBox> boxes = new ArrayList<>();
+        JPanel list = new JPanel();
+        list.setLayout(new BoxLayout(list, BoxLayout.Y_AXIS));
+        list.setOpaque(false);
+        for (main.watchers.Trigger t : live) {
+            JCheckBox cb = new JCheckBox(t.describe(), false);   // default: include none
+            cb.setOpaque(false);
+            cb.setForeground(TEXT_MAIN);
+            boxes.add(cb);
+            list.add(cb);
+        }
+        JScrollPane sp = Theme.thinScrollbars(new JScrollPane(list));
+        sp.setPreferredSize(new Dimension(360, Math.min(300, 26 * live.size() + 16)));
+        JPanel root = new JPanel(new BorderLayout(0, 6));
+        root.add(styledLabel("Also include which of your always-on global checks? "
+                + "(they run for whoever downloads it)"), BorderLayout.NORTH);
+        root.add(sp, BorderLayout.CENTER);
+        Object[] opts = {"Include selected", "Include none", "Cancel publish"};
+        int r = JOptionPane.showOptionDialog(this, root, "Include global checks?",
+                JOptionPane.DEFAULT_OPTION, JOptionPane.PLAIN_MESSAGE, null, opts, opts[1]);
+        if (r == 2 || r == JOptionPane.CLOSED_OPTION) return null;
+        java.util.List<main.watchers.Trigger> picked = new ArrayList<>();
+        if (r == 0)
+            for (int i = 0; i < boxes.size(); i++)
+                if (boxes.get(i).isSelected()) picked.add(live.get(i));
+        return picked;
+    }
+
+    public List<main.watchers.Trigger> getRuntimeTriggers() {
+        if (scriptTriggers.isEmpty()) return globalTriggers;
+        List<main.watchers.Trigger> all = new ArrayList<>(globalTriggers);
+        all.addAll(scriptTriggers);
+        return all;
+    }
 
     private final DefaultListModel<Action> inspActionsModel = new DefaultListModel<>();
     private JList<Action> inspActionsList;
@@ -770,6 +899,13 @@ public class DreamBotMenu extends JFrame {
         left.add(lblWaitTo);
         left.add(queueWaitMaxInput);
         left.add(lblWaitMs);
+        // v1.64: script triggers - always-on checks that run only while THIS list/script runs.
+        btnScriptTriggers = createButton("Script triggers\u2026", new Color(55, 45, 65), null);
+        btnScriptTriggers.setToolTipText("Pick always-on checks that apply only while this task "
+                + "list is running (they save with its preset and travel when you publish it)");
+        btnScriptTriggers.addActionListener(e -> openScriptTriggersDialog(btnScriptTriggers));
+        left.add(Box.createHorizontalStrut(6));
+        left.add(btnScriptTriggers);
 
         // ---- right: skip / run-from-here + live indicator ----
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
@@ -1125,6 +1261,7 @@ public class DreamBotMenu extends JFrame {
     private javax.swing.Timer connPollTimer;     // v1.32b: 30s health poll driving the dot
     private JButton btnAccountLogout;    // v1.32b: DreamMan-account logout (separate from game)
     private JButton btnEditProfile;      // v1.63: public-profile (bio) editor, login-gated
+    private JButton btnScriptTriggers;   // v1.64: per-script trigger selection (Task List tab)
     private boolean suppressAccountEvents = false;
 
     /** Builds the sign-in / account-switcher row for the Player card (Patch B.15). */
@@ -1623,6 +1760,11 @@ public class DreamBotMenu extends JFrame {
         // Queue-level loops still default to 1 so the importer picks their own.
         bundle.loops = 1;
         bundle.tasks = ProfileCodec.tasksToData(modelTaskList);
+        // v1.64: three tiers of triggers travel. Per-ACTION triggers are already inside the tasks
+        // above (Action's __triggers). SCRIPT triggers - the checks set to run while THIS script
+        // runs - all travel. GLOBAL triggers are opt-in via the picker below.
+        if (!scriptTriggers.isEmpty())
+            bundle.scriptTriggers = currentScriptTriggersJson();
         java.util.List<main.watchers.Trigger> pickedTrigs = new ArrayList<>();
         for (JCheckBox cb : trigPicks)
             if (cb.isSelected())
@@ -2543,7 +2685,9 @@ public class DreamBotMenu extends JFrame {
             List<Task> tasks = new ArrayList<>();
             for (int i = 0; i < modelTaskList.size(); i++)
                 tasks.add(new Task(modelTaskList.getElementAt(i)));
-            modelPresets.addElement(new Preset(name.trim(), tasks, queueLoopTarget));
+            Preset np = new Preset(name.trim(), tasks, queueLoopTarget);
+            np.setScriptTriggers(currentScriptTriggersJson());   // v1.64
+            modelPresets.addElement(np);
             selectedPresetIndex = modelPresets.size() - 1;
             saveAll(false);
             refreshPresetButtonLabels();
@@ -3280,6 +3424,18 @@ public class DreamBotMenu extends JFrame {
         body.setOpaque(false);
         body.add(blurb, BorderLayout.NORTH);
         body.add(editor, BorderLayout.CENTER);
+        // v1.64: triggers are publishable now - stage one for the market from here. Each listing
+        // carries exactly ONE check (a trigger has one main intention), and the v1.61 card gate
+        // applies as ever: it stages into the market-ready strip and opens the Card Builder.
+        JButton btnPublishCheck = createButton("Publish a check\u2026", new Color(25, 60, 75), null);
+        btnPublishCheck.setToolTipText("Stage one of your always-on checks as a market listing "
+                + "(kind: trigger) and build its card");
+        btnPublishCheck.addActionListener(e -> pickTriggerToStage(btnPublishCheck));
+        JPanel pubRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        pubRow.setOpaque(false);
+        pubRow.setBorder(new EmptyBorder(6, 0, 0, 0));
+        pubRow.add(btnPublishCheck);
+        body.add(pubRow, BorderLayout.SOUTH);
         panel.add(body, BorderLayout.CENTER);
         return panel;
     }
@@ -3531,7 +3687,12 @@ public class DreamBotMenu extends JFrame {
         JPanel body = new JPanel(new BorderLayout(0, 8));
         body.setOpaque(false);
         body.add(head, BorderLayout.NORTH);
-        body.add(marketGridScroll, BorderLayout.CENTER);
+        // v1.64: the centre is a CardLayout - the grid, or ONE listing's full detail view
+        // (opened from a card's (i)/comment buttons or right-click; closed by its X or Esc).
+        marketCenterCards = new JPanel(new CardLayout());
+        marketCenterCards.setOpaque(false);
+        marketCenterCards.add(marketGridScroll, "grid");
+        body.add(marketCenterCards, BorderLayout.CENTER);
         body.add(strip, BorderLayout.SOUTH);
         panel.add(body, BorderLayout.CENTER);
 
@@ -3730,11 +3891,9 @@ public class DreamBotMenu extends JFrame {
             main.menu.components.MarketCard card = new main.menu.components.MarketCard(
                     l, main.menu.components.MarketCard.Mode.GRID, cardCallbacks);
             if (l.id != null) marketCardById.put(l.id, card);
-            if (l.id != null && l.id.equals(expandedCommentsId)) {
-                card.setCommentsExpanded(true);
-                card.setCommentsText(marketCommentsCache.getOrDefault(l.id, "Loading comments\u2026"));
-                if (!marketCommentsCache.containsKey(l.id)) fetchCommentsInto(l.id);
-            }
+            // v1.64: if this listing's DETAIL is open, refresh its live stats from the reload
+            if (marketDetail != null && l.id != null && l.id.equals(detailListingId))
+                marketDetail.refreshFrom(l);
             marketGridPanel.add(card);
         }
         marketGridPanel.revalidate();
@@ -3802,13 +3961,8 @@ public class DreamBotMenu extends JFrame {
         @Override public void onToggleFavorite(main.market.ScriptListing l) {
             toggleFavorite(l);
         }
-        @Override public void onToggleComments(main.market.ScriptListing l,
-                                               main.menu.components.MarketCard card) {
-            toggleCardComments(l);
-        }
-        @Override public void onToggleStructure(main.market.ScriptListing l,
-                                                main.menu.components.MarketCard card) {
-            toggleCardStructure(l);
+        @Override public void onOpenDetails(main.market.ScriptListing l, boolean focusComments) {
+            openListingDetail(l, focusComments);
         }
         @Override public void onOpenProfile(main.market.ScriptListing l) {
             if (l != null) openUserProfile(l.author);
@@ -3844,31 +3998,6 @@ public class DreamBotMenu extends JFrame {
                     && main.market.ServerAccount.isLoggedIn();
         }
     };
-
-    /**
-     * v1.63: expand/collapse a card's tasks -> actions -> triggers outline. Accordion-style like
-     * comments (one open at a time) so the grid doesn't fill with tall expanded cards. Works for
-     * any origin that carries a bundle - server listings, shared-folder listings, and local
-     * staged items all qualify; a VIP listing whose bundle the server withheld shows a disabled
-     * button instead (handled in the card).
-     */
-    private void toggleCardStructure(main.market.ScriptListing l) {
-        if (l == null || l.id == null) return;
-        String prev = expandedStructureId;
-        expandedStructureId = l.id.equals(prev) ? null : l.id;
-        if (prev != null) {
-            main.menu.components.MarketCard was = marketCardById.get(prev);
-            if (was != null) was.setStructureExpanded(false);
-        }
-        if (expandedStructureId != null) {
-            main.menu.components.MarketCard now = marketCardById.get(expandedStructureId);
-            if (now != null) now.setStructureExpanded(true);
-        }
-        if (marketGridPanel != null) {
-            marketGridPanel.revalidate();
-            marketGridPanel.repaint();
-        }
-    }
 
     /** v1.63: the market server to talk to for profiles - active repo, else session, else default. */
     private String profileServerUrl() {
@@ -3976,27 +4105,36 @@ public class DreamBotMenu extends JFrame {
         }, "DreamMan-ProfileLoad").start();
     }
 
-    /** v1.50: expand/collapse a row's comments (one row at a time, accordion-style). */
-    private void toggleCardComments(main.market.ScriptListing l) {
-        if (l == null || l.id == null || !"server".equals(l.origin)) return;
-        String prev = expandedCommentsId;
-        expandedCommentsId = l.id.equals(prev) ? null : l.id;
-        // v1.60: cards are live components, so we just flip them - no row-poking
-        if (prev != null) {
-            main.menu.components.MarketCard was = marketCardById.get(prev);
-            if (was != null) was.setCommentsExpanded(false);
-        }
-        if (expandedCommentsId != null) {
-            main.menu.components.MarketCard now = marketCardById.get(expandedCommentsId);
-            if (now != null) {
-                now.setCommentsExpanded(true);
-                now.setCommentsText(marketCommentsCache.getOrDefault(l.id, "Loading comments\u2026"));
-            }
+    /**
+     * v1.64: open a listing's DETAIL view - it takes over the whole grid area (the owner's call:
+     * one item's detail at a time, covering the other cards is fine, with an explicit way out).
+     * The market header and the staging strip stay visible; ✕ or Esc returns to the grid with
+     * the scroll position untouched (the grid component is merely hidden, not rebuilt).
+     */
+    private void openListingDetail(main.market.ScriptListing l, boolean focusComments) {
+        if (l == null || marketCenterCards == null) return;
+        if (marketDetail != null) marketCenterCards.remove(marketDetail);
+        marketDetail = new main.menu.components.ListingDetailPanel(
+                l, cardCallbacks, this::closeListingDetail, focusComments);
+        detailListingId = l.id;
+        marketCenterCards.add(marketDetail, "detail");
+        ((CardLayout) marketCenterCards.getLayout()).show(marketCenterCards, "detail");
+        // comments load lazily, same cache as before
+        if ("server".equals(l.origin) && l.id != null) {
+            marketDetail.setCommentsText(
+                    marketCommentsCache.getOrDefault(l.id, "Loading comments\u2026"));
             if (!marketCommentsCache.containsKey(l.id)) fetchCommentsInto(l.id);
         }
-        if (marketGridPanel != null) {
-            marketGridPanel.revalidate();
-            marketGridPanel.repaint();
+    }
+
+    /** v1.64: back to the grid (the detail's ✕ / Esc). */
+    private void closeListingDetail() {
+        if (marketCenterCards == null) return;
+        detailListingId = null;
+        ((CardLayout) marketCenterCards.getLayout()).show(marketCenterCards, "grid");
+        if (marketDetail != null) {
+            marketCenterCards.remove(marketDetail);
+            marketDetail = null;
         }
     }
 
@@ -4026,8 +4164,8 @@ public class DreamBotMenu extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 marketCommentsCache.put(id, out);
                 // v1.60: hand the text straight to the card, if it's still the open one
-                main.menu.components.MarketCard card = marketCardById.get(id);
-                if (card != null && id.equals(expandedCommentsId)) card.setCommentsText(out);
+                if (marketDetail != null && id.equals(detailListingId))
+                    marketDetail.setCommentsText(out);
             });
         }, "DreamMan-RowComments").start();
     }
@@ -4037,8 +4175,9 @@ public class DreamBotMenu extends JFrame {
                                  main.menu.components.MarketCard card) {
         if (l == null || l.id == null || body == null || body.trim().isEmpty()) return;
         if (!(marketRepo instanceof main.market.HttpRepository)) return;
+        JComponent anchor = card != null ? card : marketAnchor();   // v1.64: detail passes null
         if (!main.market.ServerAccount.isLoggedIn()) {
-            showToast("Log in to comment", card, false);
+            showToast("Log in to comment", anchor, false);
             return;
         }
         final String id = l.id;
@@ -4051,7 +4190,7 @@ public class DreamBotMenu extends JFrame {
                 SwingUtilities.invokeLater(() -> fetchCommentsInto(id));
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() ->
-                        showToast("Comment failed: " + ex.getMessage(), card, false));
+                        showToast("Comment failed: " + ex.getMessage(), anchor, false));
             }
         }, "DreamMan-PostComment").start();
     }
@@ -4801,6 +4940,17 @@ public class DreamBotMenu extends JFrame {
     /** Import a listing into the Task Library, after showing exactly what it will add. */
     private void importListing(main.market.ScriptListing l, JComponent anchor) {
         if (l == null) { showToast("Pick a script first", anchor, false); return; }
+        // v1.64: a trigger listing installs into your always-on checks, not the library
+        if ("trigger".equalsIgnoreCase(l.kind)) {
+            if (l.bundle == null || l.bundle.globalTriggers == null
+                    || l.bundle.globalTriggers.isBlank()) {
+                showToast(l.vipOnly ? "VIP only \u2014 upgrade to download this one"
+                        : "That listing has no check inside it", anchor, false);
+                return;
+            }
+            importTriggerListing(l, anchor);
+            return;
+        }
         // v1.49: you CAN now download your own uploads (e.g. onto another device). Name-collision
         // handling below stops it from silently duplicating what you already have.
         if (l.bundle == null || l.bundle.tasks == null || l.bundle.tasks.isEmpty()) {
@@ -4859,6 +5009,11 @@ public class DreamBotMenu extends JFrame {
 
         libraryAdd(merged);
         refreshTaskLibrary();
+        // v1.64: a downloaded script may carry SCRIPT triggers (and optionally the author's global
+        // checks). A download flattens to ONE library task, which has no script-scope of its own,
+        // so offer these as always-on checks - installed DISABLED, nothing runs until you turn it
+        // on. Per-action triggers already rode in with the task's actions and need no prompt.
+        offerBundledChecksOnImport(l, anchor);
         marketRepo.noteDownload(l.id);
         reloadMarket();
         saveAll(false);
@@ -4985,6 +5140,183 @@ public class DreamBotMenu extends JFrame {
     }
 
     /**
+     * v1.64: pick which always-on check to stage for the market. One check per listing - a
+     * trigger has one main intention, and the card should make that single purpose obvious.
+     */
+    private void pickTriggerToStage(JComponent anchor) {
+        List<main.watchers.Trigger> live = new ArrayList<>();
+        for (main.watchers.Trigger t : globalTriggers) if (t != null) live.add(t);
+        if (live.isEmpty()) {
+            showToast("You have no always-on checks yet \u2014 build one above first", anchor, false);
+            return;
+        }
+        String[] opts = new String[live.size()];
+        for (int i = 0; i < live.size(); i++) opts[i] = live.get(i).describe();
+        String pick = (String) JOptionPane.showInputDialog(this,
+                "Which check do you want to publish?", "Publish a check",
+                JOptionPane.PLAIN_MESSAGE, null, opts, opts[0]);
+        if (pick == null) return;
+        for (int i = 0; i < opts.length; i++)
+            if (opts[i].equals(pick)) { stageTriggerForCardBuilder(live.get(i), anchor); return; }
+    }
+
+    /**
+     * v1.64: stage ONE trigger as a market listing (kind = "trigger") and open its Card Builder -
+     * the same v1.61 staging + mandatory-card flow tasks and scripts use. The publish payload is
+     * the existing ScriptBundle shape with an empty task list and the trigger's JSON in
+     * {@code globalTriggers} (via TriggerCodec), so every bit of publish/download/staging
+     * plumbing - and the card's structure view - works on it unchanged. NOTE: uploading a
+     * kind="trigger" listing to the CURRENT server (1.4.1) depends on the server accepting a
+     * third kind - see SERVER-NOTES-v1_64-trigger-kind.md; shared-folder markets need nothing.
+     */
+    private void stageTriggerForCardBuilder(main.watchers.Trigger trig, JComponent anchor) {
+        if (trig == null) return;
+        String suggested = trig.describe();
+        if (suggested.length() > 40) suggested = suggested.substring(0, 40).trim();
+        String name = (String) JOptionPane.showInputDialog(this,
+                "Name this check's market listing:", "Publish a check",
+                JOptionPane.PLAIN_MESSAGE, null, null, suggested);
+        if (name == null || name.trim().isEmpty()) return;
+        name = name.trim();
+
+        // same-name staging dedupe, exactly like task staging - open the existing card instead
+        for (main.market.ScriptListing ex : marketAll) {
+            if (ex != null && "local".equals(ex.origin) && ex.name != null
+                    && ex.name.equalsIgnoreCase(name)) {
+                showToast("\"" + name + "\" is already staged - opening its card", anchor, true);
+                openCardBuilder(ex);
+                return;
+            }
+        }
+
+        String acctName = main.market.ServerAccount.isLoggedIn()
+                ? main.market.ServerAccount.username() : null;
+        String who = safePlayerName();
+        String author = (acctName != null && !acctName.isEmpty()) ? acctName
+                : (who == null || who.isEmpty() ? "Anonymous" : who);
+
+        main.market.ScriptListing listing = new main.market.ScriptListing();
+        listing.name = name;
+        listing.author = author;
+        listing.version = 1.0;
+        listing.kind = "trigger";
+        listing.origin = "local";
+        listing.description = trig.describe();   // seed the card with what the check does
+
+        main.data.store.ScriptBundle b = new main.data.store.ScriptBundle();
+        b.name = listing.name;
+        b.author = author;
+        b.version = 1.0;
+        b.description = listing.description;
+        b.loops = 1;
+        b.tasks = new ArrayList<>();             // a trigger listing carries no tasks
+        List<main.watchers.Trigger> one = new ArrayList<>();
+        one.add(trig);
+        b.globalTriggers = main.watchers.TriggerCodec.toJson(one);
+        listing.bundle = b;
+
+        try {
+            localMarketRepo.publish(listing);
+            reloadMarket();
+            openCardBuilder(listing);            // finish the card, then publish from there
+        } catch (Exception ex) {
+            showToast("Couldn't stage: " + ex.getMessage(), anchor, false);
+        }
+    }
+
+    /**
+     * v1.64: after importing a script, install any triggers its bundle carried - the author's
+     * SCRIPT triggers (ran while their script ran) and any GLOBAL checks they chose to include -
+     * as always-on checks, DISABLED. A downloaded script becomes one library task with no
+     * script-scope, so always-on (off until you enable it) is the safe home; you can re-scope them
+     * to a script yourself via the Task List tab's "Script triggers..." once you've built a queue.
+     */
+    private void offerBundledChecksOnImport(main.market.ScriptListing l, JComponent anchor) {
+        if (l.bundle == null) return;
+        java.util.List<main.watchers.Trigger> incoming = new ArrayList<>();
+        try {
+            if (l.bundle.scriptTriggers != null && !l.bundle.scriptTriggers.isBlank())
+                incoming.addAll(main.watchers.TriggerCodec.fromJson(l.bundle.scriptTriggers));
+            if (l.bundle.globalTriggers != null && !l.bundle.globalTriggers.isBlank())
+                incoming.addAll(main.watchers.TriggerCodec.fromJson(l.bundle.globalTriggers));
+        } catch (Exception ignored) { return; }
+        if (incoming.isEmpty()) return;
+
+        StringBuilder sb = new StringBuilder("<html>\u201c" + escapeHtml(l.name) + "\u201d also "
+                + "brings " + incoming.size() + " always-on check"
+                + (incoming.size() == 1 ? "" : "s") + ":<br>");
+        for (main.watchers.Trigger t : incoming)
+            if (t != null) sb.append("&nbsp;&nbsp;\u2022 ").append(escapeHtml(t.describe()))
+                    .append("<br>");
+        sb.append("<br>Install "
+                + (incoming.size() == 1 ? "it" : "them") + " into your Checks tab? They'll be "
+                + "<b>disabled</b> until you switch "
+                + (incoming.size() == 1 ? "it" : "them") + " on.</html>");
+        int ok = JOptionPane.showConfirmDialog(this, new JLabel(sb.toString()),
+                "Install the script's checks?", JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE);
+        if (ok != JOptionPane.YES_OPTION) return;
+        int n = 0;
+        for (main.watchers.Trigger t : incoming) {
+            if (t == null) continue;
+            t.setEnabled(false);
+            globalTriggers.add(t);
+            n++;
+        }
+        if (checksEditor != null) checksEditor.reload();
+        saveAll(false);
+        showToast("Added " + n + " check" + (n == 1 ? "" : "s")
+                + " (disabled) to your Checks tab", anchor, true);
+    }
+
+    /**
+     * v1.64: importing a kind="trigger" listing installs its check into your always-on checks
+     * (the Checks tab) instead of the Task Library. Imported checks arrive DISABLED - nothing a
+     * download brings should start acting on your account until you've read it and switched it
+     * on yourself.
+     */
+    private void importTriggerListing(main.market.ScriptListing l, JComponent anchor) {
+        List<main.watchers.Trigger> incoming;
+        try {
+            incoming = main.watchers.TriggerCodec.fromJson(l.bundle.globalTriggers);
+        } catch (Exception ex) {
+            showToast("Couldn't read that check: " + ex.getMessage(), anchor, false);
+            return;
+        }
+        if (incoming == null || incoming.isEmpty()) {
+            showToast("That listing has no check inside it", anchor, false);
+            return;
+        }
+        StringBuilder sb = new StringBuilder("<html><b>" + escapeHtml(l.name) + "</b> by "
+                + escapeHtml(l.author) + "<br><br>Installs "
+                + (incoming.size() == 1 ? "this always-on check" : "these always-on checks")
+                + " into your Checks tab:<br>");
+        for (main.watchers.Trigger t : incoming)
+            if (t != null) sb.append("&nbsp;&nbsp;\u2022 ").append(escapeHtml(t.describe()))
+                    .append("<br>");
+        sb.append("<br>It arrives <b>disabled</b> \u2014 review it, then switch it on yourself."
+                + "<br><br>Install?</html>");
+        int ok = JOptionPane.showConfirmDialog(this, new JLabel(sb.toString()),
+                "Install \"" + l.name + "\"", JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE);
+        if (ok != JOptionPane.YES_OPTION) return;
+
+        int n = 0;
+        for (main.watchers.Trigger t : incoming) {
+            if (t == null) continue;
+            t.setEnabled(false);                 // the safety default: nothing runs until YOU say
+            globalTriggers.add(t);
+            n++;
+        }
+        if (checksEditor != null) checksEditor.reload();
+        saveAll(false);
+        marketRepo.noteDownload(l.id);
+        reloadMarket();
+        showToast("Installed " + n + " check" + (n == 1 ? "" : "s")
+                + " (disabled) \u2014 see the Checks tab", anchor, true);
+    }
+
+    /**
      * v1.61: the direct-publish path is retired - publishing anything now goes through staging
      * and the Card Builder, because a listing without a finished card can't be published at all.
      * This replaces the old publishItem/publishTasks pair: it stages a named set of tasks (a
@@ -5042,16 +5374,15 @@ public class DreamBotMenu extends JFrame {
         // the importer picks their own.
         b.loops = 1;
         b.tasks = ProfileCodec.tasksToData(tasks);
-        // the old publish dialog's "include my always-on checks" box, as a one-question ask
+        // v1.64: per-action triggers travel inside the tasks; the script's own SCRIPT triggers all
+        // travel; global checks are opt-in (now a per-check pick, not all-or-nothing).
+        if (!scriptTriggers.isEmpty())
+            b.scriptTriggers = currentScriptTriggersJson();
         if (!globalTriggers.isEmpty()) {
-            int inc = JOptionPane.showConfirmDialog(this,
-                    "Bundle your " + globalTriggers.size() + " always-on check"
-                    + (globalTriggers.size() == 1 ? "" : "s") + " into it?\n"
-                    + "(They travel with the script and run for whoever downloads it.)",
-                    "Include checks?", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
-            if (inc == JOptionPane.YES_OPTION)
-                b.globalTriggers = main.watchers.TriggerCodec.toJson(
-                        new ArrayList<>(globalTriggers));
+            java.util.List<main.watchers.Trigger> picked = pickGlobalTriggersToBundle();
+            if (picked == null) return;   // cancelled the whole publish
+            if (!picked.isEmpty())
+                b.globalTriggers = main.watchers.TriggerCodec.toJson(picked);
         }
         listing.bundle = b;
 
@@ -6394,6 +6725,8 @@ public class DreamBotMenu extends JFrame {
         List<Task> tasks;
         /** Whole-queue loop count to apply when this preset is loaded (0 = infinite). */
         int loops = 1;
+        /** v1.64: this preset's script triggers (JSON) - loaded into the live set with the preset. */
+        String scriptTriggers;
 
         public Preset(String name, List<Task> tasks) {
             this.name = name;
@@ -6410,6 +6743,8 @@ public class DreamBotMenu extends JFrame {
         public List<Task> getTasks() { return tasks; }
         public int getLoops() { return loops; }
         public void setLoops(int loops) { this.loops = loops; }
+        public String getScriptTriggers() { return scriptTriggers; }
+        public void setScriptTriggers(String s) { this.scriptTriggers = s; }
     }
 
     public boolean showToast(String toastText, JComponent component, boolean success) {
@@ -6614,6 +6949,11 @@ public class DreamBotMenu extends JFrame {
             if (data != null && data.globalTriggers != null && !data.globalTriggers.isBlank())
                 globalTriggers.addAll(main.watchers.TriggerCodec.fromJson(data.globalTriggers));
         }
+        // v1.64: restore the current queue's script triggers (always - they're queue state, not
+        // the embedded script's own global checks)
+        scriptTriggers.clear();
+        if (data != null && data.scriptTriggers != null && !data.scriptTriggers.isBlank())
+            scriptTriggers.addAll(main.watchers.TriggerCodec.fromJson(data.scriptTriggers));
         if (checksEditor != null) checksEditor.reload();   // B.5: the UI list must follow
 
         // Patch B.6: restore the remember-trackers preference and, if on, the tracked set
@@ -8137,6 +8477,9 @@ public class DreamBotMenu extends JFrame {
                 data.skillGoals.put(sd.getSkill().name(), sd.getGoalXp());
         data.globalTriggers = main.watchers.TriggerCodec.toJson(
                 new ArrayList<>(globalTriggers));
+        // v1.64: the current queue's script triggers travel with the draft
+        data.scriptTriggers = main.watchers.TriggerCodec.toJson(
+                new ArrayList<>(scriptTriggers));
         data.queueAutoWaitMinMs = queueAutoWaitMinMs;
         data.queueAutoWaitMaxMs = queueAutoWaitMaxMs;
         data.taskList = ProfileCodec.tasksToData(modelTaskList);
@@ -8629,7 +8972,9 @@ public class DreamBotMenu extends JFrame {
             List<Task> currentTasks = new ArrayList<>();
             for (int i = 0; i < modelTaskList.size(); i++)
                 currentTasks.add(new Task(modelTaskList.getElementAt(i)));
-            modelPresets.set(actualIndex, new Preset(preset.name, currentTasks, queueLoopTarget));
+            Preset saved = new Preset(preset.name, currentTasks, queueLoopTarget);
+            saved.setScriptTriggers(currentScriptTriggersJson());   // v1.64
+            modelPresets.set(actualIndex, saved);
             selectedPresetIndex = actualIndex;
             refreshPresetButtonLabels();
             saveAll(false);
@@ -8656,7 +9001,9 @@ public class DreamBotMenu extends JFrame {
                     JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) return;
             List<Task> copy = new ArrayList<>();
             for (Task t : preset.tasks) copy.add(new Task(t));
-            modelPresets.set(target, new Preset(preset.name + " (copy)", copy, preset.getLoops()));
+            Preset dup = new Preset(preset.name + " (copy)", copy, preset.getLoops());
+            dup.setScriptTriggers(preset.getScriptTriggers());   // v1.64
+            modelPresets.set(target, dup);
             refreshPresetButtonLabels();
             saveAll(false);
             showToast("Copied to slot " + (target + 1), presetButtons[slot], true);
@@ -8697,7 +9044,9 @@ public class DreamBotMenu extends JFrame {
                 currentTasks.add(new Task(modelTaskList.getElementAt(i)));
 
             String currentName = modelPresets.get(actualIndex).name;
-            modelPresets.set(actualIndex, new Preset(currentName, currentTasks, queueLoopTarget));
+            Preset saved2 = new Preset(currentName, currentTasks, queueLoopTarget);
+            saved2.setScriptTriggers(currentScriptTriggersJson());   // v1.64
+            modelPresets.set(actualIndex, saved2);
             // TODO decide whether or not to select the preset on save
             selectedPresetIndex = actualIndex; // Select it upon saving
             refreshPresetButtonLabels();
@@ -8740,6 +9089,11 @@ public class DreamBotMenu extends JFrame {
                 // apply the preset's saved whole-queue loop count
                 queueLoopTarget = Math.max(0, preset.getLoops());
                 queueLoopCurrent = 1;
+                // v1.64: swap in this preset's script triggers as the live script-trigger set
+                scriptTriggers.clear();
+                if (preset.getScriptTriggers() != null && !preset.getScriptTriggers().isBlank())
+                    scriptTriggers.addAll(
+                            main.watchers.TriggerCodec.fromJson(preset.getScriptTriggers()));
                 syncLoopControls();
                 updateQueueProgress();
 

@@ -9,4 +9,6 @@ public class PresetData {
     /** Whole-queue loop count this preset should run with (0 = infinite). */
     public int loops = 1;
     public List<TaskData> tasks = new ArrayList<>();
+    /** v1.64: this preset's script triggers (JSON) - active only while this preset runs. */
+    public String scriptTriggers;
 }
