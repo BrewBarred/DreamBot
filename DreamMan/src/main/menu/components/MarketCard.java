@@ -43,6 +43,8 @@ public class MarketCard extends JPanel {
         void onToggleComments(ScriptListing l, MarketCard card);
         /** v1.63: expand/collapse the card's tasks -> actions -> triggers outline. */
         void onToggleStructure(ScriptListing l, MarketCard card);
+        /** v1.63: open the author's public profile (author-link click on a server listing). */
+        void onOpenProfile(ScriptListing l);
         void onPostComment(ScriptListing l, String body, MarketCard card);
         void onSetIcon(ScriptListing l);
         /** v1.61: open the Card Builder for a staged listing (strip card button / context menu). */
@@ -69,6 +71,7 @@ public class MarketCard extends JPanel {
     private JLabel iconLabel;
     private JLabel titleLabel;
     private JLabel metaLabel;
+    private JLabel authorLink;         // v1.63: clickable "by <scripter>" -> public profile
     private JPanel badgeRow;
     private JLabel tagsLabel;
     private StarRating stars;
@@ -148,13 +151,28 @@ public class MarketCard extends JPanel {
         titleLabel.setFont(Theme.fontBold(13));
         titleLabel.setForeground(Theme.TEXT);
         titleLabel.setAlignmentX(LEFT_ALIGNMENT);
+        // v1.63: the author is its own clickable link (opens their public profile); the rest of
+        // the meta line (version + date) stays a plain label beside it.
+        authorLink = new JLabel();
+        authorLink.setFont(Theme.font(11));
+        authorLink.setForeground(Theme.TEXT_DIM);
+        authorLink.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                if (SwingUtilities.isLeftMouseButton(e) && "server".equals(listing.origin))
+                    cb.onOpenProfile(listing);
+            }
+        });
         metaLabel = new JLabel();
         metaLabel.setFont(Theme.font(11));
         metaLabel.setForeground(Theme.TEXT_DIM);
-        metaLabel.setAlignmentX(LEFT_ALIGNMENT);
+        JPanel metaRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        metaRow.setOpaque(false);
+        metaRow.setAlignmentX(LEFT_ALIGNMENT);
+        metaRow.add(authorLink);
+        metaRow.add(metaLabel);
         titleCol.add(titleLabel);
         titleCol.add(Box.createVerticalStrut(2));
-        titleCol.add(metaLabel);
+        titleCol.add(metaRow);
         top.add(titleCol, BorderLayout.CENTER);
 
         favButton = new FavoriteButton();
@@ -546,7 +564,17 @@ public class MarketCard extends JPanel {
         iconLabel.setIcon(decodeIcon(listing.icon, 48));
         titleLabel.setText(clip(listing.name, 26));
         titleLabel.setToolTipText(listing.name);
-        metaLabel.setText("by " + clip(listing.author, 16) + "  \u00b7  v" + trimVersion(listing.version)
+        // v1.63: server listings get a clickable author (their public profile lives there);
+        // local/folder listings show a plain author, since there's no profile to open.
+        boolean profileable = "server".equals(listing.origin)
+                && listing.author != null && !listing.author.isEmpty();
+        authorLink.setText("by " + clip(listing.author, 16));
+        authorLink.setForeground(profileable ? Theme.ACCENT : Theme.TEXT_DIM);
+        authorLink.setCursor(Cursor.getPredefinedCursor(
+                profileable ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
+        authorLink.setToolTipText(profileable
+                ? "View " + listing.author + "'s public profile" : null);
+        metaLabel.setText("  \u00b7  v" + trimVersion(listing.version)
                 + "  \u00b7  " + shortDate(listing.publishedAt));
 
         badgeRow.removeAll();

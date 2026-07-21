@@ -1124,6 +1124,7 @@ public class DreamBotMenu extends JFrame {
     private JLabel lblServerDot;                 // v1.32b: live server status (green/red)
     private javax.swing.Timer connPollTimer;     // v1.32b: 30s health poll driving the dot
     private JButton btnAccountLogout;    // v1.32b: DreamMan-account logout (separate from game)
+    private JButton btnEditProfile;      // v1.63: public-profile (bio) editor, login-gated
     private boolean suppressAccountEvents = false;
 
     /** Builds the sign-in / account-switcher row for the Player card (Patch B.15). */
@@ -3809,6 +3810,9 @@ public class DreamBotMenu extends JFrame {
                                                 main.menu.components.MarketCard card) {
             toggleCardStructure(l);
         }
+        @Override public void onOpenProfile(main.market.ScriptListing l) {
+            if (l != null) openUserProfile(l.author);
+        }
         @Override public void onPostComment(main.market.ScriptListing l, String body,
                                             main.menu.components.MarketCard card) {
             postCardComment(l, body, card);
@@ -3864,6 +3868,112 @@ public class DreamBotMenu extends JFrame {
             marketGridPanel.revalidate();
             marketGridPanel.repaint();
         }
+    }
+
+    /** v1.63: the market server to talk to for profiles - active repo, else session, else default. */
+    private String profileServerUrl() {
+        if (marketRepo instanceof main.market.HttpRepository)
+            return ((main.market.HttpRepository) marketRepo).baseUrl();
+        String s = main.market.ServerAccount.session().baseUrl;
+        return (s == null || s.isEmpty()) ? DEFAULT_MARKET_SERVER_URL : s;
+    }
+
+    /** v1.63: fetch + show a scripter's public profile (author-link click on a card). */
+    private void openUserProfile(String author) {
+        if (author == null || author.trim().isEmpty()) return;
+        final String name = author.trim();
+        final String url = profileServerUrl();
+        new Thread(() -> {
+            try {
+                String json = new main.market.ServerAccount(url).fetchUserProfile(name);
+                SwingUtilities.invokeLater(() -> main.menu.components.ProfileDialog.show(
+                        SwingUtilities.getWindowAncestor(this), name, json));
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> showToast(
+                        "Couldn't load " + name + "'s profile: " + ex.getMessage(),
+                        marketAnchor(), false));
+            }
+        }, "DreamMan-Profile").start();
+    }
+
+    /**
+     * v1.63: edit MY public bio (Status tab, next to the account card - it's account-adjacent).
+     * Prefills from the live profile, saves via PUT /me/profile. A soft 500-char client cap keeps
+     * the payload sane; the server's own limit (if stricter) surfaces through its error message.
+     */
+    private void openMyProfileEditor(JComponent anchor) {
+        if (!main.market.ServerAccount.isLoggedIn()) {
+            showToast("Log in to your DreamMan account first", anchor, false);
+            return;
+        }
+        final String me = main.market.ServerAccount.username();
+        final String url = profileServerUrl();
+        new Thread(() -> {
+            String bio = "";
+            String fetched = null;
+            try {
+                fetched = new main.market.ServerAccount(url).fetchUserProfile(me);
+                com.google.gson.JsonElement root = com.google.gson.JsonParser.parseString(fetched);
+                if (root != null && root.isJsonObject()) {
+                    com.google.gson.JsonElement b = root.getAsJsonObject().get("bio");
+                    if (b != null && !b.isJsonNull() && b.isJsonPrimitive()) bio = b.getAsString();
+                }
+            } catch (Exception ignored) { /* no profile yet / fetch failed -> start empty */ }
+            final String bio0 = bio == null ? "" : bio;
+            final String fetchedJson = fetched;
+            SwingUtilities.invokeLater(() -> {
+                JTextArea area = new JTextArea(bio0, 6, 30);
+                area.setLineWrap(true);
+                area.setWrapStyleWord(true);
+                JLabel count = new JLabel();
+                Runnable upd = () -> {
+                    int n = area.getText().length();
+                    count.setText(n + " / 500");
+                    count.setForeground(n > 500 ? Theme.AMBER : TEXT_DIM);
+                };
+                area.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                    public void insertUpdate(javax.swing.event.DocumentEvent e) { upd.run(); }
+                    public void removeUpdate(javax.swing.event.DocumentEvent e) { upd.run(); }
+                    public void changedUpdate(javax.swing.event.DocumentEvent e) { upd.run(); }
+                });
+                upd.run();
+                JPanel p = new JPanel(new BorderLayout(0, 6));
+                p.add(new JLabel("Your public bio (shown on your scripter profile):"),
+                        BorderLayout.NORTH);
+                p.add(Theme.thinScrollbars(new JScrollPane(area)), BorderLayout.CENTER);
+                JPanel foot = new JPanel(new BorderLayout());
+                foot.setOpaque(false);
+                foot.add(count, BorderLayout.EAST);
+                p.add(foot, BorderLayout.SOUTH);
+
+                Object[] opts = {"Save", "View my profile", "Cancel"};
+                int r = JOptionPane.showOptionDialog(this, p, "Public profile \u2014 " + me,
+                        JOptionPane.DEFAULT_OPTION, JOptionPane.PLAIN_MESSAGE, null, opts, opts[0]);
+                if (r == 1) {   // view as the public sees it (uses the fetch we already did)
+                    if (fetchedJson != null)
+                        main.menu.components.ProfileDialog.show(
+                                SwingUtilities.getWindowAncestor(this), me, fetchedJson);
+                    else openUserProfile(me);
+                    return;
+                }
+                if (r != 0) return;
+                String newBio = area.getText().trim();
+                if (newBio.length() > 500) {
+                    showToast("Bio is over 500 characters \u2014 trim it a little", anchor, false);
+                    return;
+                }
+                new Thread(() -> {
+                    try {
+                        new main.market.ServerAccount(url).updateMyProfile(newBio);
+                        SwingUtilities.invokeLater(() ->
+                                showToast("Profile saved", anchor, true));
+                    } catch (Exception ex) {
+                        SwingUtilities.invokeLater(() -> showToast(
+                                "Couldn't save: " + ex.getMessage(), anchor, false));
+                    }
+                }, "DreamMan-ProfileSave").start();
+            });
+        }, "DreamMan-ProfileLoad").start();
     }
 
     /** v1.50: expand/collapse a row's comments (one row at a time, accordion-style). */
@@ -5768,6 +5878,17 @@ public class DreamBotMenu extends JFrame {
         addInfoRow(card, "Tier", lblAccountTier);
         card.add(buildAccountSwitcherRow());
 
+        // v1.63: edit your public scripter profile (bio) - account-adjacent, so it lives here.
+        btnEditProfile = createButton("Public profile\u2026", new Color(45, 55, 70), null);
+        btnEditProfile.setToolTipText("View and edit the bio shown on your public scripter "
+                + "profile (what others see when they click your name on a market card)");
+        btnEditProfile.addActionListener(e -> openMyProfileEditor(btnEditProfile));
+        JPanel profileRow = new JPanel(new BorderLayout());
+        profileRow.setOpaque(false);
+        profileRow.setBorder(new EmptyBorder(8, 0, 0, 0));
+        profileRow.add(btnEditProfile, BorderLayout.CENTER);
+        card.add(profileRow);
+
         btnAccountLogout = createButton("Log out of DreamMan account");
         btnAccountLogout.setToolTipText("Sign out of your DreamMan account (separate from the "
                 + "game logout at the bottom of the window)");
@@ -5802,10 +5923,11 @@ public class DreamBotMenu extends JFrame {
         return card;
     }
 
-    /** Shows the account Log out button only while signed in. */
+    /** Shows the account Log out button (and the profile editor, v1.63) only while signed in. */
     private void refreshAccountLogoutVisibility() {
-        if (btnAccountLogout != null)
-            btnAccountLogout.setVisible(main.market.ServerAccount.isLoggedIn());
+        boolean in = main.market.ServerAccount.isLoggedIn();
+        if (btnAccountLogout != null) btnAccountLogout.setVisible(in);
+        if (btnEditProfile != null) btnEditProfile.setVisible(in);
     }
 
     /** The PIN field + Set button (moved into the Player card in B.17). */

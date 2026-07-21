@@ -245,6 +245,26 @@ public class ServerAccount {
         request("PUT", "/vault/rewrap", GSON.toJson(new java.util.LinkedHashMap<>(fields)), session().token);
     }
 
+    // ── v1.63: PUBLIC scripter profiles (a different thing from the character-settings sync
+    // below: these are the market-facing "who is this scripter" pages) ──
+
+    /**
+     * Fetches a scripter's public profile as raw JSON. No auth - profiles are public, so this
+     * works logged out too. The caller parses defensively (the exact field set is the server's).
+     */
+    public String fetchUserProfile(String name) throws Exception {
+        if (name == null || name.trim().isEmpty()) throw new IllegalArgumentException("No name");
+        return request("GET", "/users/" + enc(name.trim()) + "/profile", null, null);
+    }
+
+    /** Updates MY public profile's bio (auth'd - PUT /me/profile). */
+    public void updateMyProfile(String bio) throws Exception {
+        if (!isLoggedIn()) throw new IllegalStateException("Log in first");
+        java.util.Map<String, String> body = new java.util.HashMap<>();
+        body.put("bio", bio == null ? "" : bio);
+        request("PUT", "/me/profile", GSON.toJson(body), session().token);
+    }
+
     // ── cloud profiles, keyed by LOCAL LABEL (never the OSRS name) ──
 
     /** The character labels this account has profiles for. */
