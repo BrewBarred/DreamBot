@@ -47,6 +47,22 @@ public final class DevConsole {
         return tabs;
     }
 
+    private static final String RANK_HELP =
+            "<html><b>free</b> \u2014 browse, download, publish within the free limits<br>"
+            + "<b>vip</b> \u2014 higher publish limits and access to VIP-only listings<br>"
+            + "<b>admin</b> \u2014 all of VIP, plus the Script Management tab: approve or deny "
+            + "submissions,<br>curate default tasks, and flip the moderation valve<br>"
+            + "<b>owner</b> \u2014 everything, plus user ranks. Set in the database only.</html>";
+
+    private static String describeRank(String rank) {
+        if (Tier.ADMIN.equalsIgnoreCase(rank))
+            return "Admins can approve or deny submissions, curate default tasks, and turn "
+                 + "publish moderation on or off.";
+        if (Tier.VIP.equalsIgnoreCase(rank))
+            return "VIP raises their publish limits and unlocks VIP-only listings.";
+        return "Free is the default: browse, download, and publish within the free limits.";
+    }
+
     /** The original v1.32b users panel. */
     private static JComponent buildUsersPanel() {
         String url = ServerAccount.session().baseUrl;
@@ -94,10 +110,16 @@ public final class DevConsole {
         scroll.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
 
         // ── promote controls (act on the selected row) ──
-        JButton btnPromote = new Theme.ThemedButton("Promote to admin");
+        // v1.81: a rank SELECTOR, not a one-way promote button. The old control could only ever
+        // make admins - there was no way to grant VIP, and no way to demote anyone at all.
+        JComboBox<String> rankBox = new JComboBox<>(new String[]{
+                Tier.FREE, Tier.VIP, Tier.ADMIN});
+        rankBox.setToolTipText(RANK_HELP);
+        JButton btnPromote = new Theme.ThemedButton("Apply rank");
         btnPromote.putClientProperty("fillColor", new Color(30, 70, 40));
         btnPromote.setEnabled(false);
-        JLabel note = new JLabel("Select a user, then promote. Owner is set in the database only.");
+        JLabel note = new JLabel("<html>Pick a user, choose a rank, Apply. "
+                + "<b>Owner</b> is set in the database only.</html>");
         note.setForeground(Theme.TEXT_MUTED);
         note.setFont(new Font("Segoe UI", Font.ITALIC, 11));
 
@@ -191,42 +213,69 @@ public final class DevConsole {
 
         btnPromote.addActionListener(e -> {
             int row = table.getSelectedRow();
-            if (row < 0) return;
-            String name = str(model.getValueAt(row, 0));
-            String tier = str(model.getValueAt(row, 1));
-            if ("admin".equalsIgnoreCase(tier) || "owner".equalsIgnoreCase(tier)) {
-                status.setText(name + " is already " + tier + ".");
+            if (row < 0) {
+                JOptionPane.showMessageDialog(root, "Select a user in the list first.",
+                        "No user selected", JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
+            String name = str(model.getValueAt(row, 0));
+            String tier = str(model.getValueAt(row, 1));
+            String want = str(rankBox.getSelectedItem());
+
+            // v1.81: say WHY nothing will happen, in a dialog. Previously an owner-targeted
+            // promote wrote a line into a small status label and looked like a dead button.
+            if (Tier.OWNER.equalsIgnoreCase(tier)) {
+                JOptionPane.showMessageDialog(root,
+                        "<html><b>" + name + "</b> is the owner.<br><br>The owner's rank can't be "
+                        + "changed from the client \u2014 it's set directly in the database, so "
+                        + "the top-level<br>account can never be demoted or escalated into by "
+                        + "anything running on a user's machine.</html>",
+                        "Owner can't be changed", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            if (want.equalsIgnoreCase(tier)) {
+                JOptionPane.showMessageDialog(root,
+                        name + " is already " + want + ".", "No change",
+                        JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            boolean demoting = Tier.ADMIN.equalsIgnoreCase(tier) && !Tier.ADMIN.equalsIgnoreCase(want);
             if (JOptionPane.showConfirmDialog(root,
-                    "Promote \"" + name + "\" to admin?\nThey'll be able to manage the marketplace.",
-                    "Promote to admin", JOptionPane.YES_NO_OPTION,
-                    JOptionPane.QUESTION_MESSAGE) != JOptionPane.YES_OPTION) return;
+                    "<html>" + (demoting ? "<b>Demote</b> " : "Set ") + "\"" + name + "\" "
+                    + (demoting ? "from admin to " : "to ") + "<b>" + want + "</b>?<br><br>"
+                    + describeRank(want) + "</html>",
+                    demoting ? "Demote user" : "Change rank",
+                    JOptionPane.YES_NO_OPTION,
+                    demoting ? JOptionPane.WARNING_MESSAGE : JOptionPane.QUESTION_MESSAGE)
+                    != JOptionPane.YES_OPTION) return;
 
             btnPromote.setEnabled(false);
-            status.setText("Promoting " + name + "\u2026");
+            status.setText("Updating " + name + "\u2026");
             Thread t = new Thread(() -> {
                 String err = null;
                 try {
-                    server.adminSetRole(name, Tier.ADMIN);
+                    server.adminSetRole(name, want);
                 } catch (Throwable ex) {
                     err = ex.getMessage() == null ? ex.toString() : ex.getMessage();
                 }
                 final String fErr = err;
                 SwingUtilities.invokeLater(() -> {
+                    btnPromote.setEnabled(true);
                     if (fErr != null) {
-                        status.setText("Couldn't promote: " + fErr);
-                        btnPromote.setEnabled(true);
+                        status.setText("Couldn't change rank: " + fErr);
                     } else {
-                        model.setValueAt("admin", row, 1);
-                        model.setValueAt("\u2014", row, 2);
-                        status.setText(name + " is now an admin.");
+                        model.setValueAt(want, row, 1);
+                        status.setText(name + " is now " + want + ".");
                     }
                 });
-            }, "DreamMan-AdminPromote");
+            }, "DreamMan-AdminSetRank");
             t.setDaemon(true);
             t.start();
         });
+
+        // v1.81: load on open. The list used to start empty and only populate once you pressed
+        // Search - with an empty query, which is exactly what the panel could have done itself.
+        doSearch.run();
 
         root.add(header, BorderLayout.NORTH);
         root.add(scroll, BorderLayout.CENTER);
