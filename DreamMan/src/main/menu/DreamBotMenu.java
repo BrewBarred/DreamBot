@@ -325,6 +325,17 @@ public class DreamBotMenu extends JFrame {
     private Map<String, Integer> libraryUseCounts = new HashMap<>();
     private JLabel inspName, inspMeta, inspStatus, inspTags;   // v1.62: inspTags = full tag list
     private JTextArea inspDesc, inspAttrs;
+
+    // v1.65: market-ready is no longer a one-way button + modal. The inspector carries an inline
+    // three-state selector, so the task's market state is VISIBLE at a glance and reversible in
+    // place: you can unstage, or flip task <-> script, without hunting through the Market tab.
+    private static final String MK_NOT    = "Not market ready";
+    private static final String MK_TASK   = "Market ready (task)";
+    private static final String MK_SCRIPT = "Market ready (script)";
+    private JComboBox<String> inspMarketCombo;
+    private JLabel inspMarketBlurb;
+    /** Guards the selector's listener while populateInspector() sets it programmatically. */
+    private boolean inspMarketSyncing = false;
     // Patch B.4: always-on watchers - checked between every action while the player is safe.
     private final List<main.watchers.Trigger> globalTriggers =
             Collections.synchronizedList(new ArrayList<>());
@@ -618,6 +629,7 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
         mainTabs.addTab("Logs", loadTabIcon("logs_tab"), createLogsTab());                  // v1.31
         syncDevConsoleTab();   // v1.32b: owner-only Dev Console tab, if already signed in as owner
+        checkSubmissionOutcomes();   // v1.67: report any moderation outcomes from last session
         // Patch B.3 / v1.32: the Developers Console is no longer a top-level tab - it made the
         // tab strip overflow for developers. It now lives as a developer-only button inside the
         // Settings tab (see createSettingsTab), opened in its own window. Same isDeveloper() gate.
@@ -1482,16 +1494,71 @@ public class DreamBotMenu extends JFrame {
         // account tier changes - not a right-click context menu, which was the wrong home.
         syncDevConsoleTab();
         refreshAccountLogoutVisibility();
+        checkSubmissionOutcomes();   // v1.67
     }
 
-    /** Adds the owner-only Dev Console tab when signed in as owner; removes it otherwise. */
+    /**
+     * v1.67: tells an author what actually happened to anything they submitted while the
+     * moderation valve was on. Without it the valve is a black hole from the submitter's side -
+     * their listing simply never appears and nothing explains why, which reads as a broken market.
+     *
+     * <p>Runs off the EDT once per sign-in. Each outcome is acknowledged on the server, so it's
+     * reported exactly once and never nags. Every failure is silent by design: an older server
+     * (no {@code /me/submissions}) or an offline start should cost nothing.
+     */
+    private void checkSubmissionOutcomes() {
+        if (!main.market.ServerAccount.isLoggedIn()) return;
+        Thread t = new Thread(() -> {
+            try {
+                main.market.ServerAccount server = new main.market.ServerAccount(
+                        main.market.ServerAccount.session().baseUrl);
+                List<String> lines = new ArrayList<>();
+                List<String> ack = new ArrayList<>();
+                for (Map<String, Object> m : server.mySubmissions()) {
+                    if (m == null) continue;
+                    String status = String.valueOf(m.get("status"));
+                    if ("pending".equals(status)) continue;   // still waiting - nothing to say yet
+                    Object seen = m.get("seen");
+                    if (Boolean.TRUE.equals(seen) || "true".equals(String.valueOf(seen))) continue;
+                    String name = String.valueOf(m.get("name"));
+                    if ("approved".equals(status)) {
+                        lines.add("\u2713  \"" + name + "\" was approved \u2014 it's on the market now.");
+                    } else {
+                        String reason = m.get("reason") == null ? "" : String.valueOf(m.get("reason"));
+                        lines.add("\u2717  \"" + name + "\" wasn't accepted"
+                                + (reason.trim().isEmpty() ? "." : ": " + reason));
+                    }
+                    ack.add(String.valueOf(m.get("id")));
+                }
+                if (lines.isEmpty()) return;
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                        String.join("\n", lines) + "\n\nYour tasks are still in your library "
+                        + "either way \u2014 nothing was deleted.",
+                        "Your submissions", JOptionPane.INFORMATION_MESSAGE));
+                // Acknowledge only after it's been put on screen.
+                for (String id : ack) {
+                    try { server.ackSubmission(id); } catch (Throwable ignored) {}
+                }
+            } catch (Throwable ignored) {
+                // offline, or a server older than 1.5.1 - not worth surfacing
+            }
+        }, "DreamMan-submission-outcomes");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Adds the Dev Console tab for owners and admins; removes it otherwise. */
     private void syncDevConsoleTab() {
         if (mainTabs == null) return;
         int idx = indexOfTab("Dev Console");
-        boolean shouldShow = main.market.Tier.isOwner();
+        // v1.66: admins get the console too - moderation and the defaults library are admin work,
+        // and gating them behind the single owner account defeats the point of having admins.
+        boolean shouldShow = main.market.Tier.isOwner() || main.market.Tier.isAdmin();
         if (shouldShow && idx < 0) {
             mainTabs.addTab("Dev Console", loadTabIcon("settings_tab"),
-                    main.menu.components.DevConsole.buildPanel());
+                    main.menu.components.DevConsole.buildPanel(
+                            () -> new ArrayList<>(libraryAll),
+                            () -> new ArrayList<>(marketAll)));
         } else if (!shouldShow && idx >= 0) {
             mainTabs.removeTabAt(idx);
         }
@@ -2443,13 +2510,10 @@ public class DreamBotMenu extends JFrame {
 
         // v1.33: stage the selected library task to the LOCAL market (market-ready), without
         // removing it from the library. From there it shows in the market-ready row at the
-        // bottom of the Market tab (v1.60) and can
-        // be uploaded to the server.
-        JButton btnMarketReady = createButton("\u2191 Market-ready", new Color(25, 60, 75), null);
-        btnMarketReady.setToolTipText("Copy the selected task to your local market so you can "
-                + "publish it (it stays in your library)");
-        btnMarketReady.addActionListener(e ->
-                makeMarketReady(listTaskLibrary.getSelectedValue(), btnMarketReady));
+        // bottom of the Market tab (v1.60) and can be uploaded to the server.
+        // v1.65: the "\u2191 Market-ready" button is gone - staging is now the inspector's inline
+        // three-state selector (see buildLibraryInspector). The button could only ever stage, so
+        // unstaging meant going to the Market tab, and nothing showed the current kind.
 
         // v1.62: "Duplicate" - deep-copy the selected library task under an incremented name, so
         // you can extend a task without rebuilding it. Shared with the right-click context menu.
@@ -2465,7 +2529,6 @@ public class DreamBotMenu extends JFrame {
         btnSection.add(btnTaskLibraryImport);
         // v1.62: the "Tags…" button moved to the library's right-click context menu (and, later,
         // a Task Builder step). editLibraryTags holds the logic both entry points call.
-        btnSection.add(btnMarketReady);
 
         panelCenterEastLibraryTab.add(buildLibraryInspector(), BorderLayout.CENTER);
 
@@ -2844,13 +2907,20 @@ public class DreamBotMenu extends JFrame {
             // get the hollow "make this a default" star on the rest (clicking it toggles).
             boolean isDefault = main.data.store.DefaultTasks.isDefault(t.getId());
             boolean admin = main.market.Tier.isAdmin();
-            if (isDefault)
-                star.setIcon(main.menu.components.UIIcons.star(15, Theme.ACCENT, true));
+            // v1.66: an admin-pushed default (origin "default-admin") is drawn in blue rather
+            // than gold, so a user can tell a task an admin added from one that ships with the
+            // client - and can filter on the origin if they care.
+            boolean adminDefault = main.data.store.DefaultTasks.ADMIN_ORIGIN.equals(t.getOrigin());
+            if (isDefault || adminDefault)
+                star.setIcon(main.menu.components.UIIcons.star(15,
+                        adminDefault ? Theme.BLUE : Theme.ACCENT, true));
             else if (admin)
                 star.setIcon(main.menu.components.UIIcons.star(15, Theme.TEXT_MUTED, false));
             else
                 star.setIcon(null);
-            star.setToolTipText(admin
+            star.setToolTipText(adminDefault
+                    ? "Default task - added by an admin, shared with every user."
+                    : admin
                     ? (isDefault ? "Default task - ships to every user. Click to remove."
                                  : "Click to make this a default task for every user.")
                     : (isDefault ? "Default task - included with DreamMan." : null));
@@ -3008,6 +3078,37 @@ public class DreamBotMenu extends JFrame {
         head.add(Box.createVerticalStrut(2));
         head.add(inspTags);
 
+        // v1.65: the inline market-ready selector. It lives here rather than in the button row
+        // because it reports STATE as much as it takes a command - the blurb underneath says
+        // whether this task is local-only or staged, and what still has to happen to publish it.
+        inspMarketCombo = new JComboBox<>(new String[]{MK_NOT, MK_TASK, MK_SCRIPT});
+        inspMarketCombo.setEnabled(false);
+        inspMarketCombo.setToolTipText("<html>Stage this task to your local market, or take it "
+                + "back off.<br><b>Task</b> = a reusable building block (banking, a walk, a skill "
+                + "loop).<br><b>Script</b> = a complete single-purpose routine."
+                + "<br>It stays in your Task Library either way.</html>");
+        inspMarketCombo.addActionListener(e -> onMarketSelectorChanged());
+
+        inspMarketBlurb = new JLabel(" ");
+        inspMarketBlurb.setForeground(TEXT_DIM);
+        inspMarketBlurb.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+
+        JLabel lblMarket = new JLabel("Market:");
+        lblMarket.setForeground(TEXT_DIM);
+        lblMarket.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        lblMarket.setBorder(new EmptyBorder(0, 0, 0, 6));
+
+        JPanel marketRow = new JPanel(new BorderLayout(0, 0));
+        marketRow.setOpaque(false);
+        marketRow.add(lblMarket, BorderLayout.WEST);
+        marketRow.add(inspMarketCombo, BorderLayout.CENTER);
+
+        JPanel marketBox = new JPanel(new BorderLayout(0, 3));
+        marketBox.setOpaque(false);
+        marketBox.setBorder(new EmptyBorder(6, 0, 0, 0));
+        marketBox.add(marketRow, BorderLayout.NORTH);
+        marketBox.add(inspMarketBlurb, BorderLayout.CENTER);
+
         inspDesc = new JTextArea(3, 20);
         inspDesc.setEditable(false);
         inspDesc.setLineWrap(true);
@@ -3059,7 +3160,14 @@ public class DreamBotMenu extends JFrame {
 
         JPanel top = new JPanel(new BorderLayout(0, 6));
         top.setOpaque(false);
-        top.add(head, BorderLayout.NORTH);
+        // v1.65: head + the market selector share the north slot. Nesting them in a BorderLayout
+        // (rather than adding the selector into head's BoxLayout) keeps the selector at its
+        // natural height and left-aligned, instead of stretching or centring.
+        JPanel topNorth = new JPanel(new BorderLayout(0, 0));
+        topNorth.setOpaque(false);
+        topNorth.add(head, BorderLayout.NORTH);
+        topNorth.add(marketBox, BorderLayout.CENTER);
+        top.add(topNorth, BorderLayout.NORTH);
         JScrollPane descScroll = Theme.thinScrollbars(new JScrollPane(inspDesc));
         descScroll.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createLineBorder(COLOR_BORDER_DIM), " Description "));
@@ -3082,6 +3190,7 @@ public class DreamBotMenu extends JFrame {
             if (inspTags != null) inspTags.setText(" ");
             if (inspDesc != null) inspDesc.setText("");
             if (inspAttrs != null) inspAttrs.setText("");
+            syncMarketSelector(null);   // v1.65
             return;
         }
         inspName.setText(t.getName());
@@ -3102,6 +3211,131 @@ public class DreamBotMenu extends JFrame {
             for (Action a : t.getActions())
                 if (a != null) inspActionsModel.addElement(a);
         inspAttrs.setText("Click an action above to see its attributes.");
+        syncMarketSelector(t);   // v1.65
+    }
+
+    // ── v1.65: market-ready selector ─────────────────────────────────────────────────────────
+    // The staged listing is the source of truth, not Task.marketReady: the staging card can be
+    // deleted from the Market tab's strip, which would otherwise leave the flag lying about.
+
+    /**
+     * The local staging listing for a library task, or null if it isn't staged. Matched on the
+     * bundle's task id (ProfileCodec carries it through), falling back to an exact name match so
+     * listings staged before ids travelled still resolve.
+     */
+    private main.market.ScriptListing findLocalListingFor(Task t) {
+        if (t == null || localMarketRepo == null) return null;
+        main.market.ScriptListing byName = null;
+        try {
+            for (main.market.ScriptListing l : localMarketRepo.list()) {
+                if (l == null) continue;
+                if (l.bundle != null && l.bundle.tasks != null)
+                    for (main.data.store.TaskData d : l.bundle.tasks)
+                        if (d != null && d.id != null && d.id.equals(t.getId())) return l;
+                if (byName == null && l.name != null && l.name.equalsIgnoreCase(t.getName()))
+                    byName = l;
+            }
+        } catch (Exception ignored) {
+            // an unreadable staging folder just means "not staged" for display purposes
+        }
+        return byName;
+    }
+
+    /** The one-line explanation under the selector. */
+    private String marketBlurbFor(main.market.ScriptListing l) {
+        if (l == null)
+            return "Local only \u2014 not staged to your market.";
+        String kind = "script".equalsIgnoreCase(l.kind) ? "script" : "task";
+        return l.cardReady
+                ? "Staged as a " + kind + " \u2014 card built, ready to publish."
+                : "Staged as a " + kind + " \u2014 build its card to publish.";
+    }
+
+    /** Points the selector + blurb at a task's real state without firing the change handler. */
+    private void syncMarketSelector(Task t) {
+        if (inspMarketCombo == null) return;
+        inspMarketSyncing = true;
+        try {
+            if (t == null) {
+                inspMarketCombo.setSelectedItem(MK_NOT);
+                inspMarketCombo.setEnabled(false);
+                if (inspMarketBlurb != null) inspMarketBlurb.setText(" ");
+                return;
+            }
+            inspMarketCombo.setEnabled(true);
+            main.market.ScriptListing l = findLocalListingFor(t);
+            boolean staged = l != null;
+            inspMarketCombo.setSelectedItem(!staged ? MK_NOT
+                    : ("script".equalsIgnoreCase(l.kind) ? MK_SCRIPT : MK_TASK));
+            // heal a flag left behind by a staging copy deleted from the Market strip. In memory
+            // only - the next real save persists it, so browsing the library never writes to disk.
+            if (t.isMarketReady() != staged) t.setMarketReady(staged);
+            if (inspMarketBlurb != null) {
+                inspMarketBlurb.setText(marketBlurbFor(l));
+                inspMarketBlurb.setForeground(staged ? Theme.GREEN : TEXT_DIM);
+            }
+        } finally {
+            inspMarketSyncing = false;
+        }
+    }
+
+    /** Applies whatever the user just picked in the selector. */
+    private void onMarketSelectorChanged() {
+        if (inspMarketSyncing) return;
+        Task t = listTaskLibrary == null ? null : listTaskLibrary.getSelectedValue();
+        if (t == null) { syncMarketSelector(null); return; }
+
+        Object sel = inspMarketCombo.getSelectedItem();
+        String want = MK_SCRIPT.equals(sel) ? "script" : MK_TASK.equals(sel) ? "task" : null;
+        main.market.ScriptListing cur = findLocalListingFor(t);
+        String curKind = cur == null ? null
+                : ("script".equalsIgnoreCase(cur.kind) ? "script" : "task");
+
+        if (want == null) {
+            if (cur != null) unstageMarketReady(t, cur);
+        } else if (cur == null) {
+            makeMarketReady(t, want, inspMarketCombo);
+        } else if (!want.equals(curKind)) {
+            restageMarketKind(t, cur, want);
+        }
+        syncMarketSelector(t);   // snap back if the user cancelled a confirm
+    }
+
+    /** Takes a task back off the local market (the task itself stays in the library). */
+    private void unstageMarketReady(Task t, main.market.ScriptListing l) {
+        if (JOptionPane.showConfirmDialog(this,
+                "<html>Take <b>" + escapeHtml(t.getName()) + "</b> off your local market?"
+                + "<br><br>The task stays in your Task Library \u2014 only the staged market copy"
+                + "<br>and its card are deleted.</html>",
+                "Not market-ready", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+                != JOptionPane.YES_OPTION)
+            return;
+        try {
+            localMarketRepo.remove(l.id);
+            t.setMarketReady(false);
+            saveAll(false);
+            refilterLibrary();
+            reloadMarket();
+            showToast("\"" + t.getName() + "\" is no longer market-ready", inspMarketCombo, true);
+        } catch (Exception ex) {
+            showToast("Couldn't unstage: " + ex.getMessage(), inspMarketCombo, false);
+        }
+    }
+
+    /** Flips a staged listing between "task" and "script" in place, keeping its card and icon. */
+    private void restageMarketKind(Task t, main.market.ScriptListing l, String kind) {
+        String was = l.kind;
+        try {
+            l.kind = kind;
+            localMarketRepo.publish(l);   // same id = save-in-place, so the card survives
+            saveAll(false);
+            refilterLibrary();
+            reloadMarket();
+            showToast("\"" + t.getName() + "\" is now staged as a " + kind, inspMarketCombo, true);
+        } catch (Exception ex) {
+            l.kind = was;
+            showToast("Couldn't change kind: " + ex.getMessage(), inspMarketCombo, false);
+        }
     }
 
     /** Shows one action's attributes + the humanised delay on either side of it. */
@@ -5083,18 +5317,16 @@ public class DreamBotMenu extends JFrame {
      * (v1.60), and v1.61 drops you straight into its Card Builder, since a finished card is
      * now what makes it publishable.
      */
-    private void makeMarketReady(Task t, JComponent anchor) {
+    /**
+     * Stages a library task to the local market as {@code kind} ("task" or "script").
+     *
+     * <p>v1.65: the kind used to come from a modal fired by the "\u2191 Market-ready" button. It
+     * now arrives from the inspector's inline selector, which also shows the resulting state, so
+     * this method just stages - no question to ask, and nothing to cancel out of.
+     */
+    private void makeMarketReady(Task t, String kind, JComponent anchor) {
         if (t == null) { showToast("Select a library task first", anchor, false); return; }
-        Object[] kinds = {"Task (building block)", "Script (full routine)", "Cancel"};
-        int k = JOptionPane.showOptionDialog(this,
-                "<html>Stage <b>" + t.getName() + "</b> to your local market so you can publish it."
-                + "<br><br><b>Task</b> = a reusable building block (banking, a walk, a skill loop)."
-                + "<br><b>Script</b> = a complete single-purpose routine."
-                + "<br><br>It stays in your Task Library either way.</html>",
-                "Make market-ready", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE,
-                null, kinds, kinds[0]);
-        if (k != 0 && k != 1) return;
-        String kind = (k == 1) ? "script" : "task";
+        kind = "script".equalsIgnoreCase(kind) ? "script" : "task";
 
         String acctName = main.market.ServerAccount.isLoggedIn()
                 ? main.market.ServerAccount.username() : null;
@@ -6939,6 +7171,15 @@ public class DreamBotMenu extends JFrame {
                     refreshTaskLibrary();
             } catch (Throwable e) {
                 Logger.log(Logger.LogType.WARN, "[DefaultTasks] merge failed: " + e);
+            }
+            // v1.66: keep watching. Admins can push a default at any time, so a running client
+            // polls the server's defaults version every half hour and merges anything new - a
+            // user who leaves the client open for days still gets them without a restart.
+            try {
+                main.data.store.DefaultTasks.startSync(this,
+                        () -> new ArrayList<>(libraryAll), this::refreshTaskLibrary);
+            } catch (Throwable e) {
+                Logger.log(Logger.LogType.WARN, "[DefaultTasks] sync start failed: " + e);
             }
         }
 

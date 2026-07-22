@@ -18,6 +18,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -354,6 +355,127 @@ public class ServerAccount {
         String body = GSON.toJson(Map.of("tier", tier));
         String json = request("POST", "/admin/users/" + enc(username) + "/role", body, session().token);
         return GSON.fromJson(json, new TypeToken<Map<String, Object>>() {}.getType());
+    }
+
+    // ── v1.66: moderation, submissions queue, and the server-side defaults library ──
+    // All of these are stored on the SERVER, so every admin sees the same state from any
+    // machine (the old defaults flow lived in a file on one admin's disk).
+
+    /** {@code GET /settings} - the moderation valve + current defaults version. Public. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> fetchSettings() throws Exception {
+        String json = request("GET", "/settings", null, session().token);
+        Map<String, Object> m = GSON.fromJson(json,
+                new TypeToken<Map<String, Object>>() {}.getType());
+        return m == null ? new HashMap<>() : m;
+    }
+
+    /** {@code PUT /admin/settings} - turn publish moderation on or off. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> adminSetModeration(boolean on) throws Exception {
+        requireLoggedIn();
+        Map<String, Object> body = new HashMap<>();
+        body.put("submissionsModerated", on);
+        String json = request("PUT", "/admin/settings", GSON.toJson(body), session().token);
+        return GSON.fromJson(json, new TypeToken<Map<String, Object>>() {}.getType());
+    }
+
+    /** {@code GET /admin/submissions?status=pending|archived}. */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> adminListSubmissions(String status) throws Exception {
+        requireLoggedIn();
+        String json = request("GET", "/admin/submissions?status="
+                + enc(status == null ? "pending" : status), null, session().token);
+        List<Map<String, Object>> rows = GSON.fromJson(json,
+                new TypeToken<List<Map<String, Object>>>() {}.getType());
+        return rows == null ? new ArrayList<>() : rows;
+    }
+
+    /** Approve a queued submission - it becomes a normal market listing. */
+    public void adminApproveSubmission(String id) throws Exception {
+        requireLoggedIn();
+        request("POST", "/admin/submissions/" + enc(id) + "/approve", "{}", session().token);
+    }
+
+    /** Deny a queued submission - archived with the reason, never published. */
+    public void adminDenySubmission(String id, String reason) throws Exception {
+        requireLoggedIn();
+        Map<String, Object> body = new HashMap<>();
+        body.put("reason", reason == null ? "" : reason);
+        request("POST", "/admin/submissions/" + enc(id) + "/deny", GSON.toJson(body),
+                session().token);
+    }
+
+    /** Put an archived submission back in the queue. */
+    public void adminRestoreSubmission(String id) throws Exception {
+        requireLoggedIn();
+        request("POST", "/admin/submissions/" + enc(id) + "/restore", "{}", session().token);
+    }
+
+    /** {@code GET /admin/defaults} - the defaults library with provenance. */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> adminListDefaults() throws Exception {
+        requireLoggedIn();
+        String json = request("GET", "/admin/defaults", null, session().token);
+        List<Map<String, Object>> rows = GSON.fromJson(json,
+                new TypeToken<List<Map<String, Object>>>() {}.getType());
+        return rows == null ? new ArrayList<>() : rows;
+    }
+
+    /**
+     * Pushes a task into the defaults library, so it lands in every user's task library.
+     * {@code taskData} is a {@code main.data.store.TaskData} (serialised here, so this class
+     * stays free of a compile-time dependency on the store package).
+     */
+    public void adminAddDefault(Object taskData, String source) throws Exception {
+        requireLoggedIn();
+        Map<String, Object> body = new HashMap<>();
+        body.put("task", taskData);
+        body.put("source", "market".equals(source) ? "market" : "library");
+        request("POST", "/admin/defaults", GSON.toJson(body), session().token);
+    }
+
+    /** Removes a task from the defaults library (existing copies in user libraries stay). */
+    public void adminRemoveDefault(String taskId) throws Exception {
+        requireLoggedIn();
+        request("DELETE", "/admin/defaults/" + enc(taskId), null, session().token);
+    }
+
+    /** {@code GET /defaults} - raw JSON body, so callers can map it to their own types. */
+    public String fetchDefaultsJson() throws Exception {
+        return request("GET", "/defaults", null, session().token);
+    }
+
+    /** {@code GET /defaults/version} - the cheap poll target. -1 when unreachable. */
+    public int fetchDefaultsVersion() {
+        try {
+            String json = request("GET", "/defaults/version", null, session().token);
+            Map<?, ?> m = GSON.fromJson(json, Map.class);
+            Object v = m == null ? null : m.get("version");
+            return v == null ? -1 : (int) Math.round(Double.parseDouble(String.valueOf(v)));
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /**
+     * v1.67: the signed-in user's own submissions. Without this the moderation valve is a black
+     * hole from the author's side - their listing just never appears and nothing says why.
+     * Rows carry {@code status} (pending|approved|archived), {@code reason} and {@code seen}.
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> mySubmissions() throws Exception {
+        requireLoggedIn();
+        String json = request("GET", "/me/submissions", null, session().token);
+        List<Map<String, Object>> rows = GSON.fromJson(json,
+                new TypeToken<List<Map<String, Object>>>() {}.getType());
+        return rows == null ? new ArrayList<>() : rows;
+    }
+
+    /** Marks one outcome as shown, so it isn't reported again on the next start. */
+    public void ackSubmission(String id) throws Exception {
+        requireLoggedIn();
+        request("POST", "/me/submissions/" + enc(id) + "/ack", "{}", session().token);
     }
 
     // ── guards ──
