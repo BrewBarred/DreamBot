@@ -10,7 +10,7 @@ import java.awt.*;
 @ScriptManifest(
     author = "ETA",
     name = "DreamBot (Beta)",
-    version = 1.71,
+    version = 1.73,
     category = Category.MISC
 )
 
