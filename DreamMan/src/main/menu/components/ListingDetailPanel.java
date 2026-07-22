@@ -125,13 +125,16 @@ public class ListingDetailPanel extends JPanel {
         JPanel right = new JPanel();
         right.setOpaque(false);
         right.setLayout(new BoxLayout(right, BoxLayout.Y_AXIS));
-        JButton close = new JButton("\u2715  Close");
+        // v1.69: icon buttons - a drawn X and up-arrow instead of a glyph-plus-word pair,
+        // which rendered inconsistently across platform fonts.
+        JButton close = new JButton("Close", UIIcons.close(13, Theme.TEXT));
         close.setFont(Theme.fontBold(12));
         close.setToolTipText("Back to the market grid (Esc works too)");
         close.addActionListener(e -> onClose.run());
         close.setAlignmentX(RIGHT_ALIGNMENT);
         boolean lockedVip = l.vipOnly && l.bundle == null;
-        JButton download = new JButton(lockedVip ? "VIP only" : "Download");
+        JButton download = new JButton(lockedVip ? "VIP only" : "Download",
+                UIIcons.arrowUp(13, lockedVip ? Theme.TEXT_MUTED : Theme.GREEN));
         download.setFont(Theme.fontBold(12));
         download.setEnabled(!lockedVip);
         download.setForeground(lockedVip ? Theme.TEXT_MUTED : Theme.GREEN);
@@ -146,6 +149,19 @@ public class ListingDetailPanel extends JPanel {
         right.add(download);
         headRow.add(right, BorderLayout.EAST);
         add(headRow, BorderLayout.NORTH);
+
+        // v1.70 (item 2): right-click anywhere in the open card closes it. Right-click used to
+        // be how you OPENED a card from the grid; that is now a left-click, so the gesture is
+        // free and closing is the thing you actually want while a card is open.
+        java.awt.event.MouseAdapter closeOnRight = new java.awt.event.MouseAdapter() {
+            private void maybeClose(java.awt.event.MouseEvent e) {
+                if (e.isPopupTrigger() || SwingUtilities.isRightMouseButton(e)) onClose.run();
+            }
+            @Override public void mousePressed(java.awt.event.MouseEvent e)  { maybeClose(e); }
+            @Override public void mouseReleased(java.awt.event.MouseEvent e) { maybeClose(e); }
+        };
+        addMouseListener(closeOnRight);
+        headRow.addMouseListener(closeOnRight);
 
         // ── the scrolling column: description · tags · structure · comments ─────────────────
         JPanel col = new JPanel();

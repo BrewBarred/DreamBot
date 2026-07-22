@@ -58,6 +58,37 @@ public final class CardIcons {
         out.add(new DefaultIcon("Star",     draw(CardIcons::star)));
         out.add(new DefaultIcon("Scroll",   draw(CardIcons::scroll)));
         out.add(new DefaultIcon("Gear",     draw(CardIcons::gear)));
+
+        // v1.72: one icon per skill, plus the movement/utility set. Tinted so a wall of them is
+        // scannable - all-gold glyphs at 40px were indistinguishable in the defaults popup.
+        out.add(new DefaultIcon("Attack",        draw(CardIcons::sword,     C_COMBAT)));
+        out.add(new DefaultIcon("Strength",      draw(CardIcons::fist,      C_COMBAT)));
+        out.add(new DefaultIcon("Defence",       draw(CardIcons::shield,    C_COMBAT)));
+        out.add(new DefaultIcon("Ranged",        draw(CardIcons::bow,       C_COMBAT)));
+        out.add(new DefaultIcon("Magic",         draw(CardIcons::wand,      C_MAGIC)));
+        out.add(new DefaultIcon("Prayer",        draw(CardIcons::prayer,    C_MAGIC)));
+        out.add(new DefaultIcon("Runecrafting",  draw(CardIcons::rune,      C_MAGIC)));
+        out.add(new DefaultIcon("Hitpoints",     draw(CardIcons::heart,     C_COMBAT)));
+        out.add(new DefaultIcon("Agility",       draw(CardIcons::boot,      C_MOVE)));
+        out.add(new DefaultIcon("Herblore",      draw(CardIcons::potion,    C_NATURE)));
+        out.add(new DefaultIcon("Thieving",      draw(CardIcons::purse,     C_GOLD)));
+        out.add(new DefaultIcon("Crafting",      draw(CardIcons::needle,    C_CRAFT)));
+        out.add(new DefaultIcon("Fletching",     draw(CardIcons::arrow,     C_CRAFT)));
+        out.add(new DefaultIcon("Slayer",        draw(CardIcons::skull,     C_COMBAT)));
+        out.add(new DefaultIcon("Hunter",        draw(CardIcons::paw,       C_NATURE)));
+        out.add(new DefaultIcon("Mining",        draw(CardIcons::pickaxe,   C_CRAFT)));
+        out.add(new DefaultIcon("Smithing",      draw(CardIcons::anvil,     C_CRAFT)));
+        out.add(new DefaultIcon("Fishing",       draw(CardIcons::fish,      C_WATER)));
+        out.add(new DefaultIcon("Cooking",       draw(CardIcons::pot,       C_FIRE)));
+        out.add(new DefaultIcon("Firemaking",    draw(CardIcons::flame,     C_FIRE)));
+        out.add(new DefaultIcon("Woodcutting",   draw(CardIcons::axe,       C_NATURE)));
+        out.add(new DefaultIcon("Farming",       draw(CardIcons::plant,     C_NATURE)));
+        out.add(new DefaultIcon("Construction",  draw(CardIcons::hammer,    C_CRAFT)));
+        out.add(new DefaultIcon("Sailing",       draw(CardIcons::anchor,    C_WATER)));
+        out.add(new DefaultIcon("Teleport",      draw(CardIcons::portal,    C_MAGIC)));
+        out.add(new DefaultIcon("Travel",        draw(CardIcons::compass,   C_MOVE)));
+        out.add(new DefaultIcon("Banking",       draw(CardIcons::vault,     C_GOLD)));
+        out.add(new DefaultIcon("Quest",         draw(CardIcons::scroll,    C_GOLD)));
         cache = out;
         return out;
     }
@@ -122,6 +153,23 @@ public final class CardIcons {
     private interface Glyph { void paint(Graphics2D g); }
 
     /** Shared canvas: warm dark card background, gold strokes, rounded corners. */
+    /** v1.72: tinted variant - skills read far faster in a grid when they aren't all gold. */
+    private static String draw(Glyph glyph, Color tint) {
+        BufferedImage img = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(Theme.SURFACE_2_ALT);
+        g.fillRoundRect(0, 0, SIZE, SIZE, 24, 24);
+        g.setColor(Theme.BORDER_STRONG);
+        g.setStroke(new BasicStroke(3f));
+        g.drawRoundRect(1, 1, SIZE - 3, SIZE - 3, 24, 24);
+        g.setColor(tint);
+        g.setStroke(new BasicStroke(8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        glyph.paint(g);
+        g.dispose();
+        return toBase64Png(img);
+    }
+
     private static String draw(Glyph glyph) {
         BufferedImage img = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = img.createGraphics();
@@ -229,5 +277,145 @@ public final class CardIcons {
         }
         g.drawOval(34, 34, 60, 60);
         g.drawOval(52, 52, 24, 24);
+    }
+
+    // ── v1.72: the skill palette ─────────────────────────────────────────────────────────────
+    private static final Color C_COMBAT = new Color(0xC8, 0x62, 0x50);
+    private static final Color C_MAGIC  = new Color(0x8A, 0x7C, 0xD8);
+    private static final Color C_NATURE = new Color(0x76, 0xB0, 0x6A);
+    private static final Color C_CRAFT  = new Color(0xC9, 0xA2, 0x5E);
+    private static final Color C_WATER  = new Color(0x5D, 0xA0, 0xE8);
+    private static final Color C_FIRE   = new Color(0xE0, 0x92, 0x40);
+    private static final Color C_GOLD   = new Color(0xDC, 0xB4, 0x3C);
+    private static final Color C_MOVE   = new Color(0x6F, 0xC2, 0xB4);
+
+    private static void fist(Graphics2D g) {
+        g.drawRoundRect(38, 50, 52, 44, 16, 16);
+        g.drawLine(38, 66, 90, 66);
+    }
+    private static void bow(Graphics2D g) {
+        Path2D p = new Path2D.Float();
+        p.moveTo(44, 26); p.quadTo(92, 64, 44, 102);
+        g.draw(p);
+        g.drawLine(44, 26, 44, 102);
+        g.drawLine(50, 64, 96, 64);
+    }
+    private static void wand(Graphics2D g) {
+        g.drawLine(38, 96, 84, 44);
+        g.drawLine(84, 30, 84, 52);
+        g.drawLine(73, 41, 95, 41);
+    }
+    private static void prayer(Graphics2D g) {
+        g.drawLine(64, 26, 64, 100);
+        g.drawLine(40, 52, 88, 52);
+    }
+    private static void rune(Graphics2D g) {
+        Path2D p = new Path2D.Float();
+        p.moveTo(64, 24); p.lineTo(100, 64); p.lineTo(64, 104); p.lineTo(28, 64);
+        p.closePath();
+        g.draw(p);
+    }
+    private static void heart(Graphics2D g) {
+        Path2D p = new Path2D.Float();
+        p.moveTo(64, 100);
+        p.curveTo(18, 68, 34, 30, 64, 50);
+        p.curveTo(94, 30, 110, 68, 64, 100);
+        g.draw(p);
+    }
+    private static void boot(Graphics2D g) {
+        Path2D p = new Path2D.Float();
+        p.moveTo(44, 28); p.lineTo(44, 82); p.lineTo(96, 82); p.lineTo(76, 60); p.lineTo(66, 28);
+        g.draw(p);
+        g.drawLine(36, 96, 100, 96);
+    }
+    private static void purse(Graphics2D g) {
+        g.drawRoundRect(36, 50, 56, 50, 18, 18);
+        Path2D p = new Path2D.Float();
+        p.moveTo(52, 50); p.quadTo(64, 26, 76, 50);
+        g.draw(p);
+    }
+    private static void needle(Graphics2D g) {
+        g.drawLine(34, 100, 92, 38);
+        g.drawOval(88, 26, 18, 18);
+    }
+    private static void arrow(Graphics2D g) {
+        g.drawLine(34, 98, 94, 34);
+        g.drawLine(94, 34, 72, 38);
+        g.drawLine(94, 34, 90, 56);
+        g.drawLine(34, 98, 46, 86);
+    }
+    private static void skull(Graphics2D g) {
+        g.drawOval(38, 30, 52, 48);
+        g.drawLine(50, 92, 78, 92);
+        g.drawOval(50, 48, 10, 10);
+        g.drawOval(70, 48, 10, 10);
+    }
+    private static void paw(Graphics2D g) {
+        g.drawOval(48, 56, 34, 30);
+        g.drawOval(38, 34, 15, 15);
+        g.drawOval(60, 28, 15, 15);
+        g.drawOval(82, 40, 15, 15);
+    }
+    private static void anvil(Graphics2D g) {
+        Path2D p = new Path2D.Float();
+        p.moveTo(28, 52); p.lineTo(100, 52); p.lineTo(84, 74); p.lineTo(48, 74);
+        p.closePath();
+        g.draw(p);
+        g.drawLine(64, 74, 64, 92);
+        g.drawLine(44, 96, 84, 96);
+    }
+    private static void pot(Graphics2D g) {
+        g.drawRoundRect(34, 54, 60, 44, 12, 12);
+        g.drawLine(28, 54, 100, 54);
+        Path2D steam = new Path2D.Float();
+        steam.moveTo(58, 40); steam.quadTo(68, 30, 58, 22);
+        g.draw(steam);
+    }
+    private static void flame(Graphics2D g) {
+        Path2D p = new Path2D.Float();
+        p.moveTo(64, 100);
+        p.curveTo(28, 82, 52, 52, 60, 26);
+        p.curveTo(84, 50, 100, 74, 64, 100);
+        g.draw(p);
+    }
+    private static void plant(Graphics2D g) {
+        g.drawLine(64, 102, 64, 54);
+        Path2D l = new Path2D.Float();
+        l.moveTo(64, 66); l.quadTo(34, 56, 40, 30);
+        g.draw(l);
+        Path2D r = new Path2D.Float();
+        r.moveTo(64, 58); r.quadTo(94, 48, 88, 24);
+        g.draw(r);
+    }
+    private static void hammer(Graphics2D g) {
+        g.drawLine(40, 100, 78, 56);
+        Path2D h = new Path2D.Float();
+        h.moveTo(62, 40); h.lineTo(104, 40); h.lineTo(104, 62); h.lineTo(70, 62);
+        g.draw(h);
+    }
+    private static void anchor(Graphics2D g) {
+        g.drawLine(64, 40, 64, 100);
+        g.drawOval(54, 22, 20, 20);
+        g.drawLine(40, 56, 88, 56);
+        Path2D p = new Path2D.Float();
+        p.moveTo(32, 76); p.quadTo(40, 104, 64, 104);
+        p.quadTo(88, 104, 96, 76);
+        g.draw(p);
+    }
+    private static void portal(Graphics2D g) {
+        g.drawOval(34, 22, 60, 84);
+        g.drawOval(50, 44, 28, 40);
+    }
+    private static void compass(Graphics2D g) {
+        g.drawOval(26, 26, 76, 76);
+        Path2D n = new Path2D.Float();
+        n.moveTo(52, 78); n.lineTo(80, 46); n.lineTo(76, 82);
+        p2(g, n);
+    }
+    private static void p2(Graphics2D g, Path2D p) { p.closePath(); g.draw(p); }
+    private static void vault(Graphics2D g) {
+        g.drawRoundRect(28, 32, 72, 66, 10, 10);
+        g.drawOval(52, 52, 26, 26);
+        g.drawLine(64, 98, 64, 106);
     }
 }

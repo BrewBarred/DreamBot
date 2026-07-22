@@ -53,6 +53,24 @@ public class MarketCard extends JPanel {
         void onBuildCard(ScriptListing l);
         void onDeleteLocal(ScriptListing l);
         void onContextMenu(ScriptListing l, MouseEvent e, JComponent src);
+        /**
+         * v1.71: flip a staged listing between "card built" (market-ready strip) and "not built
+         * yet" (local folder grid). Marking built runs the publish-readiness checks first, so a
+         * card can never reach the strip missing an icon or a usable description.
+         */
+        /**
+         * v1.73: the card's X. Asks whether "remove" means delete outright or just take it off
+         * the server and keep the local copy - the two have very different consequences and the
+         * old menu made them look like neighbours.
+         */
+        void onRemoveListing(ScriptListing l, JComponent src);
+        /** v1.74: every loaded version of this listing's lineage, newest first. */
+        java.util.List<ScriptListing> onListVersions(ScriptListing l);
+        /** v1.74: open a specific older version. */
+        void onShowVersion(ScriptListing l);
+        void onSetBuilt(ScriptListing l, boolean built);
+        /** v1.71: true when the market is showing the server, false on the local folder page. */
+        boolean isServerPage();
         boolean isOwn(ScriptListing l);
         boolean canRate(ScriptListing l);
         boolean canComment(ScriptListing l);
@@ -61,6 +79,17 @@ public class MarketCard extends JPanel {
     private static final int GRID_W = 236;
     private static final int STRIP_W = 208;
     private static final Color CARD_BG = Theme.SURFACE_2_ALT;
+    /**
+     * v1.70: the hover surface. Deliberately a small lift of the card's own colour rather than
+     * a tint - anything more saturated washed out the FREE/VIP chips and the muted stat text
+     * that sit on top of it.
+     */
+    private static final Color CARD_BG_HOVER = new Color(
+            Math.min(255, CARD_BG.getRed() + 14),
+            Math.min(255, CARD_BG.getGreen() + 14),
+            Math.min(255, CARD_BG.getBlue() + 16));
+    /** How long a single left-click waits to see whether it's really a double-click. */
+    private static final int OPEN_DELAY_MS = 240;
     private static final Color CARD_BORDER = Theme.BORDER;
 
     private final Mode mode;
@@ -234,11 +263,52 @@ public class MarketCard extends JPanel {
         dl.setEnabled(!lockedVip);
         dl.addActionListener(e -> cb.onDownload(listing));
         actions.add(dl);
-        // v1.63: right-click used to open the management menu; it now opens the outline, so the
-        // menu moved to this explicit "more" button (rename / publish / unpublish / remove / ...).
-        JButton moreBtn = smallButton(UIIcons.more(15, Theme.TEXT_DIM), "More actions\u2026");
-        moreBtn.addActionListener(e -> cb.onContextMenu(listing, null, moreBtn));
-        actions.add(moreBtn);
+        // v1.73 (item 8): the "..." overflow is gone. It hid a grab-bag of unrelated commands
+        // behind a glyph that told you nothing, and every one of those commands now has its own
+        // button or lives in the card builder. What's left is the destructive action, so it gets
+        // the honest icon: an X, which asks what "remove" should mean before doing anything.
+        JButton removeBtn = smallButton(UIIcons.close(14, Theme.DANGER), "Remove\u2026");
+        removeBtn.addActionListener(e -> cb.onRemoveListing(listing, removeBtn));
+        actions.add(removeBtn);
+        // v1.74: version stacking. Versions of one script share a market slot, so the card
+        // offers the others rather than the grid listing each build separately. Only shown when
+        // there IS more than one - a lone script gets no extra furniture.
+        if (!"local".equals(listing.origin)) {
+            java.util.List<ScriptListing> vers = cb.onListVersions(listing);
+            if (vers != null && vers.size() > 1) {
+                JButton verBtn = smallButton(UIIcons.chevron(14, Theme.ACCENT, false),
+                        vers.size() + " versions \u2014 v" + trimVersion(listing.version)
+                                + " is newest");
+                verBtn.addActionListener(e -> {
+                    JPopupMenu pm = new JPopupMenu();
+                    for (ScriptListing v : vers) {
+                        boolean current = v.id != null && v.id.equals(listing.id);
+                        JMenuItem mi = new JMenuItem("v" + trimVersion(v.version)
+                                + (current ? "   (shown)" : ""));
+                        mi.setEnabled(!current);
+                        mi.addActionListener(a2 -> cb.onShowVersion(v));
+                        pm.add(mi);
+                    }
+                    pm.show(verBtn, 0, verBtn.getHeight());
+                });
+                actions.add(verBtn);
+            }
+        }
+
+        // v1.71: an unbuilt local card carries its own promotion button, so the local folder
+        // is a place you can finish work rather than a dead end (the old build was reachable
+        // only from the strip, which unbuilt cards never appeared in).
+        if ("local".equals(listing.origin)) {
+            JButton build = smallButton(UIIcons.card(15, Theme.AMBER), "Edit this card");
+            build.addActionListener(e -> cb.onBuildCard(listing));
+            actions.add(build);
+            if (!listing.cardReady) {
+                JButton mark = smallButton(UIIcons.check(15, Theme.GREEN),
+                        "Mark the card built \u2014 moves it down to My Market-Ready");
+                mark.addActionListener(e -> cb.onSetBuilt(listing, true));
+                actions.add(mark);
+            }
+        }
         if (cb.isOwn(listing) && "server".equals(listing.origin)) {
             JButton unpub = smallButton(UIIcons.publish(15, Theme.AMBER), "Unpublish");
             unpub.addActionListener(e -> cb.onUnpublish(listing, unpub));
@@ -259,37 +329,56 @@ public class MarketCard extends JPanel {
 
     // ── shared bits ─────────────────────────────────────────────────────────────────────────
 
+    /** v1.70: pending single-click open, cancelled when a second click turns it into a download. */
+    private javax.swing.Timer openTimer;
+
     private void wireCommonMouse() {
         MouseAdapter ma = new MouseAdapter() {
             @Override public void mouseEntered(MouseEvent e) {
+                // v1.70 (item 13): hover lifts the card - a brighter surface and a heavier accent
+                // rule, plus one extra pixel of padding so it reads as growing slightly. The
+                // padding is taken back out of the border width, so the card's overall footprint
+                // is unchanged and the grid never reflows under the cursor.
+                setBackground(CARD_BG_HOVER);
                 setBorder(BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(Theme.BORDER_STRONG),
-                        new EmptyBorder(8, 9, 8, 9)));
+                        BorderFactory.createLineBorder(Theme.ACCENT, 2),
+                        new EmptyBorder(7, 8, 7, 8)));
             }
             @Override public void mouseExited(MouseEvent e) {
+                setBackground(CARD_BG);
                 setBorder(BorderFactory.createCompoundBorder(
                         BorderFactory.createLineBorder(CARD_BORDER),
                         new EmptyBorder(8, 9, 8, 9)));
             }
-            private void handlePopup(MouseEvent e) {
-                // v1.64: in the GRID, right-click opens the DETAIL view (the management menu
-                // moved to the card's "..." button). STRIP cards keep their right-click menu.
-                if (mode == Mode.GRID) cb.onOpenDetails(listing, false);
-                else cb.onContextMenu(listing, e, MarketCard.this);
-            }
             @Override public void mouseClicked(MouseEvent e) {
+                // v1.70 (item 2): right-click no longer OPENS a grid card. Opening is a plain
+                // left-click; closing an open card is a right-click inside the detail view
+                // (see ListingDetailPanel). STRIP cards keep their management menu.
                 if (e.isPopupTrigger() || SwingUtilities.isRightMouseButton(e)) {
-                    handlePopup(e);
-                } else if (mode == Mode.GRID && e.getClickCount() == 2
-                        && SwingUtilities.isLeftMouseButton(e)) {
-                    cb.onDownload(listing);   // double-left-click still downloads
+                    if (mode == Mode.STRIP) cb.onContextMenu(listing, e, MarketCard.this);
+                    return;
+                }
+                if (mode != Mode.GRID || !SwingUtilities.isLeftMouseButton(e)) return;
+                if (e.getClickCount() >= 2) {
+                    // A double-click is a download, so cancel the open this click's first half
+                    // already scheduled. Without the delay the card would open AND download.
+                    if (openTimer != null) openTimer.stop();
+                    cb.onDownload(listing);
+                } else {
+                    if (openTimer != null) openTimer.stop();
+                    openTimer = new javax.swing.Timer(
+                            OPEN_DELAY_MS, ev -> cb.onOpenDetails(listing, false));
+                    openTimer.setRepeats(false);
+                    openTimer.start();
                 }
             }
             @Override public void mousePressed(MouseEvent e) {
-                if (e.isPopupTrigger()) handlePopup(e);
+                if (e.isPopupTrigger() && mode == Mode.STRIP)
+                    cb.onContextMenu(listing, e, MarketCard.this);
             }
             @Override public void mouseReleased(MouseEvent e) {
-                if (e.isPopupTrigger()) handlePopup(e);
+                if (e.isPopupTrigger() && mode == Mode.STRIP)
+                    cb.onContextMenu(listing, e, MarketCard.this);
             }
         };
         addMouseListener(ma);
@@ -394,15 +483,26 @@ public class MarketCard extends JPanel {
                 listing.cardReady ? "Edit this item's card" : "Build this item's card");
         card.addActionListener(e -> cb.onBuildCard(listing));
         // v1.61: publishing is gated on a finished card - the button says so before you click
-        JButton pub = smallButton(
-                UIIcons.publish(16, listing.cardReady ? Theme.GREEN : Theme.TEXT_MUTED),
-                listing.cardReady ? "Publish"
-                        : "A finished card is required first \u2014 click to open the card builder");
-        pub.addActionListener(e -> cb.onPublish(listing));
+        // v1.71: the strip shows the SAME items on both pages; only this button differs.
+        // On the server page it publishes; on the local page it sends the card back to the
+        // local folder for more editing. That split is also the accidental-publish guard - you
+        // cannot reach Publish without having deliberately switched to the server page first.
+        JButton act;
+        if (cb.isServerPage()) {
+            act = smallButton(
+                    UIIcons.publish(16, listing.cardReady ? Theme.GREEN : Theme.TEXT_MUTED),
+                    listing.cardReady ? "Publish to the market"
+                            : "A finished card is required first \u2014 click to open the card builder");
+            act.addActionListener(e -> cb.onPublish(listing));
+        } else {
+            act = smallButton(UIIcons.arrowUp(15, Theme.AMBER), "Not ready after all \u2014 "
+                    + "send this back to your local folder for more editing");
+            act.addActionListener(e -> cb.onSetBuilt(listing, false));
+        }
         JButton del = smallButton(UIIcons.cross(14, Theme.DANGER), "Remove from market-ready");
         del.addActionListener(e -> cb.onDeleteLocal(listing));
         actions.add(card);
-        actions.add(pub);
+        actions.add(act);
         actions.add(del);
         add(actions, BorderLayout.SOUTH);
     }

@@ -20,7 +20,7 @@ import java.util.ArrayList;
  * <p>The right-hand side is a <i>live preview</i>: a real {@link MarketCard} in GRID mode, rebuilt
  * as you type, so what you see is byte-for-byte what the market grid will render (stats start at
  * zero until it's live). The icon row makes the mandatory icon a one-click job: pick from the
- * drawn defaults, hit the die for a random identicon, or choose your own file (which goes through
+ * drawn defaults (one per skill, plus travel/teleport/banking), or choose your own file (which goes through
  * the menu's existing 300 KB-capped picker with the resize link).
  *
  * <p>The dialog never touches repositories or the menu's state itself - everything goes through
@@ -144,12 +144,6 @@ public class CardBuilderDialog extends JDialog {
         btnDefaults.setToolTipText("Pick one of the built-in icons");
         btnDefaults.addActionListener(e -> showDefaultsPopup(btnDefaults));
 
-        JButton btnRandom = new JButton(UIIcons.dice(15, Theme.ACCENT));
-        btnRandom.setToolTipText("Generate a random icon \u2014 click again for another");
-        btnRandom.setMargin(new Insets(2, 6, 2, 6));
-        btnRandom.addActionListener(e ->
-                setIcon(CardIcons.random(txtName.getText())));
-
         JButton btnFile = new JButton("File\u2026");
         btnFile.setFont(Theme.font(11));
         btnFile.setToolTipText("Use your own image (128\u00d7128 PNG recommended, 300 KB cap)");
@@ -167,7 +161,6 @@ public class CardBuilderDialog extends JDialog {
         iconRow.setOpaque(false);
         iconRow.add(iconPreview);
         iconRow.add(btnDefaults);
-        iconRow.add(btnRandom);
         iconRow.add(btnFile);
         iconRow.add(btnRemoveIcon);
 
@@ -413,6 +406,14 @@ public class CardBuilderDialog extends JDialog {
         @Override public void onBuildCard(ScriptListing l) {}
         @Override public void onDeleteLocal(ScriptListing l) {}
         @Override public void onContextMenu(ScriptListing l, MouseEvent e, JComponent src) {}
+        @Override public void onRemoveListing(ScriptListing l, JComponent src) {}
+        @Override public java.util.List<ScriptListing> onListVersions(ScriptListing l) {
+            return java.util.Collections.emptyList();
+        }
+        @Override public void onShowVersion(ScriptListing l) {}
+        @Override public void onSetBuilt(ScriptListing l, boolean built) {}
+        // The preview is drawn inside the card builder, which is a local-folder surface.
+        @Override public boolean isServerPage() { return false; }
         @Override public boolean isOwn(ScriptListing l) { return false; }
         @Override public boolean canRate(ScriptListing l) { return false; }
         @Override public boolean canComment(ScriptListing l) { return false; }

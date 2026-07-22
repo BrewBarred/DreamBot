@@ -3,14 +3,13 @@ package main.scripts;
 import org.dreambot.api.data.GameState;
 import org.dreambot.api.script.Category;
 import org.dreambot.api.script.ScriptManifest;
-import org.dreambot.api.utilities.Logger;
 
 import java.awt.*;
 
 @ScriptManifest(
     author = "ETA",
     name = "DreamBot (Beta)",
-    version = 1.73,
+    version = 1.82,
     category = Category.MISC
 )
 

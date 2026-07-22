@@ -31,8 +31,24 @@ public final class DevConsole {
      * v1.32b: the console is an embeddable PANEL (added as a hidden owner-only tab), not a
      * pop-up dialog - a real tab is what the developer tools want, and a right-click context
      * menu was the wrong home for it.
+     *
+     * <p>v1.66: the console is now itself tabbed. "Users" is the original search/promote panel;
+     * "Script Management" is the moderation queue + defaults library. The suppliers hand that tab
+     * the menu's own library and market lists without exposing those fields to this package.
      */
-    public static JComponent buildPanel() {
+    public static JComponent buildPanel(
+            java.util.function.Supplier<java.util.List<main.menu.DreamBotMenu.Task>> library,
+            java.util.function.Supplier<java.util.List<main.market.ScriptListing>> market) {
+        JTabbedPane tabs = new JTabbedPane();
+        tabs.addTab("Users", buildUsersPanel());
+        // Owners and admins both moderate; only owners can promote users, which is why the Users
+        // tab keeps its own owner-gated server calls.
+        tabs.addTab("Script Management", ScriptManagementPanel.build(library, market));
+        return tabs;
+    }
+
+    /** The original v1.32b users panel. */
+    private static JComponent buildUsersPanel() {
         String url = ServerAccount.session().baseUrl;
         ServerAccount server = new ServerAccount(url);
 

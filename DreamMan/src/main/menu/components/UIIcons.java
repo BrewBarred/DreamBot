@@ -462,5 +462,55 @@ public final class UIIcons {
             }
         };
     }
+
+    /** v1.71: a tick, for "mark this card built". */
+    public static Icon check(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                g2.setStroke(new BasicStroke(Math.max(1.7f, s / 7f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine(Math.round(s * 0.22f), Math.round(s * 0.53f),
+                            Math.round(s * 0.42f), Math.round(s * 0.73f));
+                g2.drawLine(Math.round(s * 0.42f), Math.round(s * 0.73f),
+                            Math.round(s * 0.79f), Math.round(s * 0.29f));
+            }
+        };
+    }
+
+    /**
+     * v1.69: a plain X. Used for Close (detail view) and for the card's destructive action,
+     * replacing the "..." overflow - a cross reads as "get rid of this" far faster than a
+     * three-dot menu that hid a mix of unrelated commands.
+     */
+    public static Icon close(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                g2.setStroke(new BasicStroke(Math.max(1.6f, s / 8f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                int p = Math.round(s * 0.26f), q = s - p;
+                g2.drawLine(p, p, q, q);
+                g2.drawLine(q, p, p, q);
+            }
+        };
+    }
+
+    /**
+     * v1.69: an up arrow for Download/Import - the direction that reads as "bring this into my
+     * library". Stem plus a chevron head, drawn with round caps so it stays clean when small.
+     */
+    public static Icon arrowUp(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                g2.setStroke(new BasicStroke(Math.max(1.6f, s / 8f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                int cx = s / 2;
+                int top = Math.round(s * 0.22f), bot = Math.round(s * 0.80f);
+                g2.drawLine(cx, bot, cx, top);
+                int w = Math.round(s * 0.24f), hy = top + Math.round(s * 0.24f);
+                g2.drawLine(cx - w, hy, cx, top);
+                g2.drawLine(cx + w, hy, cx, top);
+            }
+        };
+    }
 }
 

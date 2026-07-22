@@ -182,6 +182,9 @@ public class DreamBotMenu extends JFrame {
 
     private final DefaultListModel<Task> modelTaskList = new DefaultListModel<>();
     private final JList<Task> listTaskList = new JList<>(modelTaskList);
+    /** v1.68: on-start-only toggle for the selected queue entry, plus its listener guard. */
+    private JCheckBox chkTaskOnStart;
+    private boolean taskOnStartSyncing = false;
 
     /**
      * Patch B.5: the library's single source of truth. {@link #modelTaskLibrary} is only the
@@ -203,7 +206,6 @@ public class DreamBotMenu extends JFrame {
 
     // ── Patch B.11: the script market (v1.60: rebuilt as a card grid) ──
     private main.market.ScriptRepository marketRepo;
-    private JButton btnMyUploads;   // v1.32b: hidden unless the server market is active
     // v1.64: the DETAIL view replaced the v1.50/v1.63 in-card accordions. One listing's detail
     // shows at a time, swapped over the grid via a CardLayout; these track that state.
     private JPanel marketCenterCards;                                  // "grid" | "detail"
@@ -223,9 +225,17 @@ public class DreamBotMenu extends JFrame {
     private static final String[] MARKET_SORTS = {"Top rated", "Most downloaded", "Newest",
             "A-Z", "Version (highest)", "Version (lowest)"};
     private boolean fltHideVip, fltHideFree, fltLovedOnly;
+    /**
+     * v1.70: hide your OWN listings in the market grid, on by default. Replaces the "My
+     * uploads" dialog - browsing the market is for finding other people's work, and your own
+     * scripts are already in your library and market-ready strip.
+     */
+    private boolean fltHideOwn = true;
     /** Roadmap default: only the highest version of each name+author shows. Coexistence of two
      *  versions stays possible - untick the filter to see every version side by side. */
     private boolean fltHideOlder = true;
+    /** v1.75 (item 14): the clickable tag pills under the market search field. */
+    private main.menu.components.TagFilterBar tagBar;
     private final java.util.Set<String> fltTags =
             new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
     private JButton btnMarketSort, btnMarketFilter;
@@ -416,7 +426,7 @@ public class DreamBotMenu extends JFrame {
         }
         requestAutosave();
         showToast(n == 0 ? "No script triggers \u2014 this list runs with global checks only"
-                        : n + " script trigger" + (n == 1 ? "" : "s") + " will run while this list plays",
+                : n + " script trigger" + (n == 1 ? "" : "s") + " will run while this list plays",
                 anchor, true);
     }
 
@@ -629,6 +639,7 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
         mainTabs.addTab("Logs", loadTabIcon("logs_tab"), createLogsTab());                  // v1.31
         syncDevConsoleTab();   // v1.32b: owner-only Dev Console tab, if already signed in as owner
+        checkSubmissionOutcomes();   // v1.67: report any moderation outcomes from last session
         // Patch B.3 / v1.32: the Developers Console is no longer a top-level tab - it made the
         // tab strip overflow for developers. It now lives as a developer-only button inside the
         // Settings tab (see createSettingsTab), opened in its own window. Same isDeveloper() gate.
@@ -1374,7 +1385,7 @@ public class DreamBotMenu extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 if (lblServerDot == null) return;
                 lblServerDot.setIcon(dotIcon(up ? new Color(0x3F, 0xB9, 0x50)
-                        : new Color(0xCC, 0x45, 0x45)));
+                                                : new Color(0xCC, 0x45, 0x45)));
                 lblServerDot.setToolTipText(up
                         ? "Server online (checked every 30s)"
                         : "Server unreachable - details: Dev Console \u2192 Test connection");
@@ -1413,17 +1424,17 @@ public class DreamBotMenu extends JFrame {
         // yet, so instead of a half-working form we show a teaser that points at DreamBot VIP.
         JEditorPane pane = new JEditorPane("text/html",
                 "<html><body style='width:340px;font-family:sans-serif;font-size:11px;color:#DDD'>"
-                        + "<h3 style='color:#E0B341;margin:2px 0'>Multiple accounts &mdash; coming soon</h3>"
-                        + "<p>Running DreamMan across several accounts is a <b>future release</b>. It builds"
-                        + " on DreamBot's account manager, which is part of <b>DreamBot VIP</b>, so you'll"
-                        + " need VIP to use it once it's ready.</p>"
-                        + "<p>You can get VIP here:<br>"
-                        + "<a href='https://dreambot.org/forums/index.php?/store/product/6-vip/'>"
-                        + "dreambot.org &rsaquo; store &rsaquo; VIP</a></p>"
-                        + "<p style='color:#9A9A9A'><i>Note: this isn't available in DreamMan yet &mdash;"
-                        + " we may also need to arrange extra API access before enabling it. The link is"
-                        + " just so you know what it'll require.</i></p>"
-                        + "</body></html>");
+                + "<h3 style='color:#E0B341;margin:2px 0'>Multiple accounts &mdash; coming soon</h3>"
+                + "<p>Running DreamMan across several accounts is a <b>future release</b>. It builds"
+                + " on DreamBot's account manager, which is part of <b>DreamBot VIP</b>, so you'll"
+                + " need VIP to use it once it's ready.</p>"
+                + "<p>You can get VIP here:<br>"
+                + "<a href='https://dreambot.org/forums/index.php?/store/product/6-vip/'>"
+                + "dreambot.org &rsaquo; store &rsaquo; VIP</a></p>"
+                + "<p style='color:#9A9A9A'><i>Note: this isn't available in DreamMan yet &mdash;"
+                + " we may also need to arrange extra API access before enabling it. The link is"
+                + " just so you know what it'll require.</i></p>"
+                + "</body></html>");
         pane.setEditable(false);
         pane.setOpaque(false);
         pane.addHyperlinkListener(ev -> {
@@ -1493,16 +1504,71 @@ public class DreamBotMenu extends JFrame {
         // account tier changes - not a right-click context menu, which was the wrong home.
         syncDevConsoleTab();
         refreshAccountLogoutVisibility();
+        checkSubmissionOutcomes();   // v1.67
     }
 
-    /** Adds the owner-only Dev Console tab when signed in as owner; removes it otherwise. */
+    /**
+     * v1.67: tells an author what actually happened to anything they submitted while the
+     * moderation valve was on. Without it the valve is a black hole from the submitter's side -
+     * their listing simply never appears and nothing explains why, which reads as a broken market.
+     *
+     * <p>Runs off the EDT once per sign-in. Each outcome is acknowledged on the server, so it's
+     * reported exactly once and never nags. Every failure is silent by design: an older server
+     * (no {@code /me/submissions}) or an offline start should cost nothing.
+     */
+    private void checkSubmissionOutcomes() {
+        if (!main.market.ServerAccount.isLoggedIn()) return;
+        Thread t = new Thread(() -> {
+            try {
+                main.market.ServerAccount server = new main.market.ServerAccount(
+                        main.market.ServerAccount.session().baseUrl);
+                List<String> lines = new ArrayList<>();
+                List<String> ack = new ArrayList<>();
+                for (Map<String, Object> m : server.mySubmissions()) {
+                    if (m == null) continue;
+                    String status = String.valueOf(m.get("status"));
+                    if ("pending".equals(status)) continue;   // still waiting - nothing to say yet
+                    Object seen = m.get("seen");
+                    if (Boolean.TRUE.equals(seen) || "true".equals(String.valueOf(seen))) continue;
+                    String name = String.valueOf(m.get("name"));
+                    if ("approved".equals(status)) {
+                        lines.add("\u2713  \"" + name + "\" was approved \u2014 it's on the market now.");
+                    } else {
+                        String reason = m.get("reason") == null ? "" : String.valueOf(m.get("reason"));
+                        lines.add("\u2717  \"" + name + "\" wasn't accepted"
+                                + (reason.trim().isEmpty() ? "." : ": " + reason));
+                    }
+                    ack.add(String.valueOf(m.get("id")));
+                }
+                if (lines.isEmpty()) return;
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                        String.join("\n", lines) + "\n\nYour tasks are still in your library "
+                        + "either way \u2014 nothing was deleted.",
+                        "Your submissions", JOptionPane.INFORMATION_MESSAGE));
+                // Acknowledge only after it's been put on screen.
+                for (String id : ack) {
+                    try { server.ackSubmission(id); } catch (Throwable ignored) {}
+                }
+            } catch (Throwable ignored) {
+                // offline, or a server older than 1.5.1 - not worth surfacing
+            }
+        }, "DreamMan-submission-outcomes");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Adds the Dev Console tab for owners and admins; removes it otherwise. */
     private void syncDevConsoleTab() {
         if (mainTabs == null) return;
         int idx = indexOfTab("Dev Console");
-        boolean shouldShow = main.market.Tier.isOwner();
+        // v1.66: admins get the console too - moderation and the defaults library are admin work,
+        // and gating them behind the single owner account defeats the point of having admins.
+        boolean shouldShow = main.market.Tier.isOwner() || main.market.Tier.isAdmin();
         if (shouldShow && idx < 0) {
             mainTabs.addTab("Dev Console", loadTabIcon("settings_tab"),
-                    main.menu.components.DevConsole.buildPanel());
+                    main.menu.components.DevConsole.buildPanel(
+                            () -> new ArrayList<>(libraryAll),
+                            () -> new ArrayList<>(marketAll)));
         } else if (!shouldShow && idx >= 0) {
             mainTabs.removeTabAt(idx);
         }
@@ -2108,6 +2174,7 @@ public class DreamBotMenu extends JFrame {
         listTaskList.addListSelectionListener(e -> {
             btnTaskListRemove.setEnabled(!listTaskList.isSelectionEmpty());
             syncTaskRepeatSpinner();
+            syncTaskOnStartCheckbox();   // v1.68
         });
 
         listTaskList.addMouseListener(new MouseAdapter() {
@@ -2171,6 +2238,28 @@ public class DreamBotMenu extends JFrame {
             openTimerDialog(sel, btnTaskListTimer);
         });
 
+        // v1.68: on-start-only for the SELECTED queue entry. A real checkbox rather than a button,
+        // because it reports state as much as it sets it - the whole point is being able to see at
+        // a glance which entries are setup-only before starting a long session.
+        chkTaskOnStart = new JCheckBox("On start only");
+        chkTaskOnStart.setOpaque(false);
+        chkTaskOnStart.setForeground(Theme.TEXT);
+        chkTaskOnStart.setEnabled(false);
+        chkTaskOnStart.setToolTipText("<html>Run this task on the <b>first queue loop only</b>, "
+                + "then skip it on every later lap.<br>Applies to <b>this entry</b> only \u2014 the "
+                + "same task elsewhere in the queue keeps running.</html>");
+        chkTaskOnStart.addActionListener(e -> {
+            if (taskOnStartSyncing) return;
+            Task sel = listTaskList.getSelectedValue();
+            if (sel == null) { chkTaskOnStart.setSelected(false); return; }
+            sel.setOnStartOnly(chkTaskOnStart.isSelected());
+            saveAll(false);
+            listTaskList.repaint();
+            showToast(chkTaskOnStart.isSelected()
+                    ? "\"" + sel.getName() + "\" now runs on the first loop only"
+                    : "\"" + sel.getName() + "\" runs every loop again", chkTaskOnStart, true);
+        });
+
         // Patch B.10: one-click compile - turn the whole queue into a standalone DreamBot script
         JButton btnExportScript = createButton("Export as script\u2026", new Color(30, 70, 40), null);
         btnExportScript.setToolTipText("Package this queue into a .jar DreamBot can run on its own");
@@ -2187,9 +2276,9 @@ public class DreamBotMenu extends JFrame {
         // the mode a library add uses. Replaces the old "Insert: End" text dropdown.
         btnInsertToggle = iconButton(
                 insertAfterSelected ? main.menu.components.UIIcons.insertAfter(18, Theme.ACCENT)
-                        : main.menu.components.UIIcons.insertEnd(18, Theme.ACCENT),
+                                    : main.menu.components.UIIcons.insertEnd(18, Theme.ACCENT),
                 insertAfterSelected ? "Adding AFTER the selected task \u2014 click for: at the end"
-                        : "Adding at the END \u2014 click for: after the selected task",
+                                    : "Adding at the END \u2014 click for: after the selected task",
                 this::toggleInsertMode);
 
         ///  Add all buttons
@@ -2197,6 +2286,7 @@ public class DreamBotMenu extends JFrame {
         southButtons.add(btnTaskListDuplicate);
         southButtons.add(btnTaskListRemove);
         southButtons.add(btnTaskListTimer);
+        southButtons.add(chkTaskOnStart);   // v1.68
         southButtons.add(btnExportScript);
         southButtons.add(btnInsertToggle);
         southButtons.add(btnTaskListView);
@@ -2310,7 +2400,7 @@ public class DreamBotMenu extends JFrame {
                 boolean now = main.data.store.DefaultTasks.toggle(t);
                 listTaskLibrary.repaint();
                 showToast(now ? "\"" + t.getName() + "\" is now a DEFAULT task"
-                        : "\"" + t.getName() + "\" removed from defaults", listTaskLibrary, true);
+                              : "\"" + t.getName() + "\" removed from defaults", listTaskLibrary, true);
             }
 
             @Override public void mousePressed(MouseEvent me)  { maybePopup(me); }
@@ -2845,21 +2935,28 @@ public class DreamBotMenu extends JFrame {
 
         @Override
         public Component getListCellRendererComponent(JList<? extends Task> list, Task t,
-                                                      int index, boolean selected, boolean focus) {
+                int index, boolean selected, boolean focus) {
             if (t == null) return this;
             // v1.30: default-task marker. Everyone sees which tasks are defaults; only admins
             // get the hollow "make this a default" star on the rest (clicking it toggles).
             boolean isDefault = main.data.store.DefaultTasks.isDefault(t.getId());
             boolean admin = main.market.Tier.isAdmin();
-            if (isDefault)
-                star.setIcon(main.menu.components.UIIcons.star(15, Theme.ACCENT, true));
+            // v1.66: an admin-pushed default (origin "default-admin") is drawn in blue rather
+            // than gold, so a user can tell a task an admin added from one that ships with the
+            // client - and can filter on the origin if they care.
+            boolean adminDefault = main.data.store.DefaultTasks.ADMIN_ORIGIN.equals(t.getOrigin());
+            if (isDefault || adminDefault)
+                star.setIcon(main.menu.components.UIIcons.star(15,
+                        adminDefault ? Theme.BLUE : Theme.ACCENT, true));
             else if (admin)
                 star.setIcon(main.menu.components.UIIcons.star(15, Theme.TEXT_MUTED, false));
             else
                 star.setIcon(null);
-            star.setToolTipText(admin
+            star.setToolTipText(adminDefault
+                    ? "Default task - added by an admin, shared with every user."
+                    : admin
                     ? (isDefault ? "Default task - ships to every user. Click to remove."
-                    : "Click to make this a default task for every user.")
+                                 : "Click to make this a default task for every user.")
                     : (isDefault ? "Default task - included with DreamMan." : null));
             // v1.49: show the version beside the name, and the strongest lifecycle tag on the date row
             name.setText(t.getName());
@@ -3058,7 +3155,7 @@ public class DreamBotMenu extends JFrame {
         styleJList(inspActionsList);
         inspActionsList.setCellRenderer(new DefaultListCellRenderer() {
             @Override public Component getListCellRendererComponent(JList<?> l, Object v, int i,
-                                                                    boolean sel, boolean foc) {
+                    boolean sel, boolean foc) {
                 JLabel lab = (JLabel) super.getListCellRendererComponent(l, v, i, sel, foc);
                 lab.setText("  " + (i + 1) + ".  " + (v instanceof Action ? ((Action) v).toBuildString() : "?"));
                 lab.setBorder(new EmptyBorder(4, 4, 4, 4));
@@ -3242,8 +3339,8 @@ public class DreamBotMenu extends JFrame {
     private void unstageMarketReady(Task t, main.market.ScriptListing l) {
         if (JOptionPane.showConfirmDialog(this,
                 "<html>Take <b>" + escapeHtml(t.getName()) + "</b> off your local market?"
-                        + "<br><br>The task stays in your Task Library \u2014 only the staged market copy"
-                        + "<br>and its card are deleted.</html>",
+                + "<br><br>The task stays in your Task Library \u2014 only the staged market copy"
+                + "<br>and its card are deleted.</html>",
                 "Not market-ready", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
                 != JOptionPane.YES_OPTION)
             return;
@@ -3387,7 +3484,7 @@ public class DreamBotMenu extends JFrame {
             cmp = Comparator.comparingLong(Task::getCreatedAt).reversed();
         else if ("Most used".equals(mode))
             cmp = Comparator.<Task>comparingInt(
-                            t -> libraryUseCounts.getOrDefault(t.getId(), 0)).reversed()
+                    t -> libraryUseCounts.getOrDefault(t.getId(), 0)).reversed()
                     .thenComparing(Task::getName, String.CASE_INSENSITIVE_ORDER);
         else
             cmp = Comparator.comparing(Task::getName, String.CASE_INSENSITIVE_ORDER);
@@ -3629,14 +3726,44 @@ public class DreamBotMenu extends JFrame {
         return b;
     }
 
+    /**
+     * v1.73 (item 11): the market's icon toggles paint their own chrome. They used to fall
+     * through to the platform look-and-feel, which rendered a bright blue selected/rollover
+     * fill that belonged to no part of this theme and fought the gold icon sitting on it.
+     * Flat dark surface, gold rule and a gold-tinted fill when active.
+     */
     private JToggleButton iconToggle(Icon icon, String tooltip) {
-        JToggleButton b = new JToggleButton(icon);
+        JToggleButton b = new JToggleButton(icon) {
+            @Override protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                boolean on = isSelected();
+                boolean hot = getModel().isRollover();
+                g2.setColor(on ? ICON_BTN_ON : hot ? ICON_BTN_HOT : ICON_BTN_BG);
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 8, 8);
+                g2.setColor(on ? Theme.ACCENT : Theme.BORDER);
+                g2.setStroke(new BasicStroke(on ? 1.8f : 1f));
+                g2.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 8, 8);
+                g2.dispose();
+                super.paintComponent(g);
+            }
+        };
         b.setToolTipText(tooltip);
         b.setPreferredSize(new Dimension(34, 30));
         b.setFocusPainted(false);
+        b.setContentAreaFilled(false);
+        b.setBorderPainted(false);
+        b.setOpaque(false);
+        b.setRolloverEnabled(true);
         b.setMargin(new Insets(2, 2, 2, 2));
         return b;
     }
+
+    private static final Color ICON_BTN_BG  = new Color(0x24, 0x24, 0x24);
+    private static final Color ICON_BTN_HOT = new Color(0x2E, 0x2E, 0x2E);
+    /** A dark gold wash - readable as "active" without drowning the gold glyph on top. */
+    private static final Color ICON_BTN_ON  = new Color(0x3A, 0x33, 0x18);
 
     // Patch B.16: the source toggle + the configured server URL (admins can change it).
     private JToggleButton btnFolderSource, btnServerSource;
@@ -3711,14 +3838,12 @@ public class DreamBotMenu extends JFrame {
         sourceGroup.add(btnServerSource);
         (marketRepo instanceof main.market.HttpRepository ? btnServerSource : btnFolderSource).setSelected(true);
 
-        btnFolderSource.addActionListener(e -> useFolderSource(false));
+        btnFolderSource.addActionListener(e -> useFolderSource());
         btnServerSource.addActionListener(e -> useServerSource());
-        // right-click to change folder path / server url
-        btnFolderSource.addMouseListener(new MouseAdapter() {
-            @Override public void mousePressed(MouseEvent me) {
-                if (SwingUtilities.isRightMouseButton(me)) useFolderSource(true);
-            }
-        });
+        // v1.70: the folder is FIXED. Right-click used to open a JFileChooser that took
+        // ~10s per interaction and let users point the market at a path outside the sanctioned
+        // scripts.path root, which breaks SDN compliance. There is one correct folder, so
+        // there is now no way to change it.
         btnServerSource.addMouseListener(new MouseAdapter() {
             @Override public void mousePressed(MouseEvent me) {
                 if (SwingUtilities.isRightMouseButton(me)) changeServerUrl();
@@ -3748,9 +3873,6 @@ public class DreamBotMenu extends JFrame {
         // ── top-right actions: refresh + My uploads (import is per-card now) ──
         JButton btnRefresh = iconButton(main.menu.components.UIIcons.refresh(20, ic),
                 "Refresh the market", this::reloadMarket);
-        btnMyUploads = createButton("My uploads\u2026", new Color(40, 55, 40), null);
-        btnMyUploads.setToolTipText("View and manage the scripts you've uploaded (rename, delete, quota)");
-        btnMyUploads.addActionListener(e -> openMyUploads());
 
         // header row: [folder|server] [sort] [filter] [search .......] [refresh] [My uploads]
         JPanel head = new JPanel(new BorderLayout(6, 4));
@@ -3767,7 +3889,6 @@ public class DreamBotMenu extends JFrame {
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         right.setOpaque(false);
         right.add(btnRefresh);
-        right.add(btnMyUploads);
 
         JPanel searchWrap = new JPanel(new BorderLayout(4, 0));
         searchWrap.setOpaque(false);
@@ -3784,7 +3905,26 @@ public class DreamBotMenu extends JFrame {
         topRow.add(searchWrap, BorderLayout.CENTER);
         topRow.add(right, BorderLayout.EAST);
 
-        head.add(topRow, BorderLayout.NORTH);
+        // v1.75 (item 14): tags as clickable pills directly under the search field. They used to
+        // be checkboxes buried in the filter popup, which meant you had to already know the
+        // feature existed to find it. Collapsible, because a market with fifty tags is noise for
+        // anyone who doesn't use them.
+        tagBar = new main.menu.components.TagFilterBar(fltTags,
+                tag -> {
+                    if (!fltTags.remove(tag)) fltTags.add(tag);
+                    filtersChanged();
+                },
+                () -> { fltTags.clear(); filtersChanged(); });
+        // Hiding the bar changes what the search matches, so re-run it immediately rather than
+        // waiting for the next keystroke - otherwise the toggle looks like it did nothing.
+        tagBar.onVisibilityChanged = this::filtersChanged;
+
+        JPanel headStack = new JPanel(new BorderLayout(0, 0));
+        headStack.setOpaque(false);
+        headStack.add(topRow, BorderLayout.NORTH);
+        headStack.add(tagBar, BorderLayout.CENTER);
+
+        head.add(headStack, BorderLayout.NORTH);
         head.add(lblMarketSource, BorderLayout.SOUTH);
 
         // ── v1.60 TOP: everyone's published scripts as a wrapping CARD GRID. Real components,
@@ -3904,6 +4044,12 @@ public class DreamBotMenu extends JFrame {
         JCheckBoxMenuItem free = new JCheckBoxMenuItem("Hide free scripts", fltHideFree);
         free.addActionListener(a -> { fltHideFree = free.isSelected(); filtersChanged(); });
         m.add(free);
+        JCheckBoxMenuItem own = new JCheckBoxMenuItem("Hide my own scripts", fltHideOwn);
+        own.setToolTipText("On by default \u2014 your own uploads are already in your library "
+                + "and market-ready strip");
+        own.addActionListener(a -> { fltHideOwn = own.isSelected(); filtersChanged(); });
+        m.add(own);
+
         JCheckBoxMenuItem loved = new JCheckBoxMenuItem("Loved only \u2665", fltLovedOnly);
         loved.setToolTipText("Only the scripts you've hearted");
         loved.addActionListener(a -> { fltLovedOnly = loved.isSelected(); filtersChanged(); });
@@ -3956,7 +4102,7 @@ public class DreamBotMenu extends JFrame {
     /** v1.60: re-applies filters and re-tints the funnel gold while any non-default one is on. */
     private void filtersChanged() {
         boolean active = fltHideVip || fltHideFree || fltLovedOnly
-                || !fltTags.isEmpty() || !fltHideOlder;
+                || !fltTags.isEmpty() || !fltHideOlder || !fltHideOwn;   // v1.70: default is ON
         btnMarketFilter.setIcon(main.menu.components.UIIcons.filter(20,
                 active ? Theme.ACCENT : MARKET_ICON_GOLD));
         btnMarketFilter.setToolTipText(filterTooltip());
@@ -3967,6 +4113,7 @@ public class DreamBotMenu extends JFrame {
         List<String> on = new ArrayList<>();
         if (fltHideVip) on.add("hiding VIP");
         if (fltHideFree) on.add("hiding free");
+        if (fltHideOwn) on.add("hiding my own");
         if (fltLovedOnly) on.add("loved only");
         if (!fltHideOlder) on.add("showing older versions");
         if (!fltTags.isEmpty()) on.add("tags: " + String.join(", ", fltTags));
@@ -3986,17 +4133,37 @@ public class DreamBotMenu extends JFrame {
      * open-comments card and the scroll position both survive a rebuild, so rating or hearting
      * something doesn't yank the view around.
      */
+    /**
+     * v1.75: repopulates the tag bar from whatever the loaded listings actually carry, so a newly
+     * published tag appears on its own without being registered anywhere.
+     */
+    private void refreshTagBar() {
+        if (tagBar == null) return;
+        java.util.TreeSet<String> tags = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        for (main.market.ScriptListing l : marketAll)
+            if (l != null && l.tags != null && !"local".equals(l.origin)) tags.addAll(l.tags);
+        tagBar.setTags(tags);
+    }
+
     private void refreshMarketGrid() {
+        refreshTagBar();   // v1.75: the pill row tracks the loaded listings
         if (marketGridPanel == null) return;
         String q = marketSearchField == null ? ""
                 : marketSearchField.getText().trim().toLowerCase();
 
         List<main.market.ScriptListing> view = new ArrayList<>();
         for (main.market.ScriptListing l : marketAll) {
-            if (l == null || "local".equals(l.origin)) continue;   // staging lives in the strip
+            if (l == null) continue;
+            // v1.71: the grid shows the live market on the server page, and your UNBUILT
+            // local cards on the folder page - built ones have moved down to the strip.
+            boolean serverPage = marketRepo instanceof main.market.HttpRepository;
+            boolean isStaged = "local".equals(l.origin);
+            if (serverPage && isStaged) continue;
+            if (!serverPage && (!isStaged || l.cardReady)) continue;
             if (fltHideVip && l.vipOnly) continue;
             if (fltHideFree && !l.vipOnly) continue;
             if (fltLovedOnly && !l.myFavorite) continue;
+            if (fltHideOwn && isOwnListing(l)) continue;   // v1.70
             if (!fltTags.isEmpty()) {
                 boolean hit = false;
                 if (l.tags != null)
@@ -4004,19 +4171,25 @@ public class DreamBotMenu extends JFrame {
                 if (!hit) continue;
             }
             if (!q.isEmpty()) {
-                String hay = (l.name + " " + l.author + " " + l.description + " "
-                        + (l.tags == null ? "" : String.join(" ", l.tags))).toLowerCase();
+                // v1.76 (item 14): hiding the tag bar also stops tags being searched. With a
+                // hundred things tagged #furnace, searching "furnace" with tags off returns only
+                // the two or three that actually say furnace in their name or description.
+                boolean searchTags = tagBar == null || !tagBar.isCollapsed();
+                String hay = (l.name + " " + l.author + " " + l.description
+                        + (searchTags && l.tags != null ? " " + String.join(" ", l.tags) : ""))
+                        .toLowerCase();
                 if (!hay.contains(q)) continue;
             }
             view.add(l);
         }
 
         if (fltHideOlder) {
-            // keep only the highest version per author+name. The server allows versions to
-            // coexist (1.4.0 version-integrity); this is purely a view default.
+            // v1.74: collapse each LINEAGE to its newest version (server 1.6.0 stacking). Keyed
+            // on lineageId, so renaming a script can't merge it into another of your own; rows
+            // published before 1.6.0 have no lineage and fall back to the old author+name key.
             java.util.Map<String, main.market.ScriptListing> best = new LinkedHashMap<>();
             for (main.market.ScriptListing l : view) {
-                String k = (l.author + "\u0000" + l.name).toLowerCase();
+                String k = lineageKey(l);
                 main.market.ScriptListing b = best.get(k);
                 if (b == null || l.version > b.version) best.put(k, l);
             }
@@ -4082,7 +4255,9 @@ public class DreamBotMenu extends JFrame {
         if (readyCardsPanel == null) return;
         readyAll.clear();
         for (main.market.ScriptListing l : marketAll)
-            if (l != null && "local".equals(l.origin)) readyAll.add(l);
+            // v1.71: market-ready == the card is BUILT. Same items on the local and server
+            // pages; only the button on them differs (unbuild locally / publish on server).
+            if (l != null && "local".equals(l.origin) && l.cardReady) readyAll.add(l);
         if (readySortAZ)
             readyAll.sort(Comparator.comparing(l -> l.name == null ? "" : l.name.toLowerCase()));
         else
@@ -4093,8 +4268,8 @@ public class DreamBotMenu extends JFrame {
 
         readyCardsPanel.removeAll();
         if (readyAll.isEmpty()) {
-            JLabel hint = new JLabel("Nothing staged \u2014 use the Library's "
-                    + "\"\u2191 Market-ready\" button, build its card, then publish from here.");
+            JLabel hint = new JLabel("Nothing market-ready yet \u2014 mark a task market-ready "
+                    + "in the Library, then build its card in your local folder above.");
             hint.setForeground(TEXT_DIM);
             hint.setFont(new Font("Segoe UI", Font.ITALIC, 11));
             hint.setBorder(new EmptyBorder(10, 4, 10, 4));
@@ -4114,61 +4289,233 @@ public class DreamBotMenu extends JFrame {
         readyCardsPanel.repaint();
     }
 
+    /**
+     * v1.73 (item 8): the card's X. A published listing has two very different "removes" - take
+     * it off the market but keep your copy, or destroy the copy too - so it asks rather than
+     * guessing. Unpublishing keeps the staged copy, which is what makes it recoverable.
+     */
+    private void removeListingWithChoice(main.market.ScriptListing l, JComponent src) {
+        if (l == null) return;
+        boolean live = "server".equals(l.origin);
+        if (!live) {
+            // A local card: only one thing removal can mean.
+            if (JOptionPane.showConfirmDialog(this,
+                    "<html>Delete <b>" + escapeHtml(l.name) + "</b> from your local folder?"
+                    + "<br><br>This is the market's own deep copy \u2014 the original task in your"
+                    + "<br>Task Library is untouched.</html>",
+                    "Delete local copy", JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION)
+                deleteLocalListing(l);
+            return;
+        }
+        if (!isOwnListing(l) && !main.market.Tier.isAdmin()) {
+            showToast("That isn't yours to remove", src, false);
+            return;
+        }
+        Object[] opts = {"Unpublish (keep my copy)", "Delete everywhere", "Cancel"};
+        int k = JOptionPane.showOptionDialog(this,
+                "<html>What should happen to <b>" + escapeHtml(l.name) + "</b>?"
+                + "<br><br><b>Unpublish</b> \u2014 taken off the market, your market-ready copy stays,"
+                + "<br>so you can edit and re-publish it."
+                + "<br><b>Delete everywhere</b> \u2014 also removes your local copy. The original"
+                + "<br>task in your Task Library is untouched either way.</html>",
+                "Remove listing", JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE,
+                null, opts, opts[0]);
+        if (k != 0 && k != 1) return;
+        final boolean alsoLocal = (k == 1);
+        onUnpublishRequested(l, src, alsoLocal);
+    }
+
+    /** Unpublishes, then optionally deletes the staged copy too. */
+    private void onUnpublishRequested(main.market.ScriptListing l, JComponent src,
+                                      boolean alsoLocal) {
+        new Thread(() -> {
+            try {
+                marketRepo.remove(l.id);
+                if (alsoLocal && localMarketRepo != null) {
+                    try { localMarketRepo.remove(l.id); } catch (Exception ignored) {}
+                }
+                SwingUtilities.invokeLater(() -> {
+                    reloadMarket();
+                    showToast(alsoLocal
+                            ? "\"" + l.name + "\" deleted everywhere"
+                            : "\"" + l.name + "\" unpublished \u2014 your copy is in market-ready",
+                            marketAnchor(), true);
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() ->
+                        showToast("Remove failed: " + ex.getMessage(), src, false));
+            }
+        }, "DreamMan-RemoveListing").start();
+    }
+
+    // ── v1.71: the built/unbuilt gate ───────────────────────────────────────────────────────
+
+    /** Shortest and longest description a card may have before it counts as built. */
+    private static final int CARD_DESC_MIN = 20, CARD_DESC_MAX = 600;
+    /**
+     * Placeholder text people leave in by accident. This is a courtesy check, not moderation -
+     * the server-side valve (v1.66) is what actually polices content.
+     */
+    private static final String[] CARD_BANNED = {
+            "lorem ipsum", "todo", "tbd", "asdf", "test test", "xxx",
+            "no description provided"
+    };
+
+    /**
+     * @return null when the listing is fit to publish, otherwise the reason it isn't.
+     * Checked when marking a card built rather than at publish time, so the problem surfaces
+     * while you're still looking at the card that has it.
+     */
+    private String cardBuildProblem(main.market.ScriptListing l) {
+        if (l == null) return "That card no longer exists.";
+        if (l.name == null || l.name.trim().length() < 3)
+            return "Give it a name of at least 3 characters.";
+        if (l.icon == null || l.icon.isBlank())
+            return "It needs an image \u2014 pick one in the card builder.";
+        String d = l.description == null ? "" : l.description.trim();
+        if (d.length() < CARD_DESC_MIN)
+            return "The description is too short (" + d.length() + " characters, minimum "
+                    + CARD_DESC_MIN + ").";
+        if (d.length() > CARD_DESC_MAX)
+            return "The description is too long (" + d.length() + " characters, maximum "
+                    + CARD_DESC_MAX + ").";
+        String low = d.toLowerCase();
+        for (String bad : CARD_BANNED)
+            if (low.contains(bad))
+                return "The description still contains placeholder text (\"" + bad + "\").";
+        if (l.bundle == null || l.bundle.tasks == null || l.bundle.tasks.isEmpty())
+            return "There's nothing inside this card to publish.";
+        return null;
+    }
+
+    /**
+     * Moves a staged listing between the local folder (unbuilt) and My Market-Ready (built).
+     * Marking built runs {@link #cardBuildProblem}; unbuilding is always allowed, because the
+     * whole point is being able to pull something back out of the publish queue.
+     */
+    private void setCardBuilt(main.market.ScriptListing l, boolean built) {
+        if (l == null || localMarketRepo == null) return;
+        if (built) {
+            String problem = cardBuildProblem(l);
+            if (problem != null) {
+                JOptionPane.showMessageDialog(this,
+                        "<html><b>" + escapeHtml(l.name) + "</b> isn't ready yet.<br><br>"
+                        + escapeHtml(problem) + "</html>",
+                        "Not market-ready", JOptionPane.WARNING_MESSAGE);
+                openCardBuilder(l);   // land them where the fix is
+                return;
+            }
+        }
+        boolean was = l.cardReady;
+        try {
+            l.cardReady = built;
+            localMarketRepo.publish(l);   // same id = save-in-place
+            reloadMarket();
+            showToast(built
+                    ? "\"" + l.name + "\" is market-ready \u2014 publish it from the server page"
+                    : "\"" + l.name + "\" moved back to your local folder",
+                    marketAnchor(), true);
+        } catch (Exception ex) {
+            l.cardReady = was;
+            showToast("Couldn't update that card: " + ex.getMessage(), marketAnchor(), false);
+        }
+    }
+
+    /**
+     * v1.74: the grouping key for version stacking. Prefers the server-assigned lineage; falls
+     * back to author+name only for listings published before server 1.6.0 existed.
+     */
+    private static String lineageKey(main.market.ScriptListing l) {
+        if (l == null) return "";
+        if (l.lineageId != null && !l.lineageId.isBlank()) return "L:" + l.lineageId;
+        return "N:" + (String.valueOf(l.author) + "\u0000" + l.name).toLowerCase();
+    }
+
+    /** Every loaded version of a listing's lineage, newest first. */
+    private List<main.market.ScriptListing> versionsOf(main.market.ScriptListing l) {
+        List<main.market.ScriptListing> out = new ArrayList<>();
+        if (l == null) return out;
+        String k = lineageKey(l);
+        for (main.market.ScriptListing o : marketAll)
+            if (o != null && !"local".equals(o.origin) && lineageKey(o).equals(k)) out.add(o);
+        out.sort((a, b) -> Double.compare(b.version, a.version));
+        return out;
+    }
+
     /** v1.60: everything a card can ask the menu to do - one shared wiring for grid + strip. */
     private final main.menu.components.MarketCard.Callbacks cardCallbacks =
             new main.menu.components.MarketCard.Callbacks() {
-                @Override public void onDownload(main.market.ScriptListing l) {
-                    importListing(l, marketAnchor());
-                }
-                @Override public void onPublish(main.market.ScriptListing l) {
-                    publishStagedListing(l);
-                }
-                @Override public void onUnpublish(main.market.ScriptListing l, JComponent src) {
-                    unpublishListing(l, src);
-                }
-                @Override public void onRate(main.market.ScriptListing l, int stars) {
-                    rateListing(l, stars);
-                }
-                @Override public void onToggleFavorite(main.market.ScriptListing l) {
-                    toggleFavorite(l);
-                }
-                @Override public void onOpenDetails(main.market.ScriptListing l, boolean focusComments) {
-                    openListingDetail(l, focusComments);
-                }
-                @Override public void onOpenProfile(main.market.ScriptListing l) {
-                    if (l != null) openUserProfile(l.author);
-                }
-                @Override public void onPostComment(main.market.ScriptListing l, String body,
-                                                    main.menu.components.MarketCard card) {
-                    postCardComment(l, body, card);
-                }
-                @Override public void onSetIcon(main.market.ScriptListing l) {
-                    // v1.61: the icon lives on the card now - one surface for everything card-shaped
-                    openCardBuilder(l);
-                }
-                @Override public void onBuildCard(main.market.ScriptListing l) {
-                    openCardBuilder(l);
-                }
-                @Override public void onDeleteLocal(main.market.ScriptListing l) {
-                    deleteLocalListing(l);
-                }
-                @Override public void onContextMenu(main.market.ScriptListing l, MouseEvent e,
-                                                    JComponent src) {
-                    showMarketRowMenu(l, e, src);
-                }
-                @Override public boolean isOwn(main.market.ScriptListing l) {
-                    return isOwnListing(l);
-                }
-                @Override public boolean canRate(main.market.ScriptListing l) {
-                    // published rows only (server or shared folder), never your own listing
-                    return l != null && !"local".equals(l.origin) && !isOwnListing(l);
-                }
-                @Override public boolean canComment(main.market.ScriptListing l) {
-                    return l != null && "server".equals(l.origin)
-                            && marketRepo instanceof main.market.HttpRepository
-                            && main.market.ServerAccount.isLoggedIn();
-                }
-            };
+        @Override public void onDownload(main.market.ScriptListing l) {
+            importListing(l, marketAnchor());
+        }
+        @Override public void onPublish(main.market.ScriptListing l) {
+            publishStagedListing(l);
+        }
+        @Override public void onUnpublish(main.market.ScriptListing l, JComponent src) {
+            unpublishListing(l, src);
+        }
+        @Override public void onRate(main.market.ScriptListing l, int stars) {
+            rateListing(l, stars);
+        }
+        @Override public void onToggleFavorite(main.market.ScriptListing l) {
+            toggleFavorite(l);
+        }
+        @Override public void onOpenDetails(main.market.ScriptListing l, boolean focusComments) {
+            openListingDetail(l, focusComments);
+        }
+        @Override public void onOpenProfile(main.market.ScriptListing l) {
+            if (l != null) openUserProfile(l.author);
+        }
+        @Override public void onPostComment(main.market.ScriptListing l, String body,
+                                            main.menu.components.MarketCard card) {
+            postCardComment(l, body, card);
+        }
+        @Override public void onSetIcon(main.market.ScriptListing l) {
+            // v1.61: the icon lives on the card now - one surface for everything card-shaped
+            openCardBuilder(l);
+        }
+        @Override public void onBuildCard(main.market.ScriptListing l) {
+            openCardBuilder(l);
+        }
+        @Override public void onDeleteLocal(main.market.ScriptListing l) {
+            deleteLocalListing(l);
+        }
+        @Override public void onContextMenu(main.market.ScriptListing l, MouseEvent e,
+                                            JComponent src) {
+            showMarketRowMenu(l, e, src);
+        }
+        @Override public void onRemoveListing(main.market.ScriptListing l, JComponent src) {
+            removeListingWithChoice(l, src);
+        }
+        @Override public java.util.List<main.market.ScriptListing> onListVersions(
+                main.market.ScriptListing l) {
+            return versionsOf(l);
+        }
+        @Override public void onShowVersion(main.market.ScriptListing l) {
+            // Showing another version is just opening its detail - the grid keeps showing the
+            // newest, so picking an old build never silently changes what "the" card means.
+            openListingDetail(l, false);
+        }
+        @Override public boolean isServerPage() {
+            return marketRepo instanceof main.market.HttpRepository;
+        }
+        @Override public void onSetBuilt(main.market.ScriptListing l, boolean built) {
+            setCardBuilt(l, built);
+        }
+        @Override public boolean isOwn(main.market.ScriptListing l) {
+            return isOwnListing(l);
+        }
+        @Override public boolean canRate(main.market.ScriptListing l) {
+            // published rows only (server or shared folder), never your own listing
+            return l != null && !"local".equals(l.origin) && !isOwnListing(l);
+        }
+        @Override public boolean canComment(main.market.ScriptListing l) {
+            return l != null && "server".equals(l.origin)
+                    && marketRepo instanceof main.market.HttpRepository
+                    && main.market.ServerAccount.isLoggedIn();
+        }
+    };
 
     /** v1.63: the market server to talk to for profiles - active repo, else session, else default. */
     private String profileServerUrl() {
@@ -4324,8 +4671,8 @@ public class DreamBotMenu extends JFrame {
                     java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("d MMM HH:mm");
                     for (main.market.HttpRepository.Comment c : cp.comments)
                         sb.append(c.author).append("  \u00b7  ")
-                                .append(fmt.format(new java.util.Date(c.at))).append("\n")
-                                .append(c.body).append("\n\n");
+                          .append(fmt.format(new java.util.Date(c.at))).append("\n")
+                          .append(c.body).append("\n\n");
                     text = sb.toString().trim();
                 }
             } catch (Exception ex) {
@@ -4407,50 +4754,11 @@ public class DreamBotMenu extends JFrame {
             });
             menu.add(miRemove);
         } else {
-            if (isOwnListing(l) || main.market.Tier.isAdmin()) {
-                menu.addSeparator();
-                JMenuItem miRename = new JMenuItem("Rename\u2026");
-                miRename.addActionListener(a -> {
-                    if (!(marketRepo instanceof main.market.HttpRepository)) return;
-                    String name = JOptionPane.showInputDialog(this, "New name:", l.name);
-                    if (name == null || name.trim().isEmpty()) return;
-                    new Thread(() -> {
-                        try {
-                            ((main.market.HttpRepository) marketRepo).rename(l.id, name.trim());
-                            SwingUtilities.invokeLater(this::reloadMarket);
-                        } catch (Exception ex) {
-                            SwingUtilities.invokeLater(() ->
-                                    showToast("Rename failed: " + ex.getMessage(), src, false));
-                        }
-                    }, "DreamMan-Rename").start();
-                });
-                menu.add(miRename);
-                if (isOwnListing(l)) {
-                    JMenuItem miUnpub = new JMenuItem("Unpublish (back to market-ready)\u2026");
-                    miUnpub.addActionListener(a -> unpublishListing(l, src));
-                    menu.add(miUnpub);
-                }
-                JMenuItem miRemove = new JMenuItem("Remove from server");
-                miRemove.addActionListener(a -> {
-                    if (JOptionPane.showConfirmDialog(this,
-                            "Remove \"" + l.name + "\" from the market permanently?\n\n"
-                                    + "Nothing is staged back locally - if you might republish "
-                                    + "it, use Unpublish instead.",
-                            "Remove upload", JOptionPane.YES_NO_OPTION,
-                            JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) return;
-                    new Thread(() -> {
-                        try {
-                            marketRepo.remove(l.id);
-                            SwingUtilities.invokeLater(this::reloadMarket);
-                        } catch (Exception ex) {
-                            SwingUtilities.invokeLater(() ->
-                                    showToast("Remove failed: " + ex.getMessage(), src, false));
-                        }
-                    }, "DreamMan-Remove").start();
-                });
-                menu.add(miRemove);
-            }
-        }
+            // v1.73 (item 8): renaming a LIVE listing is gone. A name change on the market
+            // breaks the link users have already seen and, with version stacking keyed on
+            // name+author for display, silently re-groups lineages. Rename in the card builder
+            // or the local folder instead - i.e. only while it isn't public.
+}
         // v1.63: the "..." more-button passes a null event - anchor the popup under the button.
         if (me != null) menu.show(src, me.getX(), me.getY());
         else menu.show(src, 0, src.getHeight());
@@ -4471,10 +4779,10 @@ public class DreamBotMenu extends JFrame {
             Object[] opts = {"Open card builder", "Not now"};
             int r = JOptionPane.showOptionDialog(this,
                     "<html><b>\u201c" + escapeHtml(l.name) + "\u201d doesn't have a finished card "
-                            + "yet.</b><br><br>Every market listing needs a built card before it can be "
-                            + "published \u2014 an icon plus the details the market grid shows.<br>"
-                            + "The builder makes the icon a one-click job (defaults, or a random one)."
-                            + "</html>",
+                    + "yet.</b><br><br>Every market listing needs a built card before it can be "
+                    + "published \u2014 an icon plus the details the market grid shows.<br>"
+                    + "The builder makes the icon a one-click job (defaults, or a random one)."
+                    + "</html>",
                     "Card required to publish", JOptionPane.DEFAULT_OPTION,
                     JOptionPane.WARNING_MESSAGE, null, opts, opts[0]);
             if (r == 0) openCardBuilder(l);
@@ -4485,7 +4793,7 @@ public class DreamBotMenu extends JFrame {
         } else if (marketRepo instanceof main.market.FolderRepository) {
             if (isStagingFolderTarget()) {
                 showToast("The market source IS your staging folder \u2014 it's already there. "
-                                + "Pick the server or a shared folder to publish somewhere.",
+                        + "Pick the server or a shared folder to publish somewhere.",
                         marketAnchor(), false);
                 return;
             }
@@ -4513,13 +4821,28 @@ public class DreamBotMenu extends JFrame {
             showToast("That local file has no bundle to upload", marketAnchor(), false);
             return;
         }
+        final String stagedId = l.id;
         new Thread(() -> {
             try {
-                marketRepo.publish(l);
+                marketRepo.publish(l);   // adopts the server's id onto l (v1.76)
+                // v1.76: re-file the staged copy under the id the server gave it. The copy is
+                // deliberately KEPT on disk - it's just hidden while the market shows the same
+                // id - so if the server is ever unreachable or lost, every user's own work
+                // reappears in their local folder immediately and offline.
+                if (localMarketRepo != null && l.id != null && !l.id.equals(stagedId)) {
+                    try {
+                        localMarketRepo.remove(stagedId);
+                        localMarketRepo.publish(l);
+                    } catch (Exception reFile) {
+                        Logger.log(Logger.LogType.WARN,
+                                "[Market] published, but couldn't re-file the local copy: " + reFile);
+                    }
+                }
                 SwingUtilities.invokeLater(() -> {
                     markLibraryPublished(l.name);   // v1.49: drives the Published filter/tag
                     reloadMarket();
-                    showToast("Uploaded \"" + l.name + "\" to the server", marketAnchor(), true);
+                    showToast("Published \"" + l.name + "\" \u2014 your local copy is kept, "
+                            + "hidden while it's live", marketAnchor(), true);
                 });
             } catch (Exception ex) {
                 // v1.60: 409 (version integrity) and 403 (anti-plagiarism) come back with a real
@@ -4560,26 +4883,26 @@ public class DreamBotMenu extends JFrame {
         if (l == null || !"local".equals(l.origin)) return;
         main.menu.components.CardBuilderDialog.Host host =
                 new main.menu.components.CardBuilderDialog.Host() {
-                    @Override public void saveListing(main.market.ScriptListing x) throws Exception {
-                        localMarketRepo.publish(x);   // same id = save-in-place in the staging folder
-                        reloadMarket();
-                    }
-                    @Override public void publishListing(main.market.ScriptListing x) {
-                        publishStagedListing(x);      // re-runs the gate (now card-ready) and dispatches
-                    }
-                    @Override public boolean canPublishNow() {
-                        if (marketRepo instanceof main.market.HttpRepository)
-                            return main.market.ServerAccount.isLoggedIn();
-                        return marketRepo instanceof main.market.FolderRepository
-                                && !isStagingFolderTarget();
-                    }
-                    @Override public String publishTargetName() {
-                        return marketRepo == null ? "\u2014" : marketRepo.describe();
-                    }
-                    @Override public String pickIconFile(JComponent anchor) {
-                        return pickListingIcon(anchor);
-                    }
-                };
+            @Override public void saveListing(main.market.ScriptListing x) throws Exception {
+                localMarketRepo.publish(x);   // same id = save-in-place in the staging folder
+                reloadMarket();
+            }
+            @Override public void publishListing(main.market.ScriptListing x) {
+                publishStagedListing(x);      // re-runs the gate (now card-ready) and dispatches
+            }
+            @Override public boolean canPublishNow() {
+                if (marketRepo instanceof main.market.HttpRepository)
+                    return main.market.ServerAccount.isLoggedIn();
+                return marketRepo instanceof main.market.FolderRepository
+                        && !isStagingFolderTarget();
+            }
+            @Override public String publishTargetName() {
+                return marketRepo == null ? "\u2014" : marketRepo.describe();
+            }
+            @Override public String pickIconFile(JComponent anchor) {
+                return pickListingIcon(anchor);
+            }
+        };
         new main.menu.components.CardBuilderDialog(
                 SwingUtilities.getWindowAncestor(this), l, host).setVisible(true);
     }
@@ -4589,121 +4912,7 @@ public class DreamBotMenu extends JFrame {
      * how much of your quota you've used, and per-script Rename + Delete. Backed by the server's
      * GET /me/scripts (owner-scoped) and PUT/DELETE /scripts/{id}.
      */
-    private void openMyUploads() {
-        if (!(marketRepo instanceof main.market.HttpRepository)) {
-            showToast("My uploads needs the server market (not a local folder)", marketAnchor(), false);
-            return;
-        }
-        if (!main.market.ServerAccount.isLoggedIn()) {
-            showToast("Log in to see your uploads", marketAnchor(), false);
-            return;
-        }
-        final main.market.HttpRepository repo = (main.market.HttpRepository) marketRepo;
-
-        JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(this),
-                "My uploads", java.awt.Dialog.ModalityType.MODELESS);
-        dlg.setSize(560, 420);
-        dlg.setLocationRelativeTo(this);
-        JPanel root = new JPanel(new BorderLayout(0, 8));
-        root.setBorder(new EmptyBorder(12, 12, 12, 12));
-        root.setBackground(BG_BASE);
-
-        JLabel quota = new JLabel("Loading\u2026");
-        quota.setForeground(Theme.ACCENT);
-        String[] cols = {"Name", "Ver", "Downloads", "Rating"};
-        javax.swing.table.DefaultTableModel model =
-                new javax.swing.table.DefaultTableModel(cols, 0) {
-                    @Override public boolean isCellEditable(int r, int c) { return false; }
-                };
-        JTable table = new JTable(model);
-        table.setRowHeight(26);
-        table.setBackground(new Color(0x1A, 0x1A, 0x1A));
-        table.setForeground(TEXT_MAIN);
-        final List<main.market.ScriptListing>[] rows = new List[]{new ArrayList<>()};
-
-        JButton btnRename = createButton("Rename");
-        JButton btnDelete = createButton("Delete", COLOR_BUTTON_RED, null);
-        JButton btnRefresh = createButton("Refresh");
-        btnRename.setEnabled(false);
-        btnDelete.setEnabled(false);
-        table.getSelectionModel().addListSelectionListener(e -> {
-            boolean sel = table.getSelectedRow() >= 0;
-            btnRename.setEnabled(sel);
-            btnDelete.setEnabled(sel);
-        });
-
-        Runnable load = () -> {
-            quota.setText("Loading\u2026");
-            new Thread(() -> {
-                try {
-                    main.market.HttpRepository.MyUploads mine = repo.myScripts();
-                    SwingUtilities.invokeLater(() -> {
-                        rows[0] = mine.scripts;
-                        model.setRowCount(0);
-                        for (main.market.ScriptListing l : mine.scripts)
-                            model.addRow(new Object[]{l.name, "v" + l.version,
-                                    l.downloads, l.ratingCount > 0
-                                    ? String.format("%.1f (%d)", l.avgRating, l.ratingCount) : "\u2014"});
-                        quota.setText(mine.usage != null && mine.usage.task != null
-                                ? "Tasks: " + mine.usage.task.used + " of " + mine.usage.task.cap
-                                + "   \u00b7   Scripts: " + mine.usage.script.used + " of "
-                                + mine.usage.script.cap + "   (" + mine.tier + " tier)"
-                                : "Uploads: " + mine.used + " of " + mine.cap
-                                + "  (" + mine.tier + " tier)");
-                    });
-                } catch (Exception ex) {
-                    SwingUtilities.invokeLater(() -> quota.setText("Couldn't load: " + ex.getMessage()));
-                }
-            }, "DreamMan-MyUploads").start();
-        };
-
-        btnRefresh.addActionListener(e -> load.run());
-        btnRename.addActionListener(e -> {
-            int r = table.getSelectedRow();
-            if (r < 0 || r >= rows[0].size()) return;
-            main.market.ScriptListing l = rows[0].get(r);
-            String name = JOptionPane.showInputDialog(dlg, "New name:", l.name);
-            if (name == null || name.trim().isEmpty()) return;
-            new Thread(() -> {
-                try { repo.rename(l.id, name.trim());
-                    SwingUtilities.invokeLater(() -> { load.run(); reloadMarket(); });
-                } catch (Exception ex) {
-                    SwingUtilities.invokeLater(() -> showToast("Rename failed: " + ex.getMessage(), root, false));
-                }
-            }, "DreamMan-Rename").start();
-        });
-        btnDelete.addActionListener(e -> {
-            int r = table.getSelectedRow();
-            if (r < 0 || r >= rows[0].size()) return;
-            main.market.ScriptListing l = rows[0].get(r);
-            if (JOptionPane.showConfirmDialog(dlg,
-                    "Delete \"" + l.name + "\" from the market permanently?",
-                    "Delete upload", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
-                    != JOptionPane.YES_OPTION) return;
-            new Thread(() -> {
-                try { repo.remove(l.id);
-                    SwingUtilities.invokeLater(() -> { load.run(); reloadMarket(); });
-                } catch (Exception ex) {
-                    SwingUtilities.invokeLater(() -> showToast("Delete failed: " + ex.getMessage(), root, false));
-                }
-            }, "DreamMan-DeleteUpload").start();
-        });
-
-        JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
-        btns.setOpaque(false);
-        btns.add(btnRefresh);
-        btns.add(btnRename);
-        btns.add(btnDelete);
-
-        root.add(quota, BorderLayout.NORTH);
-        root.add(Theme.thinScrollbars(new JScrollPane(table)), BorderLayout.CENTER);
-        root.add(btns, BorderLayout.SOUTH);
-        dlg.setContentPane(root);
-        load.run();
-        dlg.setVisible(true);
-    }
-
-    /** Pulls everything from the repository (off the EDT - a shared folder can be slow). */
+/** Pulls everything from the repository (off the EDT - a shared folder can be slow). */
     private void reloadMarket() {
         if (marketRepo == null) return;
         // A SERVER market is a network call, and that needs consent first.
@@ -4718,49 +4927,57 @@ public class DreamBotMenu extends JFrame {
         final main.market.ScriptRepository repo = marketRepo;
         setStatus("Loading market...");
         new Thread(() -> {
-            // ── v1.60: the tab is split visually (grid above, staging strip below) but stays ONE
-            // merged load. Published rows - the server's, or the shared folder's in folder mode -
-            // get origin "server"/"folder" and fill the grid; your staging gets origin "local"
-            // and fills the strip. A staged copy that's already published is shown once, as the
-            // published card (that's the one with stats), so uploading never duplicates a card:
-            //   \u00b7 same id            -> folder mode pointing at the default staging folder
-            //   \u00b7 same name + author -> your server upload of a staged script
+            // ── v1.71: the split is BUILT vs UNBUILT, not which folder a file sits in.
+            //
+            // It used to be folder-based, and that was incoherent: localMarketRepo and the
+            // folder-mode repo are built over the SAME directory, so in folder mode every staged
+            // row id-matched a "published" row, got deduped away, and the market-ready strip was
+            // permanently empty ("5 in the shared folder, 0 staged locally").
+            //
+            // The model now matches the actual workflow. One staging folder on disk, two views:
+            //   · card not built yet -> the LOCAL FOLDER grid, where you edit it
+            //   · card built         -> the MY MARKET-READY strip, on BOTH pages
+            // and on the server page the grid is the live market. A staged copy whose id is
+            // already on the server is hidden (not deleted), so it reappears intact if the server
+            // ever loses it - matched on ID, never name+author, so renaming a local copy cannot
+            // make it pop back as a duplicate.
             List<main.market.ScriptListing> published = new ArrayList<>();
-            List<main.market.ScriptListing> local = new ArrayList<>();
-            published = repo.list();
-            if (localMarketRepo != null) local = localMarketRepo.list();
+            List<main.market.ScriptListing> staged = new ArrayList<>();
             final boolean serverMode = repo instanceof main.market.HttpRepository;
+            // In folder mode the "published" repo IS the staging folder, so listing it again
+            // would double every card. A live market only exists server-side.
+            if (serverMode) published = repo.list();
+            if (localMarketRepo != null) staged = localMarketRepo.list();
             for (main.market.ScriptListing l : published)
-                if (l != null) l.origin = serverMode ? "server" : "folder";
-            String me = main.market.ServerAccount.session().username;
+                if (l != null) l.origin = "server";
+
+            java.util.Set<String> publishedIds = new java.util.HashSet<>();
+            for (main.market.ScriptListing p2 : published)
+                if (p2 != null && p2.id != null) publishedIds.add(p2.id);
+
             List<main.market.ScriptListing> merged = new ArrayList<>(published);
-            for (main.market.ScriptListing l : local) {
+            int builtCount = 0;
+            for (main.market.ScriptListing l : staged) {
                 if (l == null) continue;
                 l.origin = "local";
-                boolean shownAlready = false;
-                for (main.market.ScriptListing s : published) {
-                    if (s == null) continue;
-                    if (s.id != null && s.id.equals(l.id)) { shownAlready = true; break; }
-                    if (s.name != null && s.name.equalsIgnoreCase(l.name)
-                            && me != null && !me.isEmpty() && me.equalsIgnoreCase(s.author)) {
-                        shownAlready = true;
-                        break;
-                    }
-                }
-                if (!shownAlready) merged.add(l);
+                if (publishedIds.contains(l.id)) continue;   // live on the market: hide the copy
+                if (l.cardReady) builtCount++;
+                merged.add(l);
             }
             final List<main.market.ScriptListing> found = merged;
-            final int nPublished = published.size(), nLocal = found.size() - published.size();
+            final int nPublished = published.size();
+            final int nBuilt = builtCount;
+            final int nUnbuilt = found.size() - published.size() - builtCount;
             SwingUtilities.invokeLater(() -> {
                 marketAll.clear();
                 marketAll.addAll(found);
                 if (serverMode) {
                     lblMarketSource.setText(repo.describe() + "  \u00b7  " + nPublished
-                            + " published, " + nLocal + " market-ready"
+                            + " on the market, " + nBuilt + " market-ready"
                             + (nPublished == 0 ? "  \u00b7  (server empty or unreachable)" : ""));
                 } else {
-                    lblMarketSource.setText(repo.describe() + "  \u00b7  " + nPublished
-                            + " in the shared folder, " + nLocal + " staged locally");
+                    lblMarketSource.setText(repo.describe() + "  \u00b7  " + nUnbuilt
+                            + " in your local folder, " + nBuilt + " market-ready");
                 }
                 refreshMarketGrid();
                 refreshReadyStrip();
@@ -4773,8 +4990,6 @@ public class DreamBotMenu extends JFrame {
     /** v1.32b: hide buttons that can't do anything in the current view (your notes). */
     private void updateMarketButtons() {
         boolean serverMode = marketRepo instanceof main.market.HttpRepository;
-        // "My uploads" manager only means something against the server.
-        if (btnMyUploads != null) btnMyUploads.setVisible(serverMode);
     }
 
     private JTextArea privacyStatusArea;   // legacy (unused after the v1.32b checkbox redesign)
@@ -4863,28 +5078,28 @@ public class DreamBotMenu extends JFrame {
         privacyContent.add(consentToggle(main.privacy.Consent.MARKET_BROWSE,
                 "Browse & download scripts",
                 "Lets DreamMan load the market list and download others' scripts. Sends only your "
-                        + "anonymous install id and what you search for \u2014 never your account, character "
-                        + "or game data. Turning this off hides the online market (the local folder market "
-                        + "still works).", false));
+                + "anonymous install id and what you search for \u2014 never your account, character "
+                + "or game data. Turning this off hides the online market (the local folder market "
+                + "still works).", false));
 
         privacyContent.add(consentToggle(main.privacy.Consent.MARKET_PUBLISH,
                 "Publish my scripts",
                 "Lets you upload your own tasks/presets to the market under your account name. Only "
-                        + "what you explicitly choose to publish is sent. Off means you can browse but not "
-                        + "publish.", false));
+                + "what you explicitly choose to publish is sent. Off means you can browse but not "
+                + "publish.", false));
 
         privacyContent.add(consentToggle(main.privacy.Consent.CLOUD_SYNC,
                 "Cloud-sync my setup",
                 "Backs up your task profiles to the server so you can restore them on another PC. "
-                        + "The data is encrypted on THIS machine first \u2014 the server stores only "
-                        + "ciphertext it can't read. Off keeps everything on this PC only.", false));
+                + "The data is encrypted on THIS machine first \u2014 the server stores only "
+                + "ciphertext it can't read. Off keeps everything on this PC only.", false));
 
         privacyContent.add(consentToggle(main.privacy.Consent.LINK_CHARACTER_NAME,
                 "Send REAL character names  (not recommended)",
                 "\u26a0 Sends your actual OSRS character names to the server instead of local labels "
-                        + "(\"Main\", \"Alt 1\"). This creates a permanent server-side record linking your real "
-                        + "game accounts to botting. Leave this OFF unless you have a specific reason \u2014 "
-                        + "with it off, your names never leave this PC.", true));
+                + "(\"Main\", \"Alt 1\"). This creates a permanent server-side record linking your real "
+                + "game accounts to botting. Leave this OFF unless you have a specific reason \u2014 "
+                + "with it off, your names never leave this PC.", true));
 
         privacyContent.add(Box.createVerticalStrut(6));
         privacyContent.add(privacySectionLabel("What never leaves this PC (regardless of the above)"));
@@ -5167,10 +5382,10 @@ public class DreamBotMenu extends JFrame {
             Object[] opts = {"Overwrite mine", "Keep both (rename)", "Cancel"};
             int choice = JOptionPane.showOptionDialog(this,
                     "<html>You already have a task named <b>" + merged.getName() + "</b> (v"
-                            + String.format("%.1f", existing.getVersion()) + ").<br>"
-                            + "This download is <b>v" + String.format("%.1f", merged.getVersion())
-                            + "</b>.<br><br>Overwrite your copy, keep both (the download is renamed), or "
-                            + "cancel?</html>",
+                    + String.format("%.1f", existing.getVersion()) + ").<br>"
+                    + "This download is <b>v" + String.format("%.1f", merged.getVersion())
+                    + "</b>.<br><br>Overwrite your copy, keep both (the download is renamed), or "
+                    + "cancel?</html>",
                     "You already have \"" + merged.getName() + "\"",
                     JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE, null, opts, opts[0]);
             if (choice == 2 || choice == JOptionPane.CLOSED_OPTION) return;
@@ -5630,26 +5845,25 @@ public class DreamBotMenu extends JFrame {
     // ── Patch B.16: source switching via the folder/server icons ──
 
     /** Switch to the local-folder source. If forcePick (right-click) or no folder chosen, ask. */
-    private void useFolderSource(boolean forcePick) {
-        // Patch B.17: the default folder is created for you, next to the project files. The
-        // (painfully slow) file chooser only appears on an explicit right-click, or if the
-        // folder genuinely can't be created (e.g. a read-only install location).
-        if (!forcePick && (marketFolder == null || !marketFolder.isDirectory())) {
+    /**
+     * v1.70: switches the market to the local folder. There is no longer any way to choose a
+     * different one: the old right-click JFileChooser was punishingly slow (~10s per action) and
+     * let the market point outside the sanctioned scripts.path root, which SDN rules forbid.
+     * The folder is created for you and is always the same place.
+     */
+    private void useFolderSource() {
+        if (marketFolder == null || !marketFolder.isDirectory())
             marketFolder = defaultMarketFolder();
+        if (marketFolder == null || !marketFolder.isDirectory()) {
+            // A read-only install is the only way to land here; say so rather than silently
+            // falling back to a picker that would produce a non-compliant path.
+            showToast("Couldn't create the market folder under the script directory",
+                    btnFolderSource, false);
+            if (btnServerSource != null && marketRepo instanceof main.market.HttpRepository)
+                btnServerSource.setSelected(true);
+            return;
         }
-        if (forcePick || marketFolder == null || !marketFolder.isDirectory()) {
-            JFileChooser fc = new JFileChooser();
-            fc.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            fc.setDialogTitle("Pick the shared market folder");
-            if (marketFolder != null) fc.setSelectedFile(marketFolder);
-            if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
-                // user cancelled - keep whatever source we had, re-sync the toggle
-                if (btnServerSource != null && marketRepo instanceof main.market.HttpRepository)
-                    btnServerSource.setSelected(true);
-                return;
-            }
-            marketFolder = fc.getSelectedFile();
-        }
+        closeListingDetail();   // v1.70 (item 5): never leave a detail open across a source switch
         marketRepo = new main.market.FolderRepository(marketFolder);
         if (btnFolderSource != null) btnFolderSource.setSelected(true);
         reloadMarket();
@@ -5658,6 +5872,7 @@ public class DreamBotMenu extends JFrame {
 
     /** Switch to the server source (auto-linked; URL only changeable by admins via right-click). */
     private void useServerSource() {
+        closeListingDetail();   // v1.70 (item 5): close any open card on switch
         String url = marketServerUrl;
         if (url == null || url.isEmpty()) {
             // no server configured yet - if admin, prompt; else explain
@@ -5753,13 +5968,13 @@ public class DreamBotMenu extends JFrame {
         if (!(marketRepo instanceof main.market.HttpRepository)) return;
         int ok = JOptionPane.showConfirmDialog(this,
                 "<html><b>Unpublish \u201c" + escapeHtml(l.name) + "\u201d v" + l.version + "?</b>"
-                        + "<br><br>\u00b7 Other players stop seeing it immediately."
-                        + "<br>\u00b7 A copy is staged back into your MARKET-READY row, so nothing is lost."
-                        + "<br><br><b>Heads up about stats:</b> its downloads \u00b7 ratings \u00b7 "
-                        + "favorites stay stored on the server for this name + version. If you edit the "
-                        + "script and re-upload it <b>without bumping the version</b>, those old stats "
-                        + "re-attach to the changed script \u2014 bump the version when you change it."
-                        + "</html>",
+                + "<br><br>\u00b7 Other players stop seeing it immediately."
+                + "<br>\u00b7 A copy is staged back into your MARKET-READY row, so nothing is lost."
+                + "<br><br><b>Heads up about stats:</b> its downloads \u00b7 ratings \u00b7 "
+                + "favorites stay stored on the server for this name + version. If you edit the "
+                + "script and re-upload it <b>without bumping the version</b>, those old stats "
+                + "re-attach to the changed script \u2014 bump the version when you change it."
+                + "</html>",
                 "Unpublish \u2014 back to market-ready",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
         if (ok != JOptionPane.OK_OPTION) return;
@@ -5832,7 +6047,16 @@ public class DreamBotMenu extends JFrame {
      * fix is one click away.
      */
     private String pickListingIcon(JComponent anchor) {
-        JFileChooser fc = new JFileChooser();
+        // v1.72 PERF: `new JFileChooser()` with no start directory makes Windows enumerate the
+        // whole shell namespace - My Computer, mapped network drives, cloud folders - on the EDT,
+        // which is the multi-second freeze people hit here (and the same root cause as the old
+        // market-folder picker). Starting from a known local directory and switching off
+        // ShellFolder resolution keeps it off the network entirely.
+        JFileChooser fc = new JFileChooser(main.data.store.LocalStore.getExportsDir());
+        fc.putClientProperty("FileChooser.useShellFolder", Boolean.FALSE);
+        fc.setFileHidingEnabled(true);
+        fc.setMultiSelectionEnabled(false);
+        fc.setAcceptAllFileFilterUsed(false);
         fc.setDialogTitle("Pick a listing icon (128\u00d7128 recommended)");
         fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
                 "Images (png, jpg)", "png", "jpg", "jpeg"));
@@ -5903,13 +6127,13 @@ public class DreamBotMenu extends JFrame {
             body = m.group(1).replace("\\\"", "\"").replace("\\n", "\n");
         JOptionPane.showMessageDialog(this,
                 "<html><b>" + (conflict ? "Version conflict (409)" : "Publish blocked (403)")
-                        + "</b><br><br>" + escapeHtml(body) + "<br><br>"
-                        + (conflict
-                        ? "Bump the version number, or unpublish the existing copy first \u2014 two "
+                + "</b><br><br>" + escapeHtml(body) + "<br><br>"
+                + (conflict
+                    ? "Bump the version number, or unpublish the existing copy first \u2014 two "
                         + "<i>different</i> versions of the same name can coexist."
-                        : "The server matched this content to someone else's listing. Any real change "
+                    : "The server matched this content to someone else's listing. Any real change "
                         + "to the tasks publishes fine \u2014 renaming alone doesn't.")
-                        + "</html>",
+                + "</html>",
                 conflict ? "Already on the market at this version" : "Publish blocked",
                 JOptionPane.WARNING_MESSAGE);
     }
@@ -5997,7 +6221,7 @@ public class DreamBotMenu extends JFrame {
             }
             r.add(lbl, BorderLayout.CENTER);
             JButton up = iconButton(main.menu.components.UIIcons.publish(18,
-                            already ? TEXT_DIM : new Color(0x6F, 0xC2, 0x76)),
+                    already ? TEXT_DIM : new Color(0x6F, 0xC2, 0x76)),
                     already ? "Already published"
                             : "Stage \"" + name + "\" & build its card",
                     () -> { dlg.dispose(); stageForCardBuilder(name, tasks, anchor); });
@@ -6642,6 +6866,19 @@ public class DreamBotMenu extends JFrame {
         private int autoDelayMinMs = 600;
         private int autoDelayMaxMs = 1400;
 
+        /**
+         * v1.68: run this queue entry on the FIRST queue loop only, then skip it on every later
+         * lap - the task-level counterpart of an action's "only run on first loop (setup)".
+         *
+         * <p>Deliberately PER INSTANCE, not per library task: queue entries are deep copies
+         * (see the copy constructor), so the same logical task can sit in a script twice with
+         * only one of the two gated. That's why this lives on Task/TaskData and travels inside
+         * the task's own snapshot, the way action and task triggers do, rather than in any
+         * global side-table keyed by task id - a side-table keyed by id could not tell the two
+         * instances apart.
+         */
+        private boolean onStartOnly = false;
+
         public Task(String name, String description, List<Action> actions, String status) {
             this.name = name;
             this.description = (description == null || description.isEmpty()) ? "No description provided by Author." : description;
@@ -6664,6 +6901,7 @@ public class DreamBotMenu extends JFrame {
             this.description = o.description;
             this.status = o.status;
             this.repeat = o.repeat;
+            this.onStartOnly = o.onStartOnly;   // v1.68: travels with the instance
             this.autoDelay = o.autoDelay;
             this.autoDelayMinMs = o.autoDelayMinMs;
             this.autoDelayMaxMs = o.autoDelayMaxMs;
@@ -6797,6 +7035,16 @@ public class DreamBotMenu extends JFrame {
         /** Sets how many times this task runs before the queue advances (clamped to >= 1). */
         public void setRepeat(int repeat) {
             this.repeat = Math.max(1, repeat);
+        }
+
+        /** v1.68: @return true when this queue entry runs on the first queue loop only. */
+        public boolean isOnStartOnly() {
+            return onStartOnly;
+        }
+
+        /** v1.68: marks this queue entry as setup-only (first queue loop, then skipped). */
+        public void setOnStartOnly(boolean b) {
+            this.onStartOnly = b;
         }
 
         /** @return true when the engine should insert a humanised pause after each completed action (Patch B). */
@@ -7108,6 +7356,15 @@ public class DreamBotMenu extends JFrame {
                     refreshTaskLibrary();
             } catch (Throwable e) {
                 Logger.log(Logger.LogType.WARN, "[DefaultTasks] merge failed: " + e);
+            }
+            // v1.66: keep watching. Admins can push a default at any time, so a running client
+            // polls the server's defaults version every half hour and merges anything new - a
+            // user who leaves the client open for days still gets them without a restart.
+            try {
+                main.data.store.DefaultTasks.startSync(this,
+                        () -> new ArrayList<>(libraryAll), this::refreshTaskLibrary);
+            } catch (Throwable e) {
+                Logger.log(Logger.LogType.WARN, "[DefaultTasks] sync start failed: " + e);
             }
         }
 
@@ -7506,6 +7763,22 @@ public class DreamBotMenu extends JFrame {
         revertTimer.start();
     }
 
+    /**
+     * v1.68: points the on-start checkbox at the selected queue entry without firing its
+     * listener (which would otherwise write the old value straight back onto the new task).
+     */
+    private void syncTaskOnStartCheckbox() {
+        if (chkTaskOnStart == null) return;
+        Task sel = listTaskList.getSelectedValue();
+        taskOnStartSyncing = true;
+        try {
+            chkTaskOnStart.setEnabled(sel != null);
+            chkTaskOnStart.setSelected(sel != null && sel.isOnStartOnly());
+        } finally {
+            taskOnStartSyncing = false;
+        }
+    }
+
     /** Right-click menu for a queued task card: edit / duplicate / set repeat / remove. */
     private void showTaskContextMenu(int px, int py, int index) {
         if (index < 0 || index >= modelTaskList.size()) return;
@@ -7526,6 +7799,18 @@ public class DreamBotMenu extends JFrame {
         JMenuItem repeat = new JMenuItem("Set repeat ×N…");
         repeat.addActionListener(a -> promptRepeat(task));
 
+        // v1.68: same toggle as the checkbox, where the action-level one already lives.
+        JCheckBoxMenuItem miOnStart = new JCheckBoxMenuItem(
+                "Only run on first queue loop (setup)", task.isOnStartOnly());
+        miOnStart.setToolTipText("Applies to THIS entry only — the same task elsewhere "
+                + "in the queue keeps running every loop.");
+        miOnStart.addActionListener(a -> {
+            task.setOnStartOnly(miOnStart.isSelected());
+            saveAll(false);
+            syncTaskOnStartCheckbox();
+            listTaskList.repaint();
+        });
+
         JMenuItem runHere = new JMenuItem("Run from here");
         runHere.addActionListener(a -> {
             setCurrentExecutionIndex(index);
@@ -7543,6 +7828,7 @@ public class DreamBotMenu extends JFrame {
         menu.add(edit);
         menu.add(dup);
         menu.add(repeat);
+        menu.add(miOnStart);   // v1.68
         menu.add(runHere);
         menu.addSeparator();
         menu.add(remove);
@@ -8821,7 +9107,7 @@ public class DreamBotMenu extends JFrame {
 
         @Override
         public Component getListCellRendererComponent(JList<? extends Task> list, Task task,
-                                                      int index, boolean isSelected, boolean cellHasFocus) {
+                int index, boolean isSelected, boolean cellHasFocus) {
             selected = isSelected;
             running = (currentExecutionIndex != -1 && index == currentExecutionIndex);
             hovered = (index == hoveredTaskIndex);
@@ -8832,9 +9118,14 @@ public class DreamBotMenu extends JFrame {
             chip.letter = (first != null && !first.isEmpty()) ? first.substring(0, 1).toUpperCase() : "·";
 
             // Patch B.8: a timed task is visibly out of the rotation - clock + its interval
-            name.setText(task.isTimed()
+            // v1.69: and a setup-only entry is marked the same way, so you can see which
+            // entries drop out after the first lap without selecting each one in turn.
+            String base = task.isTimed()
                     ? "\u23F1 " + task.getName() + "   (every ~" + task.getTimerMinutes() + "m)"
-                    : task.getName());
+                    : task.getName();
+            name.setText(task.isOnStartOnly()
+                    ? "\u2191 " + base + "   (first loop only)"
+                    : base);
             name.setForeground(running ? Theme.AMBER : Theme.TEXT);
 
             // action-chain preview, e.g. "Walk → Interact → Wait"
@@ -8857,7 +9148,10 @@ public class DreamBotMenu extends JFrame {
             repMinus.setVisible(!task.isTimed());            // v1.31: steppers only for looped tasks
             repPlus.setVisible(!task.isTimed());
 
-            setToolTipText(task.getDescription());
+            setToolTipText(task.isOnStartOnly()
+                    ? "<html>Runs on the first queue loop only, then skipped.<br>"
+                      + escapeHtml(String.valueOf(task.getDescription())) + "</html>"
+                    : task.getDescription());
             return this;
         }
 
@@ -9230,7 +9524,7 @@ public class DreamBotMenu extends JFrame {
             if (currentExecutionIndex != -1 && !isMenuPaused()) {
                 int go = JOptionPane.showConfirmDialog(this,
                         "A script is running. Loading a preset will stop it and replace the "
-                                + "whole Task List.\nStop and load anyway?",
+                        + "whole Task List.\nStop and load anyway?",
                         "Script is running", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
                 if (go != JOptionPane.YES_OPTION) return;
                 isMenuPaused(true);            // halt the queue cleanly (same as the account-switch

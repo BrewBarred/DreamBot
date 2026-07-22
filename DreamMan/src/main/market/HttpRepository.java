@@ -91,7 +91,22 @@ public class HttpRepository implements ScriptRepository {
     public void publish(ScriptListing listing) throws Exception {
         requireConsent(main.privacy.Consent.MARKET_PUBLISH);
         if (listing == null || listing.bundle == null) throw new IOException("Nothing to publish.");
-        request("POST", "/scripts", GSON.toJson(listing));
+        // v1.76: the server assigns the listing's real id (and, since 1.6.0, its lineage), so
+        // adopt them onto the object we were handed. Without this the caller's staged copy keeps
+        // a client-side id that will never match anything on the market, which is why a published
+        // script used to sit in the market-ready strip forever.
+        String body = request("POST", "/scripts", GSON.toJson(listing));
+        try {
+            ScriptListing back = GSON.fromJson(body, ScriptListing.class);
+            if (back != null) {
+                if (back.id != null && !back.id.isBlank()) listing.id = back.id;
+                if (back.lineageId != null && !back.lineageId.isBlank())
+                    listing.lineageId = back.lineageId;
+                if (back.publishedAt > 0) listing.publishedAt = back.publishedAt;
+            }
+        } catch (Exception ignored) {
+            // an older server that answers with something unparsable still published fine
+        }
     }
 
     @Override

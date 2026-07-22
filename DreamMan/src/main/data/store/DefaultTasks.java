@@ -158,6 +158,7 @@ public final class DefaultTasks {
                 if (t != null && t.getId() != null) have.add(t.getId());
 
         List<TaskData> all = new ArrayList<>(shipped());
+        all.addAll(server());     // v1.66: the admin-curated server set
         all.addAll(local);
         int added = 0;
         Set<String> seen = new HashSet<>();
@@ -165,12 +166,112 @@ public final class DefaultTasks {
             if (d == null || d.id == null || have.contains(d.id) || !seen.add(d.id)) continue;
             DreamBotMenu.Task t = ProfileCodec.fromData(d);
             if (t == null) continue;
-            t.setOrigin("default");
+            // v1.66: ADMIN_ORIGIN survives from the server payload so the library can mark these
+            // differently from the hardcoded set; anything else is a plain default.
+            t.setOrigin(ADMIN_ORIGIN.equals(d.origin) ? ADMIN_ORIGIN : "default");
             menu.libraryAdd(t);
             added++;
         }
         if (added > 0)
             Logger.log(Logger.LogType.INFO, "[DefaultTasks] seeded " + added + " default task(s).");
         return added;
+    }
+
+    // ── v1.66: the server-side defaults library ──────────────────────────────────────────────
+    //
+    // Defaults used to be a JSON file an admin copied into the build by hand, which meant a new
+    // default only reached users on the next release. They now live on the server: admins push a
+    // task from the management tab, and every client picks it up on its next poll (or restart).
+
+    /** Origin marker for a task an admin pushed, as opposed to one baked into the release. */
+    public static final String ADMIN_ORIGIN = "default-admin";
+
+    /** Last defaults version we successfully merged, so a poll that finds nothing new is free. */
+    private static volatile int seenVersion = -1;
+    private static volatile List<TaskData> serverCache;
+
+    /** How often a running client re-checks for newly published defaults. */
+    private static final long POLL_MINUTES = 30;
+
+    /**
+     * The admin-curated defaults from {@code GET /defaults}, cached under the sanctioned
+     * scripts.path root so an offline start still seeds what the user had last time.
+     */
+    private static synchronized List<TaskData> server() {
+        if (serverCache != null) return serverCache;
+        File cache = new File(LocalStore.getRoot(), "cache/server-defaults.json");
+        try {
+            String json = new main.market.ServerAccount(
+                    main.market.ServerAccount.session().baseUrl).fetchDefaultsJson();
+            if (json != null && !json.isEmpty()) {
+                DefaultsPayload p = GSON.fromJson(json, DefaultsPayload.class);
+                if (p != null && p.tasks != null) {
+                    seenVersion = p.version;
+                    serverCache = p.tasks;
+                    try {
+                        cache.getParentFile().mkdirs();
+                        Files.write(cache.toPath(), json.getBytes(StandardCharsets.UTF_8));
+                    } catch (Throwable ignored) {}
+                    return serverCache;
+                }
+            }
+        } catch (Throwable ignored) { /* offline - fall through to the cache */ }
+        try {
+            if (cache.isFile()) {
+                DefaultsPayload p = GSON.fromJson(new String(Files.readAllBytes(cache.toPath()),
+                        StandardCharsets.UTF_8), DefaultsPayload.class);
+                if (p != null && p.tasks != null) {
+                    serverCache = p.tasks;
+                    return serverCache;
+                }
+            }
+        } catch (Throwable ignored) {}
+        serverCache = new ArrayList<>();
+        return serverCache;
+    }
+
+    /** Wire shape of {@code GET /defaults}. */
+    private static final class DefaultsPayload {
+        int version;
+        List<TaskData> tasks;
+    }
+
+    /**
+     * Starts the background poll: every {@value #POLL_MINUTES} minutes, ask the server for the
+     * defaults version and merge only when it has moved. A daemon thread, so it never holds the
+     * client open; every failure is silent by design (a defaults check is not worth a toast).
+     */
+    public static void startSync(DreamBotMenu menu, java.util.function.Supplier<
+            List<DreamBotMenu.Task>> currentLibrary, Runnable onAdded) {
+        if (menu == null || currentLibrary == null) return;
+        Thread t = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(POLL_MINUTES * 60_000L);
+                    int v = new main.market.ServerAccount(
+                            main.market.ServerAccount.session().baseUrl).fetchDefaultsVersion();
+                    if (v < 0 || v == seenVersion) continue;
+                    synchronized (DefaultTasks.class) {
+                        serverCache = null;      // force a refetch on the next merge
+                        defaultIds = null;
+                        local = null;
+                    }
+                    final int[] added = {0};
+                    javax.swing.SwingUtilities.invokeAndWait(() ->
+                            added[0] = mergeInto(menu, currentLibrary.get()));
+                    if (added[0] > 0) {
+                        Logger.log(Logger.LogType.INFO, "[DefaultTasks] " + added[0]
+                                + " new default task(s) arrived from the server.");
+                        if (onAdded != null) javax.swing.SwingUtilities.invokeLater(onAdded);
+                    }
+                } catch (InterruptedException ie) {
+                    return;
+                } catch (Throwable ignored) {
+                    // offline, server down, or the menu went away - try again next cycle
+                }
+            }
+        }, "DreamMan-defaults-sync");
+        t.setDaemon(true);
+        t.start();
     }
 }

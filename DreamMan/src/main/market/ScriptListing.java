@@ -24,6 +24,14 @@ public class ScriptListing {
     public String author = "";
     public String description = "";
     public double version = 1.0;
+
+    /**
+     * v1.74: the stable lineage every version of one script shares, assigned by the server at
+     * first publish (1.6.0). The market groups versions on THIS, not on name+author - grouping
+     * on the name would merge two independent scripts the moment one is renamed to match the
+     * other. Null for listings published before 1.6.0, which fall back to name+author.
+     */
+    public String lineageId;
     public long publishedAt = System.currentTimeMillis();
 
     /** Free-text tags, e.g. "combat", "ironman", "f2p". */
