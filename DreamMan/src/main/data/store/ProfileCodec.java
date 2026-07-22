@@ -41,7 +41,15 @@ public final class ProfileCodec {
         if (params != null && action.getChancePercent() < 100) {
             params = new java.util.LinkedHashMap<>(params);
             params.put(Action.CHANCE_KEY, String.valueOf(action.getChancePercent()));
-        if (action.isOnStartOnly())   // v1.31: only written when set - old saves stay byte-identical
+        }
+        // v1.68 BUGFIX: this block used to sit INSIDE the chance-to-run branch above, so the
+        // on-start flag was only ever written for actions with a chance below 100%. Every normal
+        // (100%) action silently lost its "only run on first loop" setting on every single save -
+        // which is why setup steps kept re-running mid-session and looping scripts.
+        // The defensive copy matters: some actions return an immutable map from serialize()
+        // (Walk uses Map.of), so mutating params without copying first throws.
+        if (params != null && action.isOnStartOnly()) {
+            params = new java.util.LinkedHashMap<>(params);
             params.put(Action.ONSTART_KEY, "true");
         }
         d.setParams(params);
@@ -122,6 +130,10 @@ public final class ProfileCodec {
         d.description = task.getDescription();
         d.status = task.getStatus();
         d.repeat = task.getRepeat();
+        d.onStartOnly = task.isOnStartOnly();   // v1.68
+        // v1.80: only written when there are any, so untouched tasks save byte-identically.
+        d.taskTriggers = task.getTaskTriggers().isEmpty()
+                ? null : main.watchers.TriggerCodec.toJson(task.getTaskTriggers());
         d.autoDelay = task.isAutoDelay();
         d.autoDelayMinMs = task.getAutoDelayMinMs();
         d.autoDelayMaxMs = task.getAutoDelayMaxMs();
@@ -148,6 +160,11 @@ public final class ProfileCodec {
         t.setTimerJitterPct(d.timerJitterPct);
         t.setTimerWhen(d.timerWhen);
         t.setRepeat(d.repeat);
+        t.setOnStartOnly(d.onStartOnly);   // v1.68
+        if (d.taskTriggers != null && !d.taskTriggers.isBlank()) {   // v1.80
+            t.getTaskTriggers().clear();
+            t.getTaskTriggers().addAll(main.watchers.TriggerCodec.fromJson(d.taskTriggers));
+        }
         t.setAutoDelay(d.autoDelay, d.autoDelayMinMs, d.autoDelayMaxMs);
         return t;
     }

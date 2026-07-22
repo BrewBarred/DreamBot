@@ -297,6 +297,20 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
                 return Rand.nextInt(263, 983);
             }
 
+            // v1.68: a task marked "only on start" runs on the FIRST queue loop and is skipped on
+            // every lap after it - the task-level counterpart of an action's setup flag. Checked
+            // BEFORE the taskStarting announce so a skipped task doesn't fire its BEFORE_TASK
+            // triggers. Per instance: the flag is on this queue entry, so an identical task
+            // elsewhere in the queue keeps running normally.
+            if (currentTask != null && currentTask.isOnStartOnly()
+                    && menu.getQueueLoopCurrentValue() > 1) {
+                actionCursor = 0;
+                taskRunsDone = 0;
+                lastServedIndex = index;
+                menu.advanceQueue();
+                return Rand.nextInt(120, 300);
+            }
+
             // v1.33: announce a task is about to start so BEFORE_TASK triggers can fire before its
             // first action. Only on a genuine switch, and only at the very first action.
             if (switchedTask && currentTask != null && actionCursor == 0)
@@ -329,8 +343,16 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
             // ── Patch B.4: watchers run BETWEEN actions, while the player is safe ──
             // Consult globals + this action's own triggers. If a watcher is mid-response, or an
             // "instead" watcher just fired, we do NOT run the queue action this loop.
+            // v1.80: the active set is now four tiers deep. Globals and script triggers come
+            // from the menu; this task's own triggers are added for exactly as long as it runs;
+            // the action's triggers stay the most specific tier and are evaluated first.
+            java.util.List<main.watchers.Trigger> wide = menu.getRuntimeTriggers();
+            if (currentTask != null && !currentTask.getTaskTriggers().isEmpty()) {
+                wide = new java.util.ArrayList<>(wide);
+                wide.addAll(currentTask.getTaskTriggers());
+            }
             main.watchers.WatcherEngine.Outcome wo = watchers.service(
-                    menu.getRuntimeTriggers(),                       // v1.64: globals + script triggers
+                    wide,                                            // globals + script + task
                     action != null ? action.getTriggers() : null);
             if (wo == main.watchers.WatcherEngine.Outcome.RUNNING)
                 return Rand.nextInt(180, 420);   // let the response chain breathe

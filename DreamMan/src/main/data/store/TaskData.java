@@ -38,6 +38,20 @@ public class TaskData {
     public String status;
     /** How many times this task runs before the queue advances (>=1). */
     public int repeat = 1;
+
+    /**
+     * v1.68: this queue entry runs on the first queue loop only, then is skipped.
+     * Lives on the TASK SNAPSHOT rather than in any global side-table, so it travels with
+     * exports and market bundles the way action/task triggers do, and so two instances of the
+     * same logical task can differ (a side-table keyed by task id could not tell them apart).
+     */
+    public boolean onStartOnly = false;
+
+    /**
+     * v1.80: TASK triggers, stored as TriggerCodec JSON so the shape can evolve without breaking
+     * old saves. Travels in the task snapshot, so exports and market bundles carry it.
+     */
+    public String taskTriggers;
     /** Patch B: automatic humanised pause between actions. */
     /** Patch B.8: timed-task config. */
     public boolean timed = false;

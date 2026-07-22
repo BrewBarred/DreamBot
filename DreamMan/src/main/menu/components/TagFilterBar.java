@@ -83,8 +83,12 @@ public final class TagFilterBar extends JPanel {
 
         setOpaque(false);
         setLayout(new BorderLayout(0, 4));
-        setBorder(new EmptyBorder(4, 2, 0, 2));
+        // v1.78: more air above - the pills sat hard against the search field and the
+        // whole header read as squashed.
+        setBorder(new EmptyBorder(10, 2, 2, 2));
 
+        header.setIcon(UIIcons.tag(12, Theme.TEXT_DIM));   // v1.78: a real tag glyph
+        header.setIconTextGap(5);
         header.setFont(new Font("Segoe UI", Font.PLAIN, 10));
         header.setForeground(Theme.TEXT_DIM);
         caret.setFont(new Font("Segoe UI", Font.PLAIN, 10));
@@ -125,10 +129,11 @@ public final class TagFilterBar extends JPanel {
 
     private void syncHeader() {
         int n = selected.size();
-        header.setText("FILTER BY TAG" + (tagCount == 0 ? "" : "  \u00b7  " + tagCount + " available")
+        header.setText("FILTER BY TAG (all selected must match)" + (tagCount == 0 ? "" : "  \u00b7  " + tagCount + " available")
                 + (n == 0 ? "" : "  \u00b7  " + n + " active"));
         header.setForeground(n > 0 ? Theme.ACCENT : Theme.TEXT_DIM);
-        caret.setText(collapsed ? "show \u25b8" : "hide \u25be");
+        header.setIcon(UIIcons.tag(12, n > 0 ? Theme.ACCENT : Theme.TEXT_DIM));
+        caret.setText(collapsed ? "show tags \u25b8" : "hide tags \u25be");
     }
 
     /** Rebuilds from the tags actually present on the loaded listings. */

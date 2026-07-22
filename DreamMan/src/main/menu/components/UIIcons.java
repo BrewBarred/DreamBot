@@ -122,16 +122,32 @@ public final class UIIcons {
     }
 
     /** ↕ sort (up/down arrows). */
+    /**
+     * v1.79: sort order - two bars of unequal length with an arrow beside them, the standard
+     * "ordered list" reading. The old version was a bare set of lines that said "menu" more
+     * than "sort", which is why it never looked like it belonged next to "newest first".
+     */
     public static Icon sort(int s, Color c) {
         return new Vec(s, c) {
-            void paintVec(Graphics2D g) {
-                int l = (int) (s * 0.36), r = (int) (s * 0.64);
-                g.drawLine(l, (int) (s * 0.2), l, (int) (s * 0.8));
-                g.drawLine(l - s / 10, (int) (s * 0.34), l, (int) (s * 0.2));
-                g.drawLine(l + s / 10, (int) (s * 0.34), l, (int) (s * 0.2));
-                g.drawLine(r, (int) (s * 0.2), r, (int) (s * 0.8));
-                g.drawLine(r - s / 10, (int) (s * 0.66), r, (int) (s * 0.8));
-                g.drawLine(r + s / 10, (int) (s * 0.66), r, (int) (s * 0.8));
+            void paintVec(Graphics2D g2) {
+                g2.setStroke(new BasicStroke(Math.max(1.5f, s / 11f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                // descending bars: long -> short, so the icon reads as an ordering
+                float x = s * 0.16f;
+                g2.drawLine(Math.round(x), Math.round(s * 0.28f),
+                            Math.round(s * 0.72f), Math.round(s * 0.28f));
+                g2.drawLine(Math.round(x), Math.round(s * 0.50f),
+                            Math.round(s * 0.56f), Math.round(s * 0.50f));
+                g2.drawLine(Math.round(x), Math.round(s * 0.72f),
+                            Math.round(s * 0.40f), Math.round(s * 0.72f));
+                // the direction arrow
+                float ax = s * 0.86f;
+                g2.drawLine(Math.round(ax), Math.round(s * 0.22f),
+                            Math.round(ax), Math.round(s * 0.78f));
+                g2.drawLine(Math.round(ax - s * 0.11f), Math.round(s * 0.62f),
+                            Math.round(ax), Math.round(s * 0.78f));
+                g2.drawLine(Math.round(ax + s * 0.11f), Math.round(s * 0.62f),
+                            Math.round(ax), Math.round(s * 0.78f));
             }
         };
     }
@@ -459,6 +475,30 @@ public final class UIIcons {
                 g2.fillOval((int) (s * 0.18) - r / 2, y, r, r);
                 g2.fillOval(s / 2 - r / 2, y, r, r);
                 g2.fillOval((int) (s * 0.82) - r / 2, y, r, r);
+            }
+        };
+    }
+
+    /**
+     * v1.78: a luggage-tag - angled body with a punched hole. The tag row previously used a
+     * glyph the shipped fonts didn't carry, which rendered as an empty rectangle.
+     */
+    public static Icon tag(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                g2.setStroke(new BasicStroke(Math.max(1.4f, s / 10f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                java.awt.geom.Path2D p = new java.awt.geom.Path2D.Float();
+                float a = s * 0.10f, b = s * 0.52f, m = s * 0.90f;
+                p.moveTo(a, b);          // left point
+                p.lineTo(b, a);          // up to the top edge
+                p.lineTo(m, a);
+                p.lineTo(m, s * 0.62f);
+                p.lineTo(s * 0.52f, m);
+                p.closePath();
+                g2.draw(p);
+                float r = Math.max(2f, s * 0.11f);
+                g2.draw(new java.awt.geom.Ellipse2D.Float(s * 0.60f, s * 0.22f, r, r));
             }
         };
     }

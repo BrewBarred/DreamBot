@@ -215,6 +215,8 @@ public class DreamBotMenu extends JFrame {
     private final List<main.market.ScriptListing> marketAll = new ArrayList<>();
     private JTextField marketSearchField;
     private JLabel lblMarketSource;
+    /** v1.79: hide-my-own, surfaced under the grid instead of buried in the filter menu. */
+    private JCheckBox chkHideOwn;
     // v1.60: the TOP GRID - everyone's published scripts as real card components (no more JList
     // renderer + hit-testing maths; each star/heart/button is a live component of its own).
     private JPanel marketGridPanel;
@@ -230,7 +232,7 @@ public class DreamBotMenu extends JFrame {
      * uploads" dialog - browsing the market is for finding other people's work, and your own
      * scripts are already in your library and market-ready strip.
      */
-    private boolean fltHideOwn = true;
+    private boolean fltHideOwn = false;   // v1.79: opt-IN, see the checkbox under the grid
     /** Roadmap default: only the highest version of each name+author shows. Coexistence of two
      *  versions stays possible - untick the filter to see every version side by side. */
     private boolean fltHideOlder = true;
@@ -638,6 +640,25 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
         mainTabs.addTab("Logs", loadTabIcon("logs_tab"), createLogsTab());                  // v1.31
+        // v1.77 BUGFIX: apply the RESTORED session to the UI at startup.
+        //
+        // The session was being read back from session.json correctly all along - nothing ever
+        // applied it. onAccountChanged() was reachable from exactly two places: a consent change,
+        // and the Log out button's own listener. So a launch with a perfectly valid token left
+        // every account-dependent surface in its logged-out default:
+        //   · the account switcher never named you        -> "it never remembers who's logged in"
+        //   · applyTierLimits/refreshTierStatusLabel never ran -> VIP + rank (owner/admin/vip/free)
+        //                                                        showed as guest/free
+        //   · refreshAccountLogoutVisibility never ran     -> Log out sat visible while logged
+        //                                                     out, and only corrected itself once
+        //                                                     you pressed it (its listener being
+        //                                                     the sole caller)
+        // Guarded, because a failure here must never stop the menu from opening.
+        try {
+            onAccountChanged();
+        } catch (Throwable t) {
+            Logger.log(Logger.LogType.WARN, "[Account] startup sync failed: " + t);
+        }
         syncDevConsoleTab();   // v1.32b: owner-only Dev Console tab, if already signed in as owner
         checkSubmissionOutcomes();   // v1.67: report any moderation outcomes from last session
         // Patch B.3 / v1.32: the Developers Console is no longer a top-level tab - it made the
@@ -2287,6 +2308,39 @@ public class DreamBotMenu extends JFrame {
         southButtons.add(btnTaskListRemove);
         southButtons.add(btnTaskListTimer);
         southButtons.add(chkTaskOnStart);   // v1.68
+        // v1.79: publishing a preset moved here from the market. The queue in front of you IS
+        // the thing being published, triggers and on-start flags included - they ride inside each
+        // task's snapshot, so nothing extra has to be gathered.
+        JButton btnPublishPreset = createButton("Publish preset\u2026", new Color(25, 60, 75), null);
+        btnPublishPreset.setToolTipText("<html>Stage the <b>current queue</b> as one market "
+                + "script and open its card builder.<br>Each task's own triggers and "
+                + "\"first loop only\" flags travel with it.</html>");
+        btnPublishPreset.addActionListener(e -> {
+            if (modelTaskList.isEmpty()) {
+                showToast("Build a queue first \u2014 there's nothing to publish", btnPublishPreset, false);
+                return;
+            }
+            List<Task> q = new ArrayList<>();
+            for (int i = 0; i < modelTaskList.size(); i++) q.add(modelTaskList.get(i));
+            // Name it after the selected preset when there is one, so the market card matches
+            // what the user calls it; otherwise it's just the queue they've assembled.
+            // Name it after the active preset when there is one, so the market card matches what
+            // the user calls it; otherwise it's just the queue they've assembled.
+            Preset sel = (selectedPresetIndex >= 0 && selectedPresetIndex < modelPresets.size())
+                    ? modelPresets.get(selectedPresetIndex) : null;
+            String name = (sel != null && sel.getName() != null && !sel.getName().isBlank())
+                    ? sel.getName() : "Current queue";
+            stageForCardBuilder(name, q, btnPublishPreset);
+        });
+        // v1.80: per-instance task triggers, next to the entry they bind to.
+        JButton btnEntryTriggers = createButton("Triggers\u2026", new Color(60, 40, 75), null);
+        btnEntryTriggers.setToolTipText("<html>Triggers that run while <b>this queue entry</b> "
+                + "executes.<br>Starts from the library default; your global checks can be "
+                + "opted in per entry.</html>");
+        btnEntryTriggers.addActionListener(e ->
+                openInstanceTaskTriggers(listTaskList.getSelectedValue(), btnEntryTriggers));
+        southButtons.add(btnEntryTriggers);
+        southButtons.add(btnPublishPreset);
         southButtons.add(btnExportScript);
         southButtons.add(btnInsertToggle);
         southButtons.add(btnTaskListView);
@@ -2557,6 +2611,14 @@ public class DreamBotMenu extends JFrame {
                 duplicateLibraryTask(listTaskLibrary.getSelectedValue(), btnTaskLibraryDuplicate));
 
         btnSection.add(btnTaskLibraryDuplicate);
+        // v1.80: the task's DEFAULT triggers - new copies inherit these, and existing copies
+        // are updated with the user's consent (see propagateTaskTriggers).
+        JButton btnLibTriggers = createButton("Triggers\u2026", new Color(60, 40, 75), null);
+        btnLibTriggers.setToolTipText("<html>Triggers that run whenever this task executes."
+                + "<br>This is the <b>default</b> \u2014 queue entries inherit it.</html>");
+        btnLibTriggers.addActionListener(e ->
+                openLibraryTaskTriggers(listTaskLibrary.getSelectedValue(), btnLibTriggers));
+        btnSection.add(btnLibTriggers);
         btnSection.add(btnTaskLibraryDelete);
         btnSection.add(btnTaskLibraryEdit);
         btnSection.add(btnTaskLibraryExport);
@@ -3925,7 +3987,8 @@ public class DreamBotMenu extends JFrame {
         headStack.add(tagBar, BorderLayout.CENTER);
 
         head.add(headStack, BorderLayout.NORTH);
-        head.add(lblMarketSource, BorderLayout.SOUTH);
+        // v1.79: lblMarketSource used to sit here, above the grid - connection plumbing was
+        // the first thing anyone saw of the market. It now sits under the cards.
 
         // ── v1.60 TOP: everyone's published scripts as a wrapping CARD GRID. Real components,
         // not a renderer: every star, heart and button is live, and comments expand inside the
@@ -3964,15 +4027,29 @@ public class DreamBotMenu extends JFrame {
         stripLeft.setOpaque(false);
         stripLeft.add(readyCountLabel);
         stripLeft.add(readySortLabel);
+        stripLeft.add(lblMarketSource);   // v1.79: under the grid, not above it
 
-        JButton btnPublish = createButton("Publish\u2026", new Color(25, 60, 75), null);
-        btnPublish.setToolTipText("Pick a preset, the current queue, or the selected library "
-                + "task \u2014 it stages into the row below and opens the card builder "
-                + "(a finished card is required to publish)");
-        btnPublish.addActionListener(e -> publishOneItem(btnPublish));
+        // v1.79: the market's "Publish..." button is gone. It opened a picker that duplicated
+        // what the cards themselves now do, and publishing a PRESET belongs next to the queue you
+        // built - so it moved to the Task List. Every market-ready card publishes itself.
+        //
+        // This row sits directly under the card grid, which is where the two things people
+        // actually want after looking at the market go: what they're connected to, and whether
+        // their own work is being hidden from them.
+        chkHideOwn = new JCheckBox("Hide my own scripts", fltHideOwn);
+        chkHideOwn.setOpaque(false);
+        chkHideOwn.setForeground(TEXT_DIM);
+        chkHideOwn.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        chkHideOwn.setToolTipText("<html>Off by default, so a script you just published is "
+                + "visibly <b>on the market</b> rather than seeming to vanish.<br>"
+                + "Turn it on once you'd rather browse other people's work.</html>");
+        chkHideOwn.addActionListener(e -> {
+            fltHideOwn = chkHideOwn.isSelected();
+            filtersChanged();
+        });
         JPanel stripRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         stripRight.setOpaque(false);
-        stripRight.add(btnPublish);
+        stripRight.add(chkHideOwn);
 
         JPanel stripHead = new JPanel(new BorderLayout(8, 0));
         stripHead.setOpaque(false);
@@ -4044,12 +4121,6 @@ public class DreamBotMenu extends JFrame {
         JCheckBoxMenuItem free = new JCheckBoxMenuItem("Hide free scripts", fltHideFree);
         free.addActionListener(a -> { fltHideFree = free.isSelected(); filtersChanged(); });
         m.add(free);
-        JCheckBoxMenuItem own = new JCheckBoxMenuItem("Hide my own scripts", fltHideOwn);
-        own.setToolTipText("On by default \u2014 your own uploads are already in your library "
-                + "and market-ready strip");
-        own.addActionListener(a -> { fltHideOwn = own.isSelected(); filtersChanged(); });
-        m.add(own);
-
         JCheckBoxMenuItem loved = new JCheckBoxMenuItem("Loved only \u2665", fltLovedOnly);
         loved.setToolTipText("Only the scripts you've hearted");
         loved.addActionListener(a -> { fltLovedOnly = loved.isSelected(); filtersChanged(); });
@@ -4102,7 +4173,7 @@ public class DreamBotMenu extends JFrame {
     /** v1.60: re-applies filters and re-tints the funnel gold while any non-default one is on. */
     private void filtersChanged() {
         boolean active = fltHideVip || fltHideFree || fltLovedOnly
-                || !fltTags.isEmpty() || !fltHideOlder || !fltHideOwn;   // v1.70: default is ON
+                || !fltTags.isEmpty() || !fltHideOlder || fltHideOwn;
         btnMarketFilter.setIcon(main.menu.components.UIIcons.filter(20,
                 active ? Theme.ACCENT : MARKET_ICON_GOLD));
         btnMarketFilter.setToolTipText(filterTooltip());
@@ -4165,10 +4236,18 @@ public class DreamBotMenu extends JFrame {
             if (fltLovedOnly && !l.myFavorite) continue;
             if (fltHideOwn && isOwnListing(l)) continue;   // v1.70
             if (!fltTags.isEmpty()) {
-                boolean hit = false;
-                if (l.tags != null)
-                    for (String t : l.tags) if (fltTags.contains(t)) { hit = true; break; }
-                if (!hit) continue;
+                // v1.78: several tags now mean AND, not OR. Picking #mining and #f2p asks for
+                // things that are both, which is what narrowing a list is for - OR made every
+                // extra tag return MORE results, so the filter got less useful the more you used.
+                boolean all = true;
+                for (String want : fltTags) {
+                    boolean has = false;
+                    if (l.tags != null)
+                        for (String t : l.tags)
+                            if (t != null && t.equalsIgnoreCase(want)) { has = true; break; }
+                    if (!has) { all = false; break; }
+                }
+                if (!all) continue;
             }
             if (!q.isEmpty()) {
                 // v1.76 (item 14): hiding the tag bar also stops tags being searched. With a
@@ -4441,6 +4520,186 @@ public class DreamBotMenu extends JFrame {
             if (o != null && !"local".equals(o.origin) && lineageKey(o).equals(k)) out.add(o);
         out.sort((a, b) -> Double.compare(b.version, a.version));
         return out;
+    }
+
+    // ── v1.80: TASK triggers, editable in two places with deliberately different meanings ──
+
+    /**
+     * LIBRARY edit: authors the task's DEFAULT triggers. New copies inherit them, and the user
+     * chooses how existing copies in the queue are treated - because silently overwriting an
+     * instance somebody customised in the Task List would destroy work with no warning.
+     */
+    private void openLibraryTaskTriggers(Task libTask, JComponent anchor) {
+        if (libTask == null) { showToast("Select a library task first", anchor, false); return; }
+        java.util.List<main.watchers.Trigger> before = new ArrayList<>();
+        for (main.watchers.Trigger t : libTask.getTaskTriggers())
+            if (t != null) before.add(new main.watchers.Trigger(t));
+
+        main.menu.components.TriggerEditor editor = new main.menu.components.TriggerEditor(
+                libTask.getTaskTriggers(), false, this::pickResponseAction);
+        editor.setPreferredSize(new Dimension(780, 560));
+        JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(this),
+                "Task triggers \u2014 " + libTask.getName() + " (library default)",
+                java.awt.Dialog.ModalityType.APPLICATION_MODAL);
+        dlg.setAlwaysOnTop(true);
+        JPanel wrap = new JPanel(new BorderLayout(0, 8));
+        wrap.setBorder(new EmptyBorder(10, 10, 10, 10));
+        JLabel note = new JLabel("<html>These run for as long as this task is executing \u2014 "
+                + "wider than an action trigger, narrower than a script trigger.<br>"
+                + "This is the <b>library default</b>; queue entries inherit it.</html>");
+        note.setForeground(TEXT_DIM);
+        wrap.add(note, BorderLayout.NORTH);
+        wrap.add(editor, BorderLayout.CENTER);
+        dlg.setContentPane(wrap);
+        dlg.pack();
+        dlg.setLocationRelativeTo(this);
+        dlg.setVisible(true);
+
+        if (sameTriggers(before, libTask.getTaskTriggers())) return;   // nothing to propagate
+        propagateTaskTriggers(libTask, before, anchor);
+        saveAll(false);
+    }
+
+    /** True when two trigger lists describe the same checks in the same order. */
+    private static boolean sameTriggers(java.util.List<main.watchers.Trigger> a,
+                                        java.util.List<main.watchers.Trigger> b) {
+        if (a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++) {
+            String x = a.get(i) == null ? "" : a.get(i).describe();
+            String y = b.get(i) == null ? "" : b.get(i).describe();
+            if (!x.equals(y)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Pushes the library default onto queue entries of the same task. Entries whose triggers were
+     * customised in the Task List are only touched if the user explicitly says so, and either way
+     * they're told how many were affected - a propagation that silently rewrites work is how
+     * people lose an afternoon.
+     */
+    private void propagateTaskTriggers(Task libTask, java.util.List<main.watchers.Trigger> oldDefault,
+                                       JComponent anchor) {
+        java.util.List<Task> same = new ArrayList<>();
+        java.util.List<Task> customised = new ArrayList<>();
+        for (int i = 0; i < modelTaskList.size(); i++) {
+            Task q = modelTaskList.get(i);
+            if (q == null || q.getId() == null || !q.getId().equals(libTask.getId())) continue;
+            (sameTriggers(oldDefault, q.getTaskTriggers()) ? same : customised).add(q);
+        }
+        if (same.isEmpty() && customised.isEmpty()) return;
+
+        boolean alsoCustomised = false;
+        if (!customised.isEmpty()) {
+            Object[] opts = {"Update all " + (same.size() + customised.size()),
+                    "Keep my " + customised.size() + " customised", "Cancel"};
+            int k = JOptionPane.showOptionDialog(this,
+                    "<html>" + customised.size() + " queue entr"
+                    + (customised.size() == 1 ? "y has" : "ies have")
+                    + " triggers you changed in the Task List.<br><br>"
+                    + "<b>Update all</b> \u2014 those edits are replaced by the new default."
+                    + "<br><b>Keep customised</b> \u2014 only the " + same.size()
+                    + " untouched entr" + (same.size() == 1 ? "y is" : "ies are") + " updated."
+                    + "</html>",
+                    "Apply to existing copies", JOptionPane.DEFAULT_OPTION,
+                    JOptionPane.QUESTION_MESSAGE, null, opts, opts[1]);
+            if (k == 2 || k < 0) return;
+            alsoCustomised = (k == 0);
+        }
+        java.util.List<Task> targets = new ArrayList<>(same);
+        if (alsoCustomised) targets.addAll(customised);
+        for (Task q : targets) {
+            q.getTaskTriggers().clear();
+            for (main.watchers.Trigger t : libTask.getTaskTriggers())
+                if (t != null) q.getTaskTriggers().add(new main.watchers.Trigger(t));
+        }
+        listTaskList.repaint();
+        showToast("Updated " + targets.size() + " queue entr" + (targets.size() == 1 ? "y" : "ies")
+                + (alsoCustomised || customised.isEmpty() ? ""
+                   : ", kept " + customised.size() + " customised"), anchor, true);
+    }
+
+    /**
+     * TASK LIST edit: binds to THIS queue entry only. Shows the library default as ticked boxes
+     * you can untick, plus every global check as an unticked box - opting one in here makes it a
+     * task trigger for this entry, without it becoming always-on.
+     */
+    private void openInstanceTaskTriggers(Task entry, JComponent anchor) {
+        if (entry == null) { showToast("Select a queued task first", anchor, false); return; }
+        Task lib = findLibraryTaskById(entry.getId());
+
+        java.util.LinkedHashMap<String, main.watchers.Trigger> offer = new java.util.LinkedHashMap<>();
+        if (lib != null)
+            for (main.watchers.Trigger t : lib.getTaskTriggers())
+                if (t != null) offer.put(t.describe(), t);
+        for (main.watchers.Trigger t : globalTriggers)
+            if (t != null) offer.putIfAbsent(t.describe(), t);
+        if (offer.isEmpty()) {
+            showToast("No task defaults or global checks to draw from yet", anchor, false);
+            return;
+        }
+        java.util.Set<String> on = new java.util.HashSet<>();
+        for (main.watchers.Trigger t : entry.getTaskTriggers())
+            if (t != null) on.add(t.describe());
+
+        JPanel list = new JPanel();
+        list.setLayout(new BoxLayout(list, BoxLayout.Y_AXIS));
+        list.setOpaque(false);
+        java.util.List<JCheckBox> boxes = new ArrayList<>();
+        java.util.List<main.watchers.Trigger> order = new ArrayList<>();
+        int libCount = lib == null ? 0 : lib.getTaskTriggers().size();
+        int idx = 0;
+        for (java.util.Map.Entry<String, main.watchers.Trigger> e : offer.entrySet()) {
+            if (idx == 0 && libCount > 0) list.add(sectionLabel("From this task's library default"));
+            if (idx == libCount) list.add(sectionLabel("Your global checks \u2014 opt in for this entry"));
+            JCheckBox cb = new JCheckBox(e.getKey(), on.contains(e.getKey()));
+            cb.setOpaque(false);
+            cb.setForeground(TEXT_MAIN);
+            boxes.add(cb);
+            order.add(e.getValue());
+            list.add(cb);
+            idx++;
+        }
+        JScrollPane sp = Theme.thinScrollbars(new JScrollPane(list));
+        sp.setPreferredSize(new Dimension(520, 340));
+        sp.setBorder(BorderFactory.createLineBorder(COLOR_BORDER_DIM));
+
+        JPanel root = new JPanel(new BorderLayout(0, 8));
+        root.setOpaque(false);
+        JLabel note = new JLabel("<html>These apply to <b>this queue entry only</b> \u2014 another "
+                + "copy of the same task keeps its own set.<br>They run for as long as this task "
+                + "is executing.</html>");
+        note.setForeground(TEXT_DIM);
+        root.add(note, BorderLayout.NORTH);
+        root.add(sp, BorderLayout.CENTER);
+
+        if (JOptionPane.showConfirmDialog(this, root,
+                "Task triggers \u2014 " + entry.getName() + " (this entry)",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION)
+            return;
+
+        entry.getTaskTriggers().clear();
+        for (int i = 0; i < boxes.size(); i++)
+            if (boxes.get(i).isSelected())
+                entry.getTaskTriggers().add(new main.watchers.Trigger(order.get(i)));
+        saveAll(false);
+        listTaskList.repaint();
+        showToast(entry.getTaskTriggers().size() + " task trigger(s) on this entry", anchor, true);
+    }
+
+    private JLabel sectionLabel(String text) {
+        JLabel l = new JLabel(text);
+        l.setForeground(TEXT_DIM);
+        l.setFont(new Font("Segoe UI", Font.BOLD, 10));
+        l.setBorder(new EmptyBorder(8, 0, 2, 0));
+        return l;
+    }
+
+    /** The library task an entry was copied from, or null if it's been removed since. */
+    private Task findLibraryTaskById(String id) {
+        if (id == null) return null;
+        for (Task t : libraryAll) if (t != null && id.equals(t.getId())) return t;
+        return null;
     }
 
     /** v1.60: everything a card can ask the menu to do - one shared wiring for grid + strip. */
@@ -6879,6 +7138,20 @@ public class DreamBotMenu extends JFrame {
          */
         private boolean onStartOnly = false;
 
+        /**
+         * v1.80: TASK triggers - the fourth tier, between action and script.
+         *
+         * <p>The tiers, narrowest first: an ACTION trigger runs during one step of one task; a
+         * TASK trigger runs for the whole time this task is executing; a SCRIPT trigger runs for
+         * the whole queue; a GLOBAL check runs always. This list is the task tier.
+         *
+         * <p>It lives on the Task, so like {@code onStartOnly} it is PER INSTANCE - editing the
+         * copy in your Task List binds to that queue entry alone, while editing the library task
+         * sets the default that new copies inherit. It rides inside the task's own snapshot, so
+         * exports and market bundles carry it with no extra plumbing.
+         */
+        private final List<main.watchers.Trigger> taskTriggers = new ArrayList<>();
+
         public Task(String name, String description, List<Action> actions, String status) {
             this.name = name;
             this.description = (description == null || description.isEmpty()) ? "No description provided by Author." : description;
@@ -6902,6 +7175,10 @@ public class DreamBotMenu extends JFrame {
             this.status = o.status;
             this.repeat = o.repeat;
             this.onStartOnly = o.onStartOnly;   // v1.68: travels with the instance
+            // v1.80: DEEP copy - a new queue entry must not share trigger objects with the
+            // library task, or editing one instance would silently edit every other.
+            for (main.watchers.Trigger t : o.taskTriggers)
+                if (t != null) this.taskTriggers.add(new main.watchers.Trigger(t));
             this.autoDelay = o.autoDelay;
             this.autoDelayMinMs = o.autoDelayMinMs;
             this.autoDelayMaxMs = o.autoDelayMaxMs;
@@ -7036,6 +7313,9 @@ public class DreamBotMenu extends JFrame {
         public void setRepeat(int repeat) {
             this.repeat = Math.max(1, repeat);
         }
+
+        /** v1.80: triggers that run for as long as this task is executing. Live list. */
+        public List<main.watchers.Trigger> getTaskTriggers() { return taskTriggers; }
 
         /** v1.68: @return true when this queue entry runs on the first queue loop only. */
         public boolean isOnStartOnly() {
