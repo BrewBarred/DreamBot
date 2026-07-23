@@ -4,8 +4,8 @@ import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.methods.skills.Skills;
 
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
-import javax.swing.border.TitledBorder;
 import java.awt.*;
 
 import static main.menu.MenuHandler.*;
@@ -18,6 +18,10 @@ public class SkillData {
     final JProgressBar progressLevel = new JProgressBar(0, 100);
     final JLabel labelLevel = new JLabel("1"),
             labelXP = new JLabel("0/0");
+
+    /** v1.88: the overlay-style header line (skill icon + name). */
+    final JLabel lblIcon = new JLabel();
+    final JLabel lblName = new JLabel();
 
     final JLabel lblGained = new JLabel(),
             lblPerHour = new JLabel(),
@@ -48,7 +52,16 @@ public class SkillData {
     /** The same icon the menu's tracker tile shows - drawn on the overlay too (Patch B.5). */
     private transient javax.swing.ImageIcon icon;
 
-    public void setIcon(javax.swing.ImageIcon i) { this.icon = i; }
+    public void setIcon(javax.swing.ImageIcon i) {
+        this.icon = i;
+        // v1.88: the details card wears the same icon the tile and the overlay do
+        if (lblIcon != null && i != null) {
+            java.awt.Image im = i.getImage();
+            if (im != null)
+                lblIcon.setIcon(new javax.swing.ImageIcon(
+                        im.getScaledInstance(14, 14, java.awt.Image.SCALE_SMOOTH)));
+        }
+    }
     public java.awt.Image getIconImage() { return icon == null ? null : icon.getImage(); }
     public double getLevelFraction() { return lastLevelFrac; }
     public int getRemainingXp() { return lastRemainingXp; }
@@ -70,33 +83,90 @@ public class SkillData {
         this.skill = s;
         this.startXP = Skills.getExperience(s);
         this.startLevel = Skills.getRealLevel(s);
-        trackerPanel.setBackground(new Color(30, 30, 30));
-        TitledBorder b = BorderFactory.createTitledBorder(new LineBorder(COLOR_BORDER_DIM), " " + s.name() + " ");
-        b.setTitleColor(COLOR_BLOOD);
-        trackerPanel.setBorder(b);
-        // Patch B.6: the level progress bar leads the detail block so the tracker tab matches
-        // the on-screen overlay (which shows a level bar). Same rounded style as the goal bar.
+        // ── v1.88: the tracked-details card, rebuilt to read like the in-game overlay ──
+        // It used to be a titled box of ALL-CAPS "GAINED: / XP/HR: / TO LEVEL:" lines stacked
+        // in a GridLayout, which stretched one skill down half the panel and looked nothing
+        // like the card the same data draws on the game canvas. Now it's the same shape as the
+        // overlay: icon + name + level badge on one line, the progress bar under it, then two
+        // tight stat rows. Same numbers, a third of the height, and the two surfaces finally
+        // match each other.
+        trackerPanel.setLayout(new BorderLayout(0, 0));
+        trackerPanel.setBackground(new Color(0x16, 0x16, 0x16));
+        trackerPanel.setBorder(BorderFactory.createCompoundBorder(
+                new LineBorder(COLOR_BORDER_DIM), new EmptyBorder(6, 8, 6, 8)));
+        trackerPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 84));
+
+        // top line: icon · NAME · Lvl badge
+        lblIcon.setBorder(new EmptyBorder(0, 0, 0, 6));
+        lblName.setText(s.name());
+        lblName.setForeground(COLOR_BLOOD);
+        lblName.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        labelLevel.setForeground(TEXT_MAIN);
+        labelLevel.setFont(new Font("Consolas", Font.BOLD, 12));
+        labelLevel.setHorizontalAlignment(SwingConstants.RIGHT);
+        JPanel top = new JPanel(new BorderLayout(0, 0));
+        top.setOpaque(false);
+        JPanel topLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        topLeft.setOpaque(false);
+        topLeft.add(lblIcon);
+        topLeft.add(lblName);
+        top.add(topLeft, BorderLayout.WEST);
+        top.add(labelLevel, BorderLayout.EAST);
+
         progressLevel.setUI(new main.menu.Theme.RoundProgressBarUI());
-        progressLevel.setPreferredSize(new Dimension(10, 8));
+        progressLevel.setPreferredSize(new Dimension(10, 6));
         progressLevel.setStringPainted(false);
-        trackerPanel.add(progressLevel);
+        progressLevel.setBorder(new EmptyBorder(4, 0, 4, 0));
 
-        JLabel[] ls = {lblGained, lblPerHour, lblRemaining, lblActs, lblTTL, lblProj};
-
-        for (JLabel l : ls) {
-            l.setForeground(TEXT_MAIN);
-            l.setFont(new Font("Consolas", Font.PLAIN, 12));
-            trackerPanel.add(l);
-        }
-
+        // stat row 1: "To lvl 748 · 1.8h"      right: "+400"
+        // stat row 2: "423 xp/hr"              right: goal % when a goal is set
+        lblRemaining.setForeground(new Color(0xB8, 0xB8, 0xB8));
+        lblGained.setForeground(COLOR_BLOOD);
+        lblPerHour.setForeground(new Color(0xC8, 0xA8, 0x50));
         lblGoal.setForeground(new Color(230, 190, 90));
-        lblGoal.setFont(new Font("Consolas", Font.PLAIN, 12));
-        goalBar.setPreferredSize(new Dimension(10, 8));
+        for (JLabel l : new JLabel[]{lblRemaining, lblGained, lblPerHour, lblGoal})
+            l.setFont(new Font("Consolas", Font.PLAIN, 11));
+        lblGained.setHorizontalAlignment(SwingConstants.RIGHT);
+        lblGoal.setHorizontalAlignment(SwingConstants.RIGHT);
+
+        JPanel row1 = new JPanel(new BorderLayout(6, 0));
+        row1.setOpaque(false);
+        row1.add(lblRemaining, BorderLayout.CENTER);
+        row1.add(lblGained, BorderLayout.EAST);
+
+        JPanel row2 = new JPanel(new BorderLayout(6, 0));
+        row2.setOpaque(false);
+        row2.add(lblPerHour, BorderLayout.CENTER);
+        row2.add(lblGoal, BorderLayout.EAST);
+
+        goalBar.setPreferredSize(new Dimension(10, 5));
         goalBar.setStringPainted(false);
-        lblGoal.setVisible(false);
         goalBar.setVisible(false);
-        trackerPanel.add(lblGoal);
-        trackerPanel.add(goalBar);
+        lblGoal.setVisible(false);
+
+        JPanel stack = new JPanel();
+        stack.setOpaque(false);
+        stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
+        for (JComponent c : new JComponent[]{top, progressLevel, row1, row2, goalBar})
+            c.setAlignmentX(0f);
+        stack.add(top);
+        stack.add(progressLevel);
+        stack.add(row1);
+        stack.add(row2);
+        stack.add(goalBar);
+        trackerPanel.add(stack, BorderLayout.CENTER);
+
+        // v1.88: the projection line ("PROJ (24H)") is dropped from the card. It only ever had
+        // a value once xp/hr had settled, it was the widest line in the box, and it's a
+        // curiosity rather than something you steer by. lblProj/lblActs stay as fields so
+        // update() keeps working untouched - they're simply not shown.
+    }
+
+    /** v1.88: "5.5k" / "1.2m" - the same shorthand the canvas overlay uses. */
+    private static String compactXp(long n) {
+        if (n >= 1_000_000) return String.format("%.1fm", n / 1_000_000.0);
+        if (n >= 1_000) return String.format("%.1fk", n / 1_000.0);
+        return String.valueOf(n);
     }
 
     /** Sets an XP goal (0 clears). Right-click a tracker tile to change it. */
@@ -192,9 +262,11 @@ public class SkillData {
         lastLevelFrac = Math.max(0, Math.min(1, (double) (curXp - curMin) / Math.max(1, curMax - curMin)));
         lastRemainingXp = rem;
         lastTtlHours = xph > 0 ? (double) rem / xph : -1;
-        lblGained.setText(" GAINED: " + String.format("%,d XP", curXp - startXP));
-        lblPerHour.setText(" XP/HR:  " + String.format("%,d", xph));
-        lblRemaining.setText(" TO LEVEL: " + String.format("%,d", rem));
+        // v1.88: overlay-shaped strings - "To lvl 748 · 1.8h", "+400", "423 xp/hr"
+        lblGained.setText("+" + String.format("%,d", curXp - startXP));
+        lblPerHour.setText(String.format("%,d xp/hr", xph));
+        lblRemaining.setText("To lvl " + compactXp(rem) + " \u00b7 "
+                + (xph > 0 ? String.format("%.1fh", (double) rem / xph) : "-"));
         if (xph > 0) {
             lblTTL.setText(String.format(" TIME TO L: %.2f hrs", (double) rem / xph));
             lblProj.setText(String.format(" PROJ (%dH): Lvl %d", ph, curLvl + (xph * ph / 100000)));
@@ -206,7 +278,7 @@ public class SkillData {
         goalBar.setVisible(hasGoal);
         if (hasGoal) {
             double f = getGoalFraction();
-            lblGoal.setText(String.format(" GOAL: %,d XP \u2014 %.1f%%", goalXp, f * 100));
+            lblGoal.setText(String.format("goal %.0f%%", f * 100));
             goalBar.setValue((int) (f * 1000));
             goalRemaining = Math.max(0, goalXp - curXp);
             goalTtlHours = lastXpPerHour > 0 ? (double) goalRemaining / lastXpPerHour : -1;

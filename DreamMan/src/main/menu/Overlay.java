@@ -243,8 +243,23 @@ public final class Overlay {
     // ── Tracked-skill overlay cards (Patch B.5: v2 with icons, bars & ETAs) ──
     private static final int SKILL_W = 176, SKILL_GAP = 5;
     private static final int CHIP_W = 118, CHIP_H = 22;
-    /** Fixed-mode fallback when the canvas size can't be read from the Graphics clip. */
-    private static final int FALLBACK_BOTTOM = 332;
+    /**
+     * Fixed-mode fallback when the canvas size can't be read from the Graphics clip.
+     *
+     * <p>v1.88: this was 332 - roughly one card's worth of room below the button strip - so
+     * whenever the clip couldn't be read (which is most frames; DreamBot hands onPaint a
+     * clip sized to the dirty region, not the canvas) EVERY card overflowed its column
+     * immediately and marched off to the right. Five tracked skills became a banner across
+     * the top of the screen. The value is now a sane full-canvas guess AND is only a floor:
+     * see MIN_PER_COLUMN, which guarantees a column holds a real stack regardless.
+     */
+    private static final int FALLBACK_BOTTOM = 700;
+    /**
+     * v1.88: a column always takes at least this many cards before spilling into the next one.
+     * Stacking downward is the whole point - it keeps the trackers as one tidy strip down the
+     * edge of the screen instead of a wall across the top of it.
+     */
+    private static final int MIN_PER_COLUMN = 6;
     /** Above this many tracked skills, cards auto-shrink to compact chips. */
     private static final int CHIP_THRESHOLD = 10;
 
@@ -274,23 +289,43 @@ public final class Overlay {
                 : FALLBACK_BOTTOM;
 
         boolean chipDefault = tracked.size() > CHIP_THRESHOLD;
-        int cx = x, cy = Math.max(startY, y);
+        final int top = Math.max(startY, y);
+
+        // ── v1.88: a stable, predictable order ────────────────────────────────────────
+        // Cards used to render in whatever order the tracked set happened to iterate, so
+        // minimizing one in the middle left a chip sitting between two full cards and shoved
+        // everything after it into a different column - the "bugs out when you minimize them
+        // in a strange order" report. Now it's two alphabetical groups: everything EXPANDED
+        // first, then everything MINIMIZED. Collapsing a card drops it to the bottom of the
+        // list and expanding it lifts it back, so you always know where a tracker went.
+        List<main.menu.skills.SkillData> order = new ArrayList<>();
+        for (main.menu.skills.SkillData sd : tracked) if (sd != null) order.add(sd);
+        order.sort((a, b) -> {
+            boolean ca = isCompact(a, chipDefault), cb = isCompact(b, chipDefault);
+            if (ca != cb) return ca ? 1 : -1;       // expanded above minimized
+            return nameOf(a).compareTo(nameOf(b));  // then alphabetical within each group
+        });
+
+        int cx = x, cy = top, inColumn = 0;
         Font fName = new Font("Segoe UI", Font.BOLD, 12);
         Font fBody = new Font("Consolas", Font.PLAIN, 10);
 
-        for (main.menu.skills.SkillData sd : tracked) {
+        for (main.menu.skills.SkillData sd : order) {
             if (sd == null) continue;
-            String name = sd.getSkill() != null ? sd.getSkill().name() : "?";
-            Boolean override = SKILL_MIN.get(name);
-            boolean compact = override != null ? override : chipDefault;
+            String name = nameOf(sd);
+            boolean compact = isCompact(sd, chipDefault);
             boolean hasGoal = sd.getGoalXp() > 0;
             int h = compact ? CHIP_H : (hasGoal ? 108 : 82);
             int w = compact ? CHIP_W : SKILL_W;
 
-            if (cy + h > colBottom) {           // out of vertical room -> next column
+            // v1.88: spill to the next column only when the column is genuinely full - and
+            // never before MIN_PER_COLUMN cards have gone into it, whatever the clip claims.
+            if (inColumn > 0 && cy + h > colBottom && inColumn >= MIN_PER_COLUMN) {
                 cx += SKILL_W + SKILL_GAP;
-                cy = Math.max(startY, y);
+                cy = top;
+                inColumn = 0;
             }
+            inColumn++;
 
             g2.setColor(BG);
             g2.fillRoundRect(cx, cy, w, h, 10, 10);
@@ -314,7 +349,13 @@ public final class Overlay {
                 g2.fillRoundRect(barX, cy + 9, (int) (barW * clamp01(f)), 5, 4, 4);
                 g2.setFont(fBody);
                 g2.setColor(ACCENT);
-                g2.drawString("+" + fmt(sd.getGainedXp()), barX + barW + 6, cy + 15);
+                // v1.88: minimized shows XP TO LEVEL, not xp gained. Gained is the number you
+                // check when you're looking at the session; to-level is the one worth keeping
+                // on screen when you've collapsed the card to get on with playing.
+                String toLvl = hasGoal
+                        ? fmt(sd.getGoalRemainingXp()) + " to goal"
+                        : fmt(sd.getRemainingXp()) + " to lvl";
+                g2.drawString(toLvl, barX + barW + 6, cy + 15);
                 hit(box, () -> SKILL_MIN.put(key, Boolean.FALSE));   // click chip -> expand
             } else {
                 // ── expanded mini canvas ──
@@ -369,6 +410,17 @@ public final class Overlay {
             cy += h + SKILL_GAP;
         }
         g2.dispose();
+    }
+
+    /** v1.88: the display name used for both sorting and the minimize map's key. */
+    private static String nameOf(main.menu.skills.SkillData sd) {
+        return sd != null && sd.getSkill() != null ? sd.getSkill().name() : "?";
+    }
+
+    /** v1.88: whether this card renders as a chip - explicit choice first, threshold second. */
+    private static boolean isCompact(main.menu.skills.SkillData sd, boolean chipDefault) {
+        Boolean override = SKILL_MIN.get(nameOf(sd));
+        return override != null ? override : chipDefault;
     }
 
     private static double clamp01(double v) { return Math.max(0, Math.min(1, v)); }

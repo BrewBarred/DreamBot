@@ -673,6 +673,103 @@ public final class UIIcons {
     }
 
     /**
+     * v1.88: "run from the top" - a three-row list with the play triangle on the FIRST row.
+     * Paired with {@link #runFromHere}, which is the same glyph aimed at the middle row; the
+     * pair reads as one control family instead of two unrelated media buttons.
+     */
+    public static Icon runFromStart(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) { runGlyph(g2, s, 0); }
+        };
+    }
+
+    /** v1.88: "run from the selected task" - the list glyph with the triangle on the middle row. */
+    public static Icon runFromHere(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) { runGlyph(g2, s, 1); }
+        };
+    }
+
+    /** Shared body of the two run icons: three list rows, play triangle on row {@code onRow}. */
+    private static void runGlyph(Graphics2D g2, int s, int onRow) {
+        float lineH = Math.max(1.4f, s / 11f);
+        float[] ys = {s * 0.26f, s * 0.50f, s * 0.74f};
+        g2.setStroke(new BasicStroke(lineH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        for (int i = 0; i < ys.length; i++) {
+            // the row being run is drawn full-length; the others sit back a little
+            float x2 = i == onRow ? s * 0.46f : s * 0.40f;
+            g2.drawLine(Math.round(s * 0.10f), Math.round(ys[i]), Math.round(x2), Math.round(ys[i]));
+        }
+        float cy = ys[onRow];
+        Path2D t = new Path2D.Float();
+        t.moveTo(s * 0.60f, cy - s * 0.20f);
+        t.lineTo(s * 0.92f, cy);
+        t.lineTo(s * 0.60f, cy + s * 0.20f);
+        t.closePath();
+        g2.fill(t);
+    }
+
+    /** v1.88: skip - the media skip-forward glyph (triangle into a bar). */
+    public static Icon skip(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                Path2D t = new Path2D.Float();
+                t.moveTo(s * 0.16f, s * 0.22f);
+                t.lineTo(s * 0.64f, s * 0.50f);
+                t.lineTo(s * 0.16f, s * 0.78f);
+                t.closePath();
+                g2.fill(t);
+                g2.fillRect(Math.round(s * 0.70f), Math.round(s * 0.22f),
+                        Math.max(2, Math.round(s * 0.13f)), Math.round(s * 0.56f));
+            }
+        };
+    }
+
+    /**
+     * v1.88: the Dev Console tab - a terminal window with a {@code >_} prompt. Deliberately
+     * nothing like the settings gear: the two tabs sat side by side wearing the same icon.
+     */
+    public static Icon devConsole(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                g2.setStroke(new BasicStroke(Math.max(1.2f, s / 13f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                int x = Math.round(s * 0.10f), y = Math.round(s * 0.16f);
+                int w = Math.round(s * 0.80f), h = Math.round(s * 0.68f);
+                g2.drawRoundRect(x, y, w, h, 4, 4);
+                g2.drawLine(x, Math.round(s * 0.34f), x + w, Math.round(s * 0.34f));  // title bar
+                // the > prompt
+                Path2D p = new Path2D.Float();
+                p.moveTo(s * 0.24f, s * 0.46f);
+                p.lineTo(s * 0.38f, s * 0.58f);
+                p.lineTo(s * 0.24f, s * 0.70f);
+                g2.draw(p);
+                g2.drawLine(Math.round(s * 0.46f), Math.round(s * 0.70f),
+                        Math.round(s * 0.68f), Math.round(s * 0.70f));               // cursor
+            }
+        };
+    }
+
+    /** v1.88: a wastebasket, for the preset delete control. */
+    public static Icon trash(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                g2.setStroke(new BasicStroke(Math.max(1.2f, s / 13f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                int x = Math.round(s * 0.22f), w = Math.round(s * 0.56f);
+                g2.drawLine(Math.round(s * 0.14f), Math.round(s * 0.28f),
+                        Math.round(s * 0.86f), Math.round(s * 0.28f));               // lid
+                g2.drawLine(Math.round(s * 0.40f), Math.round(s * 0.20f),
+                        Math.round(s * 0.60f), Math.round(s * 0.20f));               // handle
+                g2.drawRoundRect(x, Math.round(s * 0.32f), w, Math.round(s * 0.52f), 3, 3);
+                for (float fx : new float[]{0.40f, 0.60f})                            // ribs
+                    g2.drawLine(Math.round(s * fx), Math.round(s * 0.44f),
+                            Math.round(s * fx), Math.round(s * 0.72f));
+            }
+        };
+    }
+
+    /**
      * v1.87: planet earth for the world-map button - a blue disc with green landmasses, sitting
      * where the in-game world-map orb sits so the minimap corner reads like the real one. The
      * only two-colour icon in the set; the caller passes no colour because Earth has its own.

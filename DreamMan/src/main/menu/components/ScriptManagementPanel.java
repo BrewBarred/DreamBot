@@ -136,6 +136,13 @@ public final class ScriptManagementPanel {
         JButton btnDeny = new Theme.ThemedButton("Deny\u2026");
         btnDeny.putClientProperty("fillColor", new Color(80, 35, 25));
         JButton btnRestore = new Theme.ThemedButton("Restore to queue");
+        // v1.88: EXPORT lives here now, not on every user's Task List. Packaging a queue into a
+        // standalone jar is a maintenance/moderation tool - handing it to everyone mostly
+        // helped people carry the app's work out of the app. Admins can export any script they
+        // can select here; the exporter itself is the same one, unchanged.
+        JButton btnExport = new Theme.ThemedButton("Export as script\u2026");
+        btnExport.setToolTipText("Package the selected script into a .jar DreamBot can run "
+                + "on its own");
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         actions.setOpaque(false);
@@ -144,6 +151,7 @@ public final class ScriptManagementPanel {
         actions.add(btnApprove);
         actions.add(btnDeny);
         actions.add(btnRestore);
+        actions.add(btnExport);
 
         root.add(header, BorderLayout.NORTH);
         root.add(scroll, BorderLayout.CENTER);
@@ -158,6 +166,7 @@ public final class ScriptManagementPanel {
             btnApprove.setVisible(SCOPE_PENDING.equals(s));
             btnDeny.setVisible(SCOPE_PENDING.equals(s));
             btnRestore.setVisible(SCOPE_ARCHIVE.equals(s));
+            btnExport.setEnabled(any);   // v1.88: available in every scope that lists scripts
             btnPromote.setEnabled(any);
             btnUnDefault.setEnabled(any);
             btnApprove.setEnabled(any);
@@ -295,6 +304,43 @@ public final class ScriptManagementPanel {
                     "\"" + r.name + "\" is back in the queue.");
         });
 
+        btnExport.addActionListener(e -> {
+            Row r = selected(table, rows);
+            if (r == null) return;
+            main.data.store.ScriptBundle bundle = toBundle(r);
+            if (bundle == null) {
+                status.setText("That row has no script payload to export.");
+                return;
+            }
+            java.io.File dir = main.tools.ScriptExporter.dreamBotScriptsDir();
+            java.io.File target;
+            String fileName = main.tools.ScriptExporter.safeFileName(bundle.name) + ".jar";
+            if (dir != null) {
+                target = new java.io.File(dir, fileName);
+            } else {
+                JFileChooser fc = new JFileChooser(main.data.store.LocalStore.getExportsDir());
+                fc.setDialogTitle("Save the script jar");
+                fc.setSelectedFile(new java.io.File(
+                        main.data.store.LocalStore.getExportsDir(), fileName));
+                if (fc.showSaveDialog(root) != JFileChooser.APPROVE_OPTION) return;
+                target = fc.getSelectedFile();
+            }
+            final java.io.File out = target;
+            status.setText("Exporting \u201c" + bundle.name + "\u201d\u2026");
+            new Thread(() -> {
+                String err = null;
+                try {
+                    main.tools.ScriptExporter.export(bundle, out);
+                } catch (Throwable ex) {
+                    err = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                }
+                final String fErr = err;
+                SwingUtilities.invokeLater(() -> status.setText(fErr != null
+                        ? "Export failed: " + fErr
+                        : "Exported to " + out.getAbsolutePath()));
+            }, "DreamMan-DevExport").start();
+        });
+
         reload[0].run();
         return root;
     }
@@ -374,6 +420,32 @@ public final class ScriptManagementPanel {
 
     /** The TaskData to promote for a row, or null when the row carries no usable task. */
     @SuppressWarnings("unchecked")
+    /**
+     * v1.88: the exportable bundle behind a row. Market listings already carry one; a library
+     * task is wrapped into a single-task bundle so it can be exported the same way.
+     */
+    private static main.data.store.ScriptBundle toBundle(Row r) {
+        if (r == null) return null;
+        if (r.payload instanceof ScriptListing) {
+            ScriptListing l = (ScriptListing) r.payload;
+            if (l.bundle != null && l.bundle.tasks != null && !l.bundle.tasks.isEmpty())
+                return l.bundle;
+            return null;
+        }
+        if (r.payload instanceof DreamBotMenu.Task) {
+            DreamBotMenu.Task t = (DreamBotMenu.Task) r.payload;
+            main.data.store.ScriptBundle b = new main.data.store.ScriptBundle();
+            b.name = t.getName() == null || t.getName().isBlank() ? "DreamMan Script" : t.getName();
+            b.author = r.who == null || r.who.isBlank() ? "Anonymous" : r.who;
+            b.description = t.getDescription() == null ? "" : t.getDescription();
+            b.loops = 1;
+            b.tasks = new ArrayList<>();
+            b.tasks.add(main.data.store.ProfileCodec.toData(t));
+            return b;
+        }
+        return null;
+    }
+
     private static Object toTaskData(Row r) {
         if (r.payload instanceof DreamBotMenu.Task)
             return main.data.store.ProfileCodec.toData((DreamBotMenu.Task) r.payload);

@@ -400,16 +400,28 @@ public class DreamBotMenu extends JFrame {
             JCheckBox cb = new JCheckBox(t.describe(), active.contains(t.describe()));
             cb.setOpaque(false);
             cb.setForeground(TEXT_MAIN);
+            cb.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+            cb.setAlignmentX(0f);
+            cb.setBorder(new EmptyBorder(5, 2, 5, 2));   // v1.88: breathing room per row
             boxes.add(cb);
             list.add(cb);
         }
+        // v1.88: room to breathe. The picker was 380px wide with rows jammed at 26px, so a
+        // trigger with a real description wrapped into a cramped two-line smear. Wider, taller,
+        // padded rows, and the explanation gets space above it.
         JScrollPane sp = Theme.thinScrollbars(new JScrollPane(list));
-        sp.setPreferredSize(new Dimension(380, Math.min(320, 26 * globals.size() + 16)));
+        sp.setPreferredSize(new Dimension(560, Math.max(220, Math.min(460, 32 * globals.size() + 24))));
+        sp.setBorder(BorderFactory.createLineBorder(COLOR_BORDER_DIM));
+        list.setBorder(new EmptyBorder(8, 10, 8, 10));
 
-        JPanel root = new JPanel(new BorderLayout(0, 6));
-        root.add(styledLabel("<html>Checks that run <b>only while this task list is running</b>:"
-                + "<br><span style='color:#999'>(Global checks on the Checks tab always run; these "
-                + "run additionally, just for this script.)</span></html>"), BorderLayout.NORTH);
+        JPanel root = new JPanel(new BorderLayout(0, 10));
+        root.setBorder(new EmptyBorder(4, 4, 4, 4));
+        JLabel head = styledLabel("<html><div style='width:520px'>Checks that run <b>only while "
+                + "this task list is running</b>:<br><span style='color:#999'>(Global checks on "
+                + "the Checks tab always run; these run additionally, just for this "
+                + "script.)</span></div></html>");
+        head.setBorder(new EmptyBorder(2, 2, 6, 2));
+        root.add(head, BorderLayout.NORTH);
         root.add(sp, BorderLayout.CENTER);
 
         int r = JOptionPane.showConfirmDialog(this, root, "Script triggers",
@@ -647,6 +659,9 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Triggers", loadTabIcon("triggers_tab"), createWatchersTab());
         mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
         mainTabs.addTab("Loot Tracker", loadTabIcon("loot_tracker_tab"), createLootTrackerTab());
+        // v1.88: Logs sits with the other things you WATCH (skills, loot) instead of being
+        // stranded past the account/settings block at the end of the strip.
+        mainTabs.addTab("Logs", loadTabIcon("logs_tab"), createLogsTab());                  // v1.31
         // v1.86: the Equipment tab is gone - the doll, inventory and presets live in the
         // always-reachable side panel now (buildSideLiveCard), per the sketch.
         mainTabs.addTab("Market", loadTabIcon("market_tab"), createMarketTab());
@@ -658,7 +673,6 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Account", loadTabIcon("status_tab"), createAccountTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
         mainTabs.addTab("Privacy", loadTabIcon("privacy_tab"), createPrivacyTabStandalone());
-        mainTabs.addTab("Logs", loadTabIcon("logs_tab"), createLogsTab());                  // v1.31
         // v1.77 BUGFIX: apply the RESTORED session to the UI at startup.
         //
         // The session was being read back from session.json correctly all along - nothing ever
@@ -944,13 +958,44 @@ public class DreamBotMenu extends JFrame {
         btnScriptTriggers.addActionListener(e -> openScriptTriggersDialog(btnScriptTriggers));
         left.add(Box.createHorizontalStrut(6));
         left.add(btnScriptTriggers);
+        // v1.88: the Timer moved here from the task-button row. It's a SCRIPT-level control
+        // (when this entry fires on its own schedule), so it belongs beside Script triggers,
+        // not among the buttons that build the queue.
+        btnTaskListTimer = createButton("Timer\u2026", new Color(25, 60, 75), null);
+        btnTaskListTimer.setToolTipText("Take the selected task out of the normal rotation and "
+                + "fire it on a rough interval instead");
+        btnTaskListTimer.addActionListener(e -> {
+            Task sel = listTaskList.getSelectedValue();
+            if (sel == null) { showToast("Select a task first!", btnTaskListTimer, false); return; }
+            openTimerDialog(sel, btnTaskListTimer);
+        });
+        left.add(btnTaskListTimer);
 
         // ---- right: skip / run-from-here + live indicator ----
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         right.setOpaque(false);
 
-        JButton btnRunHere = createButton("Run from here");
-        btnRunHere.setToolTipText("Start the queue at the selected task");
+        // v1.88: these three are ICONS now - the row was carrying three word-buttons for
+        // controls you press constantly, and the space is better spent on the queue itself.
+        JButton btnRunStart = iconButton(
+                main.menu.components.UIIcons.runFromStart(18, Theme.ACCENT),
+                "Run from the top - restart the queue at task 1", null);
+        btnRunStart.addActionListener(e -> {
+            if (modelTaskList.isEmpty()) {
+                showToast("The queue is empty", btnRunStart, false);
+                return;
+            }
+            listTaskList.setSelectedIndex(0);
+            setCurrentExecutionIndex(0);
+            resetLoopProgress();
+            listTaskList.repaint();
+            isMenuPaused(false);
+            showToast("Running from the top", btnRunStart, true);
+        });
+
+        JButton btnRunHere = iconButton(
+                main.menu.components.UIIcons.runFromHere(18, Theme.ACCENT),
+                "Run from here - start the queue at the selected task", null);
         btnRunHere.addActionListener(e -> {
             int idx = listTaskList.getSelectedIndex();
             if (idx < 0) {
@@ -964,8 +1009,9 @@ public class DreamBotMenu extends JFrame {
             showToast("Running from task " + (idx + 1), btnRunHere, true);
         });
 
-        JButton btnSkip = createButton("Skip");
-        btnSkip.setToolTipText("Skip the current task and move to the next");
+        JButton btnSkip = iconButton(
+                main.menu.components.UIIcons.skip(18, Theme.ACCENT),
+                "Skip the current task and move to the next", null);
         btnSkip.addActionListener(e -> {
             if (modelTaskList.isEmpty()) return;
             advanceQueue();
@@ -977,6 +1023,7 @@ public class DreamBotMenu extends JFrame {
         lblLoopIndicator.setFont(new Font("Consolas", Font.BOLD, 13));
         lblLoopIndicator.setBorder(new EmptyBorder(0, 10, 0, 4));
 
+        right.add(btnRunStart);
         right.add(btnRunHere);
         right.add(btnSkip);
         right.add(lblLoopIndicator);
@@ -1294,6 +1341,7 @@ public class DreamBotMenu extends JFrame {
     private JButton btnAccountLogout;    // v1.32b: DreamMan-account logout (separate from game)
     private JButton btnEditProfile;      // v1.63: public-profile (bio) editor, login-gated
     private JButton btnScriptTriggers;   // v1.64: per-script trigger selection (Task List tab)
+    private JButton btnTaskListTimer;    // v1.88: moved beside Script triggers (script-level)
     private boolean suppressAccountEvents = false;
 
     /** Builds the sign-in / account-switcher row for the Player card (Patch B.15). */
@@ -1479,6 +1527,7 @@ public class DreamBotMenu extends JFrame {
         refreshAccountSwitcher();
         refreshTierStatusLabel();
         refreshAccountTab();   // v1.87: flip auth <-> signed-in, rebuild limits + badges
+        refreshMarketGate();   // v1.88: the market tab is signed-in only
         refreshAccountLogoutVisibility();   // v1.32b: show/hide the account Log out button
         refilterLibrary();   // VIP tasks may now be visible
         maybeAutoConnectMarket();   // Patch B.17: logging in grants consent -> market goes live
@@ -1576,7 +1625,10 @@ public class DreamBotMenu extends JFrame {
         // and gating them behind the single owner account defeats the point of having admins.
         boolean shouldShow = main.market.Tier.isOwner() || main.market.Tier.isAdmin();
         if (shouldShow && idx < 0) {
-            mainTabs.addTab("Dev Console", loadTabIcon("settings_tab"),
+            // v1.88: its own terminal glyph - Dev Console and Settings wore the same gear.
+            mainTabs.addTab("Dev Console",
+                    new javax.swing.ImageIcon(iconToImage(
+                            main.menu.components.UIIcons.devConsole(16, Theme.ACCENT), 16)),
                     main.menu.components.DevConsole.buildPanel(
                             () -> new ArrayList<>(libraryAll),
                             () -> new ArrayList<>(marketAll)));
@@ -1791,11 +1843,9 @@ public class DreamBotMenu extends JFrame {
             trigChosen[0] = (int) trigPicks.stream().filter(AbstractButton::isSelected).count();
             updateTrigBtn.run();
         });
-        // v1.51: optionally stage this same export straight into the local market (off by default)
-        JComboBox<String> cmbStage = new JComboBox<>(new String[]{
-                "Don't add to market-ready",
-                "Also stage as TASK (market-ready)",
-                "Also stage as SCRIPT (market-ready)"});
+        // v1.88: the "also stage as TASK / SCRIPT (market-ready)" combo is gone. It predates
+        // the Publish preset button and the card builder, and it staged a listing with no card
+        // - which the mandatory-card publish gate then refused. Publishing has one road now.
 
         java.io.File scriptsDir = main.tools.ScriptExporter.dreamBotScriptsDir();
         JLabel lblWhere = new JLabel(scriptsDir != null
@@ -1824,8 +1874,6 @@ public class DreamBotMenu extends JFrame {
         form.add(styledLabel("Always-on checks that travel with the script:"), c);
         c.gridy++;
         form.add(btnTriggers, c);
-        c.gridy++;
-        form.add(cmbStage, c);
         c.gridy++;
         form.add(styledLabel(modelTaskList.size() + " task(s), "
                 + (queueLoopTarget <= 0 ? "looping forever" : queueLoopTarget + " loop(s)")), c);
@@ -1860,31 +1908,7 @@ public class DreamBotMenu extends JFrame {
         if (!pickedTrigs.isEmpty())
             bundle.globalTriggers = main.watchers.TriggerCodec.toJson(pickedTrigs);
 
-        // v1.51: optional stage-to-market-ready of this same export (task or script)
-        if (cmbStage.getSelectedIndex() > 0) {
-            main.market.ScriptListing st = new main.market.ScriptListing();
-            st.name = bundle.name;
-            st.author = bundle.author;
-            st.description = bundle.description;
-            st.version = bundle.version;
-            st.kind = cmbStage.getSelectedIndex() == 2 ? "script" : "task";
-            st.origin = "local";
-            java.util.LinkedHashSet<String> tagset = new java.util.LinkedHashSet<>();
-            for (int ti = 0; ti < modelTaskList.size(); ti++) {
-                Task qt = modelTaskList.get(ti);
-                if (qt != null) tagset.addAll(qt.getTags());
-            }
-            st.tags = new ArrayList<>(tagset);
-            st.bundle = bundle;
-            try {
-                localMarketRepo.publish(st);
-                reloadMarket();
-                showToast("Also staged \"" + st.name + "\" as a market-ready " + st.kind
-                        + " \u2014 build its card before publishing", mainTabs, true);
-            } catch (Exception sx) {
-                showToast("Staging failed: " + sx.getMessage(), mainTabs, false);
-            }
-        }
+        // (v1.88: the optional stage-to-market-ready step was removed with the combo above.)
 
         // where to write it
         java.io.File target;
@@ -2121,9 +2145,14 @@ public class DreamBotMenu extends JFrame {
         JPanel south = new JPanel(new BorderLayout(0, 10));
         south.setOpaque(false);
 
-        // Sub-panel for the original buttons (v1.62: +2 columns for "+ Add" and the insert toggle)
-        JPanel southButtons = new JPanel(new GridLayout(1, 7, 5, 0));
+        // v1.88: BoxLayout, not GridLayout. The grid forced every control to the same width,
+        // which is why the insert-mode icon sat in a button as wide as "Publish preset..." and
+        // why a spacer was impossible. Now each control takes the width it needs and the gap
+        // between the build half and the tools half is real.
+        JPanel southButtons = new JPanel();
+        southButtons.setLayout(new BoxLayout(southButtons, BoxLayout.X_AXIS));
         southButtons.setOpaque(false);
+        southButtons.setBorder(new EmptyBorder(0, 0, 2, 0));
 
         // v1.62: the Task List "Save" button is gone - the queue autosaves on change (add / remove
         // / reorder via the model listener) plus a 60s backstop and a save on exit.
@@ -2168,19 +2197,16 @@ public class DreamBotMenu extends JFrame {
             mainTabs.setSelectedIndex(2);
         });
 
-        /// Create Reset All button
-        JButton btnResetAllPresets = createButton("Reset All", new Color(139, 0, 0), null);
-        btnResetAllPresets.addActionListener(e -> {
-            int choice = JOptionPane.showConfirmDialog(this, "WARNING: This will delete ALL presets (could be 100s!). Continue?", "Nuclear Reset", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-            if (choice == JOptionPane.YES_OPTION) {
-                modelPresets.clear();
-                currentPresetPage = 0;
-                selectedPresetIndex = -1;
-                btnPageUp.setEnabled(false);
-                refreshPresetButtonLabels();
-                this.showToast("System Reset Complete!", btnResetAllPresets, true);
-            }
-        });
+        // v1.88: "Reset All" was a one-click way to destroy every preset you own - a nuclear
+        // button sitting in a row you use constantly. It's now a per-preset RESET: it clears
+        // the SELECTED preset and restores its default name, leaving the slot open to refill.
+        // If you walk away without putting anything in it, the empty slot is squashed out
+        // (see compactPresets) so the strip never ends up patchy - preset 1, 2, gap, 4.
+        JButton btnResetPreset = createButton("Reset", new Color(120, 60, 20), null);
+        btnResetPreset.setToolTipText("<html>Clear the <b>selected preset</b> and reset its name, "
+                + "ready to save something new into it.<br>Leave it empty and it closes up on its "
+                + "own \u2014 no gaps in the preset strip.</html>");
+        btnResetPreset.addActionListener(e -> resetSelectedPreset(btnResetPreset));
 
         listTaskList.addListSelectionListener(e -> {
             btnTaskListRemove.setEnabled(!listTaskList.isSelectionEmpty());
@@ -2240,14 +2266,8 @@ public class DreamBotMenu extends JFrame {
             }
         });
 
-        // Patch B.8: mark a queued task as TIMED - it leaves the normal rotation and fires on a
-        // rough interval at a safe point instead.
-        JButton btnTaskListTimer = createButton("Timer\u2026", new Color(25, 60, 75), null);
-        btnTaskListTimer.addActionListener(e -> {
-            Task sel = listTaskList.getSelectedValue();
-            if (sel == null) { showToast("Select a task first!", btnTaskListTimer, false); return; }
-            openTimerDialog(sel, btnTaskListTimer);
-        });
+        // v1.88: the Timer button moved to the loop bar, beside Script triggers - it's a
+        // script-level scheduling control, not one of the queue-building buttons.
 
         // v1.68: on-start-only for the SELECTED queue entry. A real checkbox rather than a button,
         // because it reports state as much as it sets it - the whole point is being able to see at
@@ -2271,10 +2291,10 @@ public class DreamBotMenu extends JFrame {
                     : "\"" + sel.getName() + "\" runs every loop again", chkTaskOnStart, true);
         });
 
-        // Patch B.10: one-click compile - turn the whole queue into a standalone DreamBot script
-        JButton btnExportScript = createButton("Export as script\u2026", new Color(30, 70, 40), null);
-        btnExportScript.setToolTipText("Package this queue into a .jar DreamBot can run on its own");
-        btnExportScript.addActionListener(e -> openExportDialog(btnExportScript));
+        // v1.88: "Export as script" is GONE from here. Handing every user a one-click way to
+        // rip their queue out as a standalone jar mostly enabled taking the app's work
+        // elsewhere; it now lives in the Dev Console's Script Management tab, where admins can
+        // export any script they select. The exporter itself is unchanged.
 
         // v1.62: "+" opens the library picker popup - double-click a task to add it to THIS list.
         // This is what lets the Task Library's own "add" button and the Quick-add menu retire.
@@ -2292,12 +2312,13 @@ public class DreamBotMenu extends JFrame {
                                     : "Adding at the END \u2014 click for: after the selected task",
                 this::toggleInsertMode);
 
-        ///  Add all buttons
+        ///  v1.88: the row reads left to right as the order you actually work in -
+        ///  BUILD the queue (add / duplicate / remove / this entry's triggers / on-start),
+        ///  then a gap, then the TOOLS you reach for once it's built (publish, insert mode,
+        ///  open in builder, reset the preset).
         southButtons.add(btnAddFromLib);
         southButtons.add(btnTaskListDuplicate);
         southButtons.add(btnTaskListRemove);
-        southButtons.add(btnTaskListTimer);
-        southButtons.add(chkTaskOnStart);   // v1.68
         // v1.79: publishing a preset moved here from the market. The queue in front of you IS
         // the thing being published, triggers and on-start flags included - they ride inside each
         // task's snapshot, so nothing extra has to be gathered.
@@ -2323,23 +2344,31 @@ public class DreamBotMenu extends JFrame {
             stageForCardBuilder(name, q, btnPublishPreset);
         });
         // v1.80: per-instance task triggers, next to the entry they bind to.
-        JButton btnEntryTriggers = createButton("Triggers\u2026", new Color(60, 40, 75), null);
+        // v1.88: renamed "Task triggers..." - "Triggers..." next to a "Script triggers..." button
+        // one row up told you nothing about which of the two you were opening.
+        JButton btnEntryTriggers = createButton("Task triggers\u2026", new Color(60, 40, 75), null);
         btnEntryTriggers.setToolTipText("<html>Triggers that run while <b>this queue entry</b> "
                 + "executes.<br>Starts from the library default; your global checks can be "
                 + "opted in per entry.</html>");
         btnEntryTriggers.addActionListener(e ->
                 openInstanceTaskTriggers(listTaskList.getSelectedValue(), btnEntryTriggers));
         southButtons.add(btnEntryTriggers);
+        southButtons.add(chkTaskOnStart);   // v1.68
+        // the gap: everything left of it builds the queue, everything right of it acts on the
+        // finished thing. A plain spacer, but it's what makes the row readable at a glance.
+        southButtons.add(Box.createHorizontalStrut(18));
         southButtons.add(btnPublishPreset);
-        southButtons.add(btnExportScript);
         southButtons.add(btnInsertToggle);
         southButtons.add(btnTaskListView);
-        // UI preset delete button was removed here as per instructions
-        southButtons.add(btnResetAllPresets);
+        southButtons.add(btnResetPreset);
 
-        south.add(createPresetControlPanel(), BorderLayout.NORTH);
-        south.add(createLoopBar(), BorderLayout.CENTER);
-        south.add(southButtons, BorderLayout.SOUTH);
+        // ── v1.88: the three rows, reordered to match what they belong to ───────────────
+        // The task BUTTONS act on the queue directly above them, so they sit closest to it.
+        // The PRESETS save/load that queue plus those controls, so they come next. The
+        // repeat/loop/pause bar configures the whole SCRIPT, so it anchors the bottom.
+        south.add(southButtons, BorderLayout.NORTH);
+        south.add(createPresetControlPanel(), BorderLayout.CENTER);
+        south.add(createLoopBar(), BorderLayout.SOUTH);
 
         // add all panels to the main panel (task list panel)
         lblTaskCount = pill("0 tasks");
@@ -2362,6 +2391,15 @@ public class DreamBotMenu extends JFrame {
                 refreshTaskListTab();
                 refreshPresetButtonLabels();
                 refreshDynamicControls();
+            }
+            /** v1.88: leaving the tab settles any preset slot that was reset and left empty. */
+            @Override
+            public void componentHidden(ComponentEvent e) {
+                super.componentHidden(e);
+                if (provisionalPresetIndex >= 0) {
+                    selectedPresetIndex = -1;
+                    compactPresets();
+                }
             }
         });
 
@@ -4087,10 +4125,75 @@ public class DreamBotMenu extends JFrame {
         marketCenterCards.add(marketGridScroll, "grid");
         body.add(marketCenterCards, BorderLayout.CENTER);
         body.add(strip, BorderLayout.SOUTH);
-        panel.add(body, BorderLayout.CENTER);
 
-        reloadMarket();
+        // ── v1.88: the market is SIGNED-IN ONLY ────────────────────────────────────────
+        // Scripts live on the server now, so the market is a view of your account's world -
+        // browsing, publishing, rating and commenting all need to know who you are. Rather
+        // than letting people poke at a market that can't answer them, the whole tab shows a
+        // sign-in wall until they're authenticated. What you've ALREADY downloaded is yours
+        // offline forever: imported scripts land in your local library and never come back
+        // through here.
+        marketGateCards = new CardLayout();
+        marketGateHost = new JPanel(marketGateCards);
+        marketGateHost.setOpaque(false);
+        marketGateHost.add(buildMarketSignInWall(), "gate");
+        marketGateHost.add(body, "market");
+        panel.add(marketGateHost, BorderLayout.CENTER);
+
+        refreshMarketGate();
+        if (main.market.ServerAccount.isLoggedIn()) reloadMarket();
         return panel;
+    }
+
+    private CardLayout marketGateCards;
+    private JPanel marketGateHost;
+
+    /** v1.88: what the Market tab shows when nobody's signed in - an explanation and a way in. */
+    private JPanel buildMarketSignInWall() {
+        JPanel wrap = new JPanel(new GridBagLayout());
+        wrap.setOpaque(false);
+
+        JPanel card = new JPanel();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(PANEL_SURFACE);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(COLOR_BORDER_DIM),
+                new EmptyBorder(22, 26, 22, 26)));
+
+        JLabel title = new JLabel("Sign in to browse the market");
+        title.setForeground(Theme.ACCENT);
+        title.setFont(new Font("Consolas", Font.BOLD, 19));
+        title.setAlignmentX(0f);
+        card.add(title);
+
+        JLabel blurb = new JLabel("<html><div style='width:400px'>Market scripts are stored on "
+                + "the DreamMan server, so browsing, publishing, rating and commenting all need "
+                + "your account.<br><br>Anything you've <b>already downloaded is yours offline</b> "
+                + "\u2014 it's in your Task Library and runs with or without a connection.</div></html>");
+        blurb.setForeground(TEXT_DIM);
+        blurb.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        blurb.setAlignmentX(0f);
+        blurb.setBorder(new EmptyBorder(10, 0, 14, 0));
+        card.add(blurb);
+
+        JButton go = createButton("Go to the Account tab", new Color(45, 70, 45), null);
+        go.setAlignmentX(0f);
+        go.setToolTipText("Sign in (or create an account) on the Account tab");
+        go.addActionListener(e -> {
+            int idx = indexOfTab("Account");
+            if (idx >= 0) mainTabs.setSelectedIndex(idx);
+        });
+        card.add(go);
+
+        wrap.add(card);
+        return wrap;
+    }
+
+    /** v1.88: flips the Market tab between the sign-in wall and the market itself. */
+    private void refreshMarketGate() {
+        if (marketGateHost == null || marketGateCards == null) return;
+        boolean in = main.market.ServerAccount.isLoggedIn();
+        marketGateCards.show(marketGateHost, in ? "market" : "gate");
     }
 
     /** v1.60: the sort menu over the card grid - one radio per option, roadmap's full set. */
@@ -4137,41 +4240,11 @@ public class DreamBotMenu extends JFrame {
         older.addActionListener(a -> { fltHideOlder = older.isSelected(); filtersChanged(); });
         m.add(older);
 
-        m.addSeparator();
-        JMenuItem tagHead = new JMenuItem("Filter by tag \u2014 any ticked tag matches:");
-        tagHead.setEnabled(false);
-        m.add(tagHead);
-        java.util.TreeSet<String> tags = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-        for (main.market.ScriptListing l : marketAll)
-            if (l != null && l.tags != null && !"local".equals(l.origin)) tags.addAll(l.tags);
-        if (tags.isEmpty()) {
-            JMenuItem none = new JMenuItem("(no tags on the market yet)");
-            none.setEnabled(false);
-            m.add(none);
-        } else {
-            int shown = 0;
-            for (String tag : tags) {
-                if (++shown > 20) {   // a popup can't scroll; the search field covers the rest
-                    JMenuItem more = new JMenuItem("\u2026and " + (tags.size() - 20)
-                            + " more \u2014 use the search field");
-                    more.setEnabled(false);
-                    m.add(more);
-                    break;
-                }
-                JCheckBoxMenuItem t = new JCheckBoxMenuItem("#" + tag, fltTags.contains(tag));
-                t.addActionListener(a -> {
-                    if (t.isSelected()) fltTags.add(tag); else fltTags.remove(tag);
-                    filtersChanged();
-                });
-                m.add(t);
-            }
-            if (!fltTags.isEmpty()) {
-                m.addSeparator();
-                JMenuItem clear = new JMenuItem("Clear tag filter (" + fltTags.size() + ")");
-                clear.addActionListener(a -> { fltTags.clear(); filtersChanged(); });
-                m.add(clear);
-            }
-        }
+        // v1.88: the tag checkboxes are GONE from this menu. Every tag is already a
+        // clickable pill under the search field (TagFilterBar), so this list was a second,
+        // capped, un-scrollable copy of the same control - two places to set one filter, and
+        // the menu's "...and 12 more" cut-off made it the worse of the two.
+
         m.show(btnMarketFilter, 0, btnMarketFilter.getHeight());
     }
 
@@ -5185,24 +5258,27 @@ public class DreamBotMenu extends JFrame {
         new Thread(() -> {
             try {
                 marketRepo.publish(l);   // adopts the server's id onto l (v1.76)
-                // v1.76: re-file the staged copy under the id the server gave it. The copy is
-                // deliberately KEPT on disk - it's just hidden while the market shows the same
-                // id - so if the server is ever unreachable or lost, every user's own work
-                // reappears in their local folder immediately and offline.
-                if (localMarketRepo != null && l.id != null && !l.id.equals(stagedId)) {
+                // ── v1.88: publishing MOVES the script; it doesn't copy it ──────────────
+                // Until now the staged file stayed on disk and was merely HIDDEN while a
+                // listing with the same id was live. That produced the exact confusion this
+                // patch is fixing: the same script appearing (or not) in "my market-ready"
+                // and in the local folder depending on whether you happened to be signed in.
+                // One home per script: once the server has it, the local staging copy goes.
+                // Nothing is at risk - the delete only runs AFTER publish() returned
+                // successfully, and Unpublish stages a full copy straight back.
+                if (localMarketRepo != null && stagedId != null) {
                     try {
                         localMarketRepo.remove(stagedId);
-                        localMarketRepo.publish(l);
-                    } catch (Exception reFile) {
+                    } catch (Exception rm) {
                         Logger.log(Logger.LogType.WARN,
-                                "[Market] published, but couldn't re-file the local copy: " + reFile);
+                                "[Market] published, but couldn't clear the local copy: " + rm);
                     }
                 }
                 SwingUtilities.invokeLater(() -> {
                     markLibraryPublished(l.name);   // v1.49: drives the Published filter/tag
                     reloadMarket();
-                    showToast("Published \"" + l.name + "\" \u2014 your local copy is kept, "
-                            + "hidden while it's live", marketAnchor(), true);
+                    showToast("Published \"" + l.name + "\" \u2014 it lives on the server now "
+                            + "(unpublish brings it back)", marketAnchor(), true);
                 });
             } catch (Exception ex) {
                 // v1.60: 409 (version integrity) and 403 (anti-plagiarism) come back with a real
@@ -5311,6 +5387,10 @@ public class DreamBotMenu extends JFrame {
             for (main.market.ScriptListing l : published)
                 if (l != null) l.origin = "server";
 
+            // v1.88: publishing now MOVES the file to the server, so a staged copy sharing a
+            // published id should no longer exist at all. This stays as a one-way tidy-up for
+            // installs upgrading from v1.87 and earlier, where the copy was kept and hidden:
+            // the leftovers are deleted on the first load rather than lingering invisibly.
             java.util.Set<String> publishedIds = new java.util.HashSet<>();
             for (main.market.ScriptListing p2 : published)
                 if (p2 != null && p2.id != null) publishedIds.add(p2.id);
@@ -5320,7 +5400,13 @@ public class DreamBotMenu extends JFrame {
             for (main.market.ScriptListing l : staged) {
                 if (l == null) continue;
                 l.origin = "local";
-                if (publishedIds.contains(l.id)) continue;   // live on the market: hide the copy
+                if (publishedIds.contains(l.id)) {
+                    // legacy leftover from the copy-and-hide era - remove it for good (v1.88)
+                    try {
+                        if (localMarketRepo != null) localMarketRepo.remove(l.id);
+                    } catch (Exception ignored) {}
+                    continue;
+                }
                 if (l.cardReady) builtCount++;
                 merged.add(l);
             }
@@ -8850,6 +8936,17 @@ public class DreamBotMenu extends JFrame {
         return card;
     }
 
+    /** v1.88: renders any drawn {@link main.menu.components.UIIcons} glyph into a tab icon. */
+    private static java.awt.Image iconToImage(Icon icon, int size) {
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+                size, size, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        icon.paintIcon(null, g, 0, 0);
+        g.dispose();
+        return img;
+    }
+
     private ImageIcon loadTabIcon(String name) {
         // v1.32 (SDN): runtime fetch + cache; repaint the tab strip when the icon arrives.
         return main.tools.Assets.icon("tabs", name, 16, name,
@@ -10310,6 +10407,7 @@ public class DreamBotMenu extends JFrame {
         // Ensure the button remains enabled so the user can click it to see the toast
         btnPageUp.setEnabled(true);
         btnPageUp.addActionListener(e -> {
+            if (provisionalPresetIndex >= 0) compactPresets();   // v1.88
             if (currentPresetPage > 0) {
                 currentPresetPage--;
                 refreshPresetButtonLabels();
@@ -10354,6 +10452,7 @@ public class DreamBotMenu extends JFrame {
          * Increments the page index if expansion is possible; otherwise, triggers a warning toast.
          */
         btnPageDown.addActionListener(e -> {
+            if (provisionalPresetIndex >= 0) compactPresets();   // v1.88
             if (canExpandPresets()) {
                 currentPresetPage++;
                 btnPageUp.setEnabled(true);
@@ -10455,14 +10554,36 @@ public class DreamBotMenu extends JFrame {
             showToast("Copied to slot " + (target + 1), presetButtons[slot], true);
         });
 
+        // v1.88: a real Delete item. The behaviour existed (promptAndDeletePreset, squash and
+        // all) but the only way to reach it was pressing Delete while the button happened to
+        // hold keyboard focus - which nobody would ever discover.
+        JMenuItem miDelete = new JMenuItem("Delete preset\u2026",
+                main.menu.components.UIIcons.trash(14, Theme.DANGER));
+        miDelete.setEnabled(actualIndex < modelPresets.size());
+        miDelete.addActionListener(a -> {
+            selectedPresetIndex = actualIndex;
+            promptAndDeletePreset();
+        });
+
         menu.add(miRename);
         menu.add(miSave);
         menu.add(miDuplicate);
+        menu.addSeparator();
+        menu.add(miDelete);
         menu.show(presetButtons[slot], x, y);
     }
 
     private void handlePresetClick(int slot, ActionEvent e) {
         int actualIndex = (currentPresetPage * 4) + slot;
+        // v1.88: clicking a DIFFERENT preset is attention moving on - drop any slot that was
+        // reset and left untouched before the indices shift under us.
+        if (provisionalPresetIndex >= 0 && provisionalPresetIndex != actualIndex) {
+            int wasSel = selectedPresetIndex;
+            selectedPresetIndex = -1;         // let the provisional slot be considered
+            compactPresets();
+            selectedPresetIndex = Math.min(wasSel, modelPresets.size() - 1);
+            actualIndex = (currentPresetPage * 4) + slot;
+        }
         boolean shift = (e.getModifiers() & ActionEvent.SHIFT_MASK) != 0;
         boolean ctrl = (e.getModifiers() & ActionEvent.CTRL_MASK) != 0;
 
@@ -10572,6 +10693,78 @@ public class DreamBotMenu extends JFrame {
             Logger.log(Logger.LogType.ERROR, i.getMessage());
             i.printStackTrace();
         }
+    }
+
+    /**
+     * v1.88: the per-preset RESET (what replaced the nuclear "Reset All"). Clears the SELECTED
+     * preset's tasks and restores its default "Preset N" name, so the slot is immediately
+     * reusable - save a different queue into it and it's yours again.
+     *
+     * <p>A reset slot is left <b>provisional</b>: still there, still clickable, but if you
+     * wander off without putting anything in it or renaming it, {@link #compactPresets()}
+     * closes the space so the strip never reads "preset 1, 2, nothing, 4".
+     */
+    private void resetSelectedPreset(JComponent anchor) {
+        if (selectedPresetIndex < 0 || selectedPresetIndex >= modelPresets.size()) {
+            showToast("Select a preset to reset", anchor, false);
+            return;
+        }
+        Preset p = modelPresets.get(selectedPresetIndex);
+        if (!p.tasks.isEmpty() && JOptionPane.showConfirmDialog(this,
+                "<html>Clear <b>\u201c" + escapeHtml(p.name) + "\u201d</b> ("
+                + p.tasks.size() + " task" + (p.tasks.size() == 1 ? "" : "s") + ")?<br><br>"
+                + "The slot stays open so you can save something new into it. Leave it empty "
+                + "and it closes up on its own.<br>"
+                + "<i>Your tasks themselves are untouched \u2014 they live in the library.</i></html>",
+                "Reset preset", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE)
+                != JOptionPane.OK_OPTION) return;
+
+        Preset blank = new Preset(defaultPresetName(selectedPresetIndex), new ArrayList<>());
+        modelPresets.set(selectedPresetIndex, blank);
+        provisionalPresetIndex = selectedPresetIndex;   // watched by compactPresets()
+        refreshPresetButtonLabels();
+        saveAll(false);
+        showToast("Reset \u2014 save a queue here, or leave it and the slot closes up",
+                anchor, true);
+    }
+
+    /** The name an untouched slot carries ("Preset 3"), used to spot ones nobody has claimed. */
+    private static String defaultPresetName(int index) { return "Preset " + (index + 1); }
+
+    /** True for a slot with no tasks and its factory name - i.e. nobody has put anything in it. */
+    private boolean isUnclaimed(int index) {
+        if (index < 0 || index >= modelPresets.size()) return false;
+        Preset p = modelPresets.get(index);
+        return p != null && (p.tasks == null || p.tasks.isEmpty())
+                && (p.name == null || p.name.isBlank() || p.name.equals(defaultPresetName(index)));
+    }
+
+    /** Set by a reset; the slot is dropped if it's still unclaimed when attention moves away. */
+    private int provisionalPresetIndex = -1;
+
+    /**
+     * v1.88: closes the gaps. Any preset that's empty AND still wearing its default name is
+     * removed and the rest shuffle down, so the strip is always a solid run of real presets.
+     * Called when attention leaves a slot - clicking another preset, changing page, or leaving
+     * the tab - never mid-edit, so a slot you're actively filling can't vanish under you.
+     */
+    private void compactPresets() {
+        boolean changed = false;
+        for (int i = modelPresets.size() - 1; i >= 0; i--) {
+            if (i == selectedPresetIndex) continue;   // never squash what's open in front of you
+            if (!isUnclaimed(i)) continue;
+            modelPresets.remove(i);
+            if (selectedPresetIndex > i) selectedPresetIndex--;
+            changed = true;
+        }
+        provisionalPresetIndex = -1;
+        if (!changed) return;
+        // a page that just emptied itself shouldn't strand you looking at nothing
+        while (currentPresetPage > 0 && currentPresetPage * 4 >= modelPresets.size())
+            currentPresetPage--;
+        if (btnPageUp != null) btnPageUp.setEnabled(currentPresetPage > 0);
+        refreshPresetButtonLabels();
+        saveAll(false);
     }
 
     private void promptAndDeletePreset() {
