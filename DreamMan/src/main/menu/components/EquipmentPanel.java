@@ -3,27 +3,40 @@ package main.menu.components;
 import main.menu.Theme;
 import main.tools.EquipmentPresets;
 import main.tools.WikiAssets;
+import org.dreambot.api.methods.container.impl.Inventory;
+import org.dreambot.api.wrappers.items.Item;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.border.TitledBorder;
 import java.awt.*;
 import java.awt.event.HierarchyEvent;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * The Equipment tab (v1.31): a replica of the in-game worn-equipment interface - the same
- * slot layout you see in the equipment tab - live-updating with what you're wearing, plus
- * equipment PRESETS: save your current setup under a name, pick a saved one from the dropdown,
- * and "Equip preset" builds a task out of the existing actions (FindBank + withdraw + Wield)
- * to change into it - after a clear warning that it interrupts whatever's running.
+ * The worn-equipment doll + live inventory (v1.86) - reshaped from the old Equipment TAB into
+ * the compact stack the live side panel hosts: the in-game 5x3 equipment layout, a preset
+ * control bar, the 4x7 inventory mirroring your backpack slot-for-slot (stack sizes drawn
+ * OSRS-style), and a second identical control bar under it, per the sketch. Presets work like
+ * the game's gear setups: save the current loadout under a name, pick one from the dropdown,
+ * and Equip builds a task from EXISTING actions (FindBank + withdraw + Wield) - after a clear
+ * warning that it interrupts whatever's running.
+ *
+ * <p>Two long-standing display bugs die here (v1.86): the HEAD (and necklace) cell never
+ * populating - the doll asked for {@code HEAD} while DreamBot answers {@code HAT}, fixed by
+ * {@link EquipmentPresets#canonicalSlot(String)} on every read - and item images sticking on
+ * their letter placeholders until a reload: the wiki fetch completed, but the ready-callback
+ * only REPAINTED the old placeholder instead of re-asking for the now-cached image; cells now
+ * re-apply the icon when it lands.
  *
  * <p>Item images ride the Loot Tracker's opt-in Wiki toggle; offline you get the letter tiles.
  */
 public class EquipmentPanel extends JPanel {
 
-    /** The in-game slot grid: 5 rows x 3 columns (null = empty cell). */
+    /** The in-game slot grid: 5 rows x 3 columns (null = empty cell). Canonical slot names. */
     private static final String[][] LAYOUT = {
             {null,     "HEAD",  null},
             {"CAPE",   "AMULET","ARROWS"},
@@ -32,27 +45,34 @@ public class EquipmentPanel extends JPanel {
             {"HANDS",  "FEET",  "RING"},
     };
 
-    /** Slot name -> the cell showing it. */
+    private static final Color PANEL_BROWN = new Color(0x21, 0x1E, 0x18);  // in-game dark panel
+    private static final Color SLOT_BROWN  = new Color(0x3A, 0x35, 0x2B);  // in-game slot fill
+    private static final Color SLOT_EDGE   = new Color(0x18, 0x16, 0x12);
+
+    /** Canonical slot name -> the doll cell showing it. */
     private final Map<String, SlotCell> cells = new LinkedHashMap<>();
-    private final JComboBox<String> presetCombo = new JComboBox<>();
+    /** The 28 inventory cells, index = in-game slot (top-left across, then down). */
+    private final InvCell[] invCells = new InvCell[28];
+
+    private final PresetBar barTop = new PresetBar();
+    private final PresetBar barBottom = new PresetBar();
     private final JLabel status = new JLabel(" ");
     private final javax.swing.Timer timer = new javax.swing.Timer(2000, e -> refreshLive());
+
+    private String selectedPreset;   // shared by both bars
 
     /** The menu wires this to: pause script -> queue the equip task -> start it. */
     private java.util.function.Consumer<main.menu.DreamBotMenu.Task> equipRunner;
     private JActionSelector actionFactory;
 
     public EquipmentPanel() {
-        setLayout(new BorderLayout(14, 0));
         setOpaque(false);
+        setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+        setBorder(new EmptyBorder(4, 8, 6, 8));
 
         // ── the paper doll ──
-        JPanel doll = new JPanel(new GridLayout(LAYOUT.length, 3, 6, 6));
-        doll.setOpaque(true);
-        doll.setBackground(new Color(0x21, 0x1E, 0x18));   // the in-game brown-dark panel
-        doll.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.BORDER, 2),
-                new EmptyBorder(10, 10, 10, 10)));
+        JPanel doll = new JPanel(new GridLayout(LAYOUT.length, 3, 5, 5));
+        doll.setOpaque(false);
         for (String[] row : LAYOUT)
             for (String slot : row) {
                 if (slot == null) {
@@ -65,91 +85,54 @@ public class EquipmentPanel extends JPanel {
                     doll.add(cell);
                 }
             }
-        JPanel dollWrap = new JPanel(new GridBagLayout());
-        dollWrap.setOpaque(false);
-        doll.setPreferredSize(new Dimension(230, 340));
-        dollWrap.add(doll);
+        add(section(" Equipment ", doll));
+        add(Box.createVerticalStrut(6));
+        add(align(barTop));
+        add(Box.createVerticalStrut(10));
 
-        // ── presets side ──
-        JLabel title = new JLabel("Equipment presets");
-        title.setForeground(Theme.ACCENT);
-        title.setFont(new Font("Segoe UI", Font.BOLD, 14));
-
-        JLabel blurb = new JLabel("<html>The doll mirrors your worn equipment live, exactly like "
-                + "the in-game tab. Save the current setup under a name, then <b>Equip preset</b> "
-                + "changes into a saved one - banking automatically for anything you're not "
-                + "carrying, using the same Walk/Bank/Wield actions your tasks do.</html>");
-        blurb.setForeground(Theme.TEXT_DIM);
-
-        presetCombo.setToolTipText("Your saved equipment setups");
-        reloadPresetCombo(null);
-
-        JButton btnSave = new Theme.ThemedButton("Save current as...");
-        btnSave.addActionListener(e -> {
-            Map<String, String> live = EquipmentPresets.readLive();
-            if (live.isEmpty()) {
-                status("Nothing worn to save - log in first.", false);
-                return;
-            }
-            String name = JOptionPane.showInputDialog(this, "Preset name:", "Save equipment preset",
-                    JOptionPane.PLAIN_MESSAGE);
-            if (name == null || name.isBlank()) return;
-            EquipmentPresets.put(name.trim(), live);
-            reloadPresetCombo(name.trim());
-            status("Saved \"" + name.trim() + "\" (" + live.size() + " slots).", true);
-        });
-
-        JButton btnEquip = new Theme.ThemedButton("Equip preset");
-        btnEquip.putClientProperty("fillColor", new Color(30, 70, 40));
-        btnEquip.addActionListener(e -> equipSelected());
-
-        JButton btnDelete = new Theme.ThemedButton("Delete");
-        btnDelete.addActionListener(e -> {
-            Object sel = presetCombo.getSelectedItem();
-            if (sel == null) return;
-            if (JOptionPane.showConfirmDialog(this, "Delete preset \"" + sel + "\"?",
-                    "Delete preset", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
-                EquipmentPresets.delete(String.valueOf(sel));
-                reloadPresetCombo(null);
-            }
-        });
-
-        JPanel presetRow = new JPanel(new BorderLayout(6, 0));
-        presetRow.setOpaque(false);
-        presetRow.add(presetCombo, BorderLayout.CENTER);
-        JPanel presetBtns = new JPanel(new GridLayout(1, 2, 4, 0));
-        presetBtns.setOpaque(false);
-        presetBtns.add(btnEquip);
-        presetBtns.add(btnDelete);
-        presetRow.add(presetBtns, BorderLayout.EAST);
+        // ── the inventory ──
+        JPanel grid = new JPanel(new GridLayout(7, 4, 4, 4));
+        grid.setOpaque(false);
+        for (int i = 0; i < invCells.length; i++) {
+            invCells[i] = new InvCell(i);
+            grid.add(invCells[i]);
+        }
+        add(section(" Inventory ", grid));
+        add(Box.createVerticalStrut(6));
+        add(align(barBottom));
+        add(Box.createVerticalStrut(6));
 
         status.setForeground(Theme.TEXT_DIM);
         status.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+        status.setHorizontalAlignment(SwingConstants.CENTER);
+        add(align(status));
 
-        JPanel side = new JPanel();
-        side.setOpaque(false);
-        side.setLayout(new BoxLayout(side, BoxLayout.Y_AXIS));
-        for (JComponent c : new JComponent[]{title, blurb, btnSave, presetRow, status})
-            c.setAlignmentX(LEFT_ALIGNMENT);
-        side.add(title);
-        side.add(Box.createVerticalStrut(6));
-        side.add(blurb);
-        side.add(Box.createVerticalStrut(14));
-        side.add(btnSave);
-        side.add(Box.createVerticalStrut(8));
-        side.add(presetRow);
-        side.add(Box.createVerticalStrut(10));
-        side.add(status);
-        side.add(Box.createVerticalGlue());
-
-        add(dollWrap, BorderLayout.WEST);
-        add(side, BorderLayout.CENTER);
+        syncBars();
 
         addHierarchyListener(e -> {
             if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0) {
                 if (isShowing()) { refreshLive(); timer.start(); } else timer.stop();
             }
         });
+    }
+
+    /** Wraps content in the in-game brown panel with a gold titled border, centred. */
+    private JComponent section(String title, JComponent content) {
+        JPanel box = new JPanel(new GridBagLayout());
+        box.setOpaque(true);
+        box.setBackground(PANEL_BROWN);
+        TitledBorder tb = BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(Theme.BORDER, 2), title);
+        tb.setTitleColor(Theme.ACCENT);
+        tb.setTitleFont(Theme.monoBold(12));
+        box.setBorder(BorderFactory.createCompoundBorder(tb, new EmptyBorder(4, 8, 8, 8)));
+        box.add(content);
+        return align(box);
+    }
+
+    private static JComponent align(JComponent c) {
+        c.setAlignmentX(CENTER_ALIGNMENT);
+        return c;
     }
 
     /** The menu injects how an equip task gets run (pause + queue-front + play). */
@@ -159,17 +142,126 @@ public class EquipmentPanel extends JPanel {
         this.equipRunner = runner;
     }
 
+    // ── presets ───────────────────────────────────────────────────────────────
+
+    /**
+     * One [Equip] [<preset> v] control bar - the sketch puts an identical pair under the doll
+     * and under the inventory, so this exists twice with shared selection state.
+     */
+    private final class PresetBar extends JPanel {
+        final JButton btnEquip = small(new Theme.ThemedButton("Equip"));
+        final JButton btnSelect = small(new Theme.ThemedButton());
+
+        PresetBar() {
+            setOpaque(false);
+            setLayout(new BorderLayout(6, 0));
+            btnEquip.setToolTipText("Change into the selected preset (interrupts the running script)");
+            btnEquip.addActionListener(e -> equipSelected());
+            btnSelect.setIcon(UIIcons.caretDown(12, Theme.TEXT_DIM));
+            btnSelect.setHorizontalTextPosition(SwingConstants.LEFT);
+            btnSelect.setIconTextGap(6);
+            btnSelect.setToolTipText("Pick, save, rename or delete equipment presets");
+            btnSelect.addActionListener(e -> showPresetMenu(btnSelect));
+            add(btnEquip, BorderLayout.WEST);
+            add(btnSelect, BorderLayout.CENTER);
+            setMaximumSize(new Dimension(240, 28));
+            setPreferredSize(new Dimension(230, 26));
+        }
+
+        private JButton small(JButton b) {
+            b.setFont(Theme.font(11));
+            b.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
+            return b;
+        }
+    }
+
+    private void syncBars() {
+        String label = selectedPreset == null ? "Select preset" : selectedPreset;
+        for (PresetBar bar : new PresetBar[]{barTop, barBottom}) {
+            bar.btnSelect.setText(label);
+            bar.btnEquip.setEnabled(selectedPreset != null);
+        }
+    }
+
+    private void showPresetMenu(Component anchor) {
+        JPopupMenu menu = new JPopupMenu();
+        List<String> names = EquipmentPresets.names();
+        if (names.isEmpty()) {
+            JMenuItem none = new JMenuItem("No presets saved yet");
+            none.setEnabled(false);
+            menu.add(none);
+        } else {
+            for (String n : names) {
+                JRadioButtonMenuItem item = new JRadioButtonMenuItem(n, n.equals(selectedPreset));
+                item.addActionListener(e -> {
+                    selectedPreset = n;
+                    syncBars();
+                    status("Selected \"" + n + "\" (" + EquipmentPresets.get(n).size() + " slots).", true);
+                });
+                menu.add(item);
+            }
+        }
+        menu.addSeparator();
+
+        JMenuItem save = new JMenuItem("Save current as...");
+        save.addActionListener(e -> {
+            Map<String, String> live = EquipmentPresets.readLive();
+            if (live.isEmpty()) {
+                status("Nothing worn to save - log in first.", false);
+                return;
+            }
+            String name = JOptionPane.showInputDialog(this, "Preset name:", "Save equipment preset",
+                    JOptionPane.PLAIN_MESSAGE);
+            if (name == null || name.isBlank()) return;
+            EquipmentPresets.put(name.trim(), live);
+            selectedPreset = name.trim();
+            syncBars();
+            status("Saved \"" + name.trim() + "\" (" + live.size() + " slots).", true);
+        });
+        menu.add(save);
+
+        JMenuItem rename = new JMenuItem("Rename selected...");
+        rename.setEnabled(selectedPreset != null);
+        rename.addActionListener(e -> {
+            String name = (String) JOptionPane.showInputDialog(this, "New name:", "Rename preset",
+                    JOptionPane.PLAIN_MESSAGE, null, null, selectedPreset);
+            if (name == null || name.isBlank() || name.trim().equals(selectedPreset)) return;
+            if (EquipmentPresets.rename(selectedPreset, name.trim())) {
+                selectedPreset = name.trim();
+                syncBars();
+                status("Renamed to \"" + name.trim() + "\".", true);
+            } else {
+                status("A preset named \"" + name.trim() + "\" already exists.", false);
+            }
+        });
+        menu.add(rename);
+
+        JMenuItem delete = new JMenuItem("Delete selected...");
+        delete.setEnabled(selectedPreset != null);
+        delete.addActionListener(e -> {
+            if (JOptionPane.showConfirmDialog(this, "Delete preset \"" + selectedPreset + "\"?",
+                    "Delete preset", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+                EquipmentPresets.delete(selectedPreset);
+                selectedPreset = null;
+                syncBars();
+                status("Preset deleted.", true);
+            }
+        });
+        menu.add(delete);
+
+        menu.show(anchor, 0, anchor.getHeight());
+    }
+
     private void equipSelected() {
-        Object sel = presetCombo.getSelectedItem();
-        if (sel == null) { status("No preset selected.", false); return; }
+        if (selectedPreset == null) { status("No preset selected.", false); return; }
         if (actionFactory == null || equipRunner == null) { status("Not wired yet.", false); return; }
 
-        List<String> missing = EquipmentPresets.missingItems(EquipmentPresets.get(String.valueOf(sel)));
+        List<String> missing = EquipmentPresets.missingItems(EquipmentPresets.get(selectedPreset));
         String detail = missing.isEmpty()
                 ? "Everything needed is already worn or carried."
                 : "Missing from inventory (will bank for these):\n  " + String.join("\n  ", missing);
         int ok = JOptionPane.showConfirmDialog(this,
-                "Equip \"" + sel + "\" now?\n\n"
+                "Equip \"" + selectedPreset + "\" now?\n\n"
                         + "This PAUSES and interrupts any running script, runs the equip task\n"
                         + "(walking to a bank if needed), then you press Play to resume your queue.\n\n"
                         + detail,
@@ -178,16 +270,10 @@ public class EquipmentPanel extends JPanel {
         if (ok != JOptionPane.OK_OPTION) return;
 
         main.menu.DreamBotMenu.Task task =
-                EquipmentPresets.buildEquipTask(String.valueOf(sel), actionFactory);
+                EquipmentPresets.buildEquipTask(selectedPreset, actionFactory);
         if (task == null) { status("Preset is empty.", false); return; }
         equipRunner.accept(task);
         status("Equip task queued - it runs now.", true);
-    }
-
-    private void reloadPresetCombo(String select) {
-        presetCombo.removeAllItems();
-        for (String n : EquipmentPresets.names()) presetCombo.addItem(n);
-        if (select != null) presetCombo.setSelectedItem(select);
     }
 
     private void status(String text, boolean good) {
@@ -195,31 +281,86 @@ public class EquipmentPanel extends JPanel {
         status.setForeground(good ? Theme.TEXT_DIM : new Color(200, 90, 70));
     }
 
-    /** Repaints every slot from the live equipment (off the EDT for the API read). */
+    // ── live refresh ──────────────────────────────────────────────────────────
+
+    /** Re-reads worn equipment AND the inventory off the EDT, then repaints every cell. */
     private void refreshLive() {
         Thread t = new Thread(() -> {
-            Map<String, String> live = EquipmentPresets.readLive();
+            Map<String, String> worn = EquipmentPresets.readLive();
+            String[] invNames = new String[28];
+            int[] invCounts = new int[28];
+            try {
+                List<Item> items = Inventory.all();   // slot-indexed; empty slots are null
+                if (items != null)
+                    for (int i = 0; i < items.size() && i < 28; i++) {
+                        Item it = items.get(i);
+                        if (it == null || it.getName() == null || it.getName().isEmpty()
+                                || "null".equalsIgnoreCase(it.getName())) continue;
+                        invNames[i] = it.getName();
+                        invCounts[i] = Math.max(1, it.getAmount());
+                    }
+            } catch (Throwable ignored) {}
             SwingUtilities.invokeLater(() -> {
                 for (Map.Entry<String, SlotCell> e : cells.entrySet())
-                    e.getValue().setItem(live.get(e.getKey()));
+                    e.getValue().setItem(worn.get(e.getKey()));
+                for (int i = 0; i < 28; i++)
+                    invCells[i].setItem(invNames[i], invCounts[i]);
             });
         }, "DreamMan-EquipRead");
         t.setDaemon(true);
         t.start();
     }
 
-    /** One equipment slot: item icon + tooltip, styled like the in-game boxes. */
-    private final class SlotCell extends JLabel {
-        private final String slot;
-        private String item;
+    // ── cells ─────────────────────────────────────────────────────────────────
 
-        SlotCell(String slot) {
-            this.slot = slot;
+    /**
+     * The shared item tile: in-game brown box showing the item's wiki image. The icon is
+     * (re-)applied through {@link #applyIcon()} which passes ITSELF as the ready-callback -
+     * the v1.86 fix for images stuck on placeholders: when the background fetch lands, the
+     * cell asks {@link WikiAssets#icon} again, hits the now-warm cache, and swaps the real
+     * image in (a cache hit registers no callback, so this terminates immediately).
+     */
+    private abstract static class ItemBox extends JLabel {
+        private final int iconPx;
+        String item;
+
+        ItemBox(int cellPx, int iconPx) {
+            this.iconPx = iconPx;
             setHorizontalAlignment(CENTER);
             setOpaque(true);
-            setBackground(new Color(0x3A, 0x35, 0x2B));   // the in-game slot brown
-            setBorder(BorderFactory.createLineBorder(new Color(0x18, 0x16, 0x12), 2));
-            setPreferredSize(new Dimension(52, 52));
+            setBackground(SLOT_BROWN);
+            setBorder(BorderFactory.createLineBorder(SLOT_EDGE, 2));
+            setPreferredSize(new Dimension(cellPx, cellPx));
+            setMinimumSize(new Dimension(cellPx, cellPx));
+        }
+
+        final void applyIcon() {
+            if (item == null) return;
+            setIcon(WikiAssets.icon(WikiAssets.Kind.ITEM, item, iconPx, this::applyIcon));
+        }
+
+        void empty() {
+            setIcon(null);
+            setText("");
+        }
+    }
+
+    /** One equipment slot, keyed by its canonical name. */
+    private final class SlotCell extends ItemBox {
+        private final String slot;
+
+        SlotCell(String slot) {
+            super(46, 34);
+            this.slot = slot;
+            showEmpty();   // labelled from the first paint - setItem(null) would no-op (item
+                           // already null), which used to leave brand-new cells blank
+        }
+
+        private void showEmpty() {
+            empty();
+            setText(shortSlot(slot));
+            setFont(new Font("Segoe UI", Font.BOLD, 9));
+            setForeground(new Color(0x6A, 0x62, 0x50));
             setToolTipText(pretty(slot) + ": empty");
         }
 
@@ -227,14 +368,10 @@ public class EquipmentPanel extends JPanel {
             if (java.util.Objects.equals(name, item)) return;
             item = name;
             if (name == null || name.isBlank()) {
-                setIcon(null);
-                setText(shortSlot(slot));
-                setFont(new Font("Segoe UI", Font.BOLD, 9));
-                setForeground(new Color(0x6A, 0x62, 0x50));
-                setToolTipText(pretty(slot) + ": empty");
+                showEmpty();
             } else {
                 setText("");
-                setIcon(WikiAssets.icon(WikiAssets.Kind.ITEM, name, 36, this::repaint));
+                applyIcon();
                 setToolTipText(pretty(slot) + ": " + name);
             }
         }
@@ -253,6 +390,53 @@ public class EquipmentPanel extends JPanel {
                 case "FEET":   return "BOOTS";
                 default:       return s;
             }
+        }
+    }
+
+    /** One inventory slot: the item image plus its stack size, drawn like the game draws it. */
+    private final class InvCell extends ItemBox {
+        private final int slot;
+        private int count;
+
+        InvCell(int slot) {
+            super(38, 30);
+            this.slot = slot;
+            setToolTipText("Slot " + (slot + 1) + ": empty");
+        }
+
+        void setItem(String name, int amount) {
+            if (java.util.Objects.equals(name, item) && amount == count) return;
+            boolean sameItem = java.util.Objects.equals(name, item);
+            item = name;
+            count = amount;
+            if (name == null) {
+                empty();
+                setToolTipText("Slot " + (slot + 1) + ": empty");
+            } else {
+                setText("");
+                if (!sameItem) applyIcon();   // count-only changes just need the repaint below
+                setToolTipText("Slot " + (slot + 1) + ": " + name
+                        + (count > 1 ? "  \u00d7" + String.format("%,d", count) : ""));
+            }
+            repaint();
+        }
+
+        @Override protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            if (item == null || count <= 1) return;
+            // OSRS stack text: yellow, then "K" white past 100K, "M" green past 10M
+            String txt;
+            Color col;
+            if (count >= 10_000_000)     { txt = (count / 1_000_000) + "M"; col = new Color(0x00, 0xFF, 0x80); }
+            else if (count >= 100_000)   { txt = (count / 1_000) + "K";     col = Color.WHITE; }
+            else                         { txt = String.valueOf(count);     col = new Color(0xFF, 0xFF, 0x00); }
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
+            g2.setColor(Color.BLACK);
+            g2.drawString(txt, 4, 12);
+            g2.setColor(col);
+            g2.drawString(txt, 3, 11);
+            g2.dispose();
         }
     }
 }

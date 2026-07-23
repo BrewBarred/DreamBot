@@ -478,6 +478,46 @@ public class ServerAccount {
         request("POST", "/me/submissions/" + enc(id) + "/ack", "{}", session().token);
     }
 
+    /**
+     * v1.82: a raw, authenticated probe for the Dev Console's Connection tab. Deliberately thin -
+     * it returns the body and lets exceptions through, because the diagnostic value is in WHICH
+     * status came back, not in a tidied result.
+     */
+    public String probe(String method, String path) throws Exception {
+        return request(method == null ? "GET" : method, path, null, session().token);
+    }
+
+    /** v1.84: an admin's view of one user - moderation state, market counts, complexity. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> adminUserProfile(String username) throws Exception {
+        requireLoggedIn();
+        String json = request("GET", "/admin/users/" + enc(username) + "/profile", null,
+                session().token);
+        Map<String, Object> m = GSON.fromJson(json,
+                new TypeToken<Map<String, Object>>() {}.getType());
+        return m == null ? new HashMap<>() : m;
+    }
+
+    /**
+     * v1.85: stores a PRIVATE copy of a listing on the user's profile. Sends the whole listing,
+     * because the server has no other way to know what it's keeping - an id alone would refer to
+     * a local file it has never seen.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> vaultScript(main.market.ScriptListing l) throws Exception {
+        requireLoggedIn();
+        if (l == null || l.bundle == null) throw new IOException("Nothing to vault.");
+        Map<String, Object> body = new HashMap<>();
+        body.put("name", l.name);
+        body.put("kind", l.kind);
+        body.put("version", l.version);
+        body.put("data", l.bundle);
+        String json = request("POST", "/vault/scripts", GSON.toJson(body), session().token);
+        Map<String, Object> m = GSON.fromJson(json,
+                new TypeToken<Map<String, Object>>() {}.getType());
+        return m == null ? new HashMap<>() : m;
+    }
+
     // ── guards ──
 
     private void requireCloud() throws IOException {

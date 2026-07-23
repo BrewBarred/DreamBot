@@ -44,7 +44,191 @@ public final class DevConsole {
         // Owners and admins both moderate; only owners can promote users, which is why the Users
         // tab keeps its own owner-gated server calls.
         tabs.addTab("Script Management", ScriptManagementPanel.build(library, market));
+        // v1.82: per-endpoint diagnostics, replacing the old "Test connection" button that
+        // only proved something answered and then printed auth salts at you.
+        tabs.addTab("Connection", ConnectionPanel.build());
         return tabs;
+    }
+
+    /**
+     * v1.82: a user's profile. The identity half is placeholders on purpose - the server has no
+     * avatar or bio to serve yet - but the MODERATION half is real UI wired to a server that
+     * doesn't implement it, and says so plainly rather than pretending.
+     *
+     * <p>Each control is a toggle: a banned user's button reads "Unban". State is optimistic and
+     * reverts if the call fails, so a fallback build can be exercised end-to-end without lying
+     * about what was persisted.
+     */
+    private static void showUserProfile(Component parent, ServerAccount server,
+                                        String username, String rank) {
+        JPanel root = new JPanel(new BorderLayout(0, 10));
+        root.setOpaque(false);
+
+        // ── identity (placeholder until the server carries profiles) ──
+        JPanel id = new JPanel(new BorderLayout(10, 0));
+        id.setOpaque(false);
+        JLabel avatar = new JLabel("\u25CF", SwingConstants.CENTER);
+        avatar.setPreferredSize(new Dimension(64, 64));
+        avatar.setForeground(Theme.BORDER_STRONG);
+        avatar.setFont(new Font("Segoe UI", Font.PLAIN, 44));
+        avatar.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+        avatar.setToolTipText("Avatars aren't stored on the server yet");
+        id.add(avatar, BorderLayout.WEST);
+
+        JPanel facts = new JPanel(new GridLayout(0, 1, 0, 2));
+        facts.setOpaque(false);
+        JLabel name = new JLabel(username);
+        name.setForeground(Theme.ACCENT);
+        name.setFont(new Font("Segoe UI", Font.BOLD, 16));
+        facts.add(name);
+        facts.add(dim("Rank: " + (rank == null || rank.isBlank() ? "free" : rank)));
+        JLabel seenLbl = dim("Joined: \u2014      Last seen: \u2014");
+        JLabel marketLbl = dim("On the market: \u2014      Downloads: \u2014");
+        JLabel subsLbl = dim("Submissions: \u2014 pending / \u2014 approved / \u2014 denied");
+        JLabel cxLbl = dim("Complexity: \u2014 tasks / \u2014 actions / \u2014 loops");
+        facts.add(seenLbl);
+        facts.add(marketLbl);
+        facts.add(subsLbl);
+        facts.add(cxLbl);
+
+        // v1.84: real numbers, computed SERVER-side from the stored bundles. A client-reported
+        // figure is exactly what someone gaming their limits would falsify, so these are only
+        // ever read, never sent.
+        new SwingWorker<java.util.Map<String, Object>, Void>() {
+            @Override protected java.util.Map<String, Object> doInBackground() throws Exception {
+                return server.adminUserProfile(username);
+            }
+            @Override protected void done() {
+                try {
+                    java.util.Map<String, Object> p = get();
+                    seenLbl.setText("Joined: " + when(p.get("joined"))
+                            + "      Last seen: " + when(p.get("lastSeen")));
+                    marketLbl.setText("On the market: " + num(p.get("onMarket"))
+                            + "      Downloads: " + num(p.get("downloads")));
+                    Object so = p.get("submissions");
+                    if (so instanceof java.util.Map) {
+                        java.util.Map<?, ?> sm = (java.util.Map<?, ?>) so;
+                        subsLbl.setText("Submissions: " + num(sm.get("pending")) + " pending / "
+                                + num(sm.get("approved")) + " approved / "
+                                + num(sm.get("denied")) + " denied");
+                    }
+                    Object co = p.get("complexity");
+                    if (co instanceof java.util.Map) {
+                        java.util.Map<?, ?> cm = (java.util.Map<?, ?>) co;
+                        long loops = (long) num(cm.get("loops"));
+                        cxLbl.setText("Complexity: " + num(cm.get("tasks")) + " tasks / "
+                                + num(cm.get("actions")) + " actions / " + loops + " loops");
+                        // A signal to look closer, deliberately NOT an automatic judgement:
+                        // a long quest routine is legitimately large.
+                        if (loops > 300) {
+                            cxLbl.setForeground(Theme.AMBER);
+                            cxLbl.setToolTipText("Unusually large for a free account \u2014 worth "
+                                    + "a look, though a long legitimate routine can reach this too.");
+                        }
+                    }
+                } catch (Exception ex) {
+                    cxLbl.setText("(stats unavailable \u2014 needs server 1.7.0+)");
+                }
+            }
+        }.execute();
+        id.add(facts, BorderLayout.CENTER);
+
+        // ── moderation ──
+        JPanel mod = new JPanel(new GridLayout(0, 1, 0, 6));
+        mod.setOpaque(false);
+        mod.setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(Theme.BORDER), " Moderation "));
+        mod.add(modToggle(parent, server, username, "mute", "Mute",
+                "Stops them commenting on market listings. Their scripts stay up."));
+        mod.add(modToggle(parent, server, username, "publishing", "Revoke publishing",
+                "Stops them putting anything new on the market. Existing listings stay."));
+        mod.add(modToggle(parent, server, username, "ban", "Ban",
+                "Blocks sign-in and all server access until they make a new account."));
+
+        root.add(id, BorderLayout.NORTH);
+        root.add(mod, BorderLayout.CENTER);
+        JOptionPane.showMessageDialog(parent, root, "Profile \u2014 " + username,
+                JOptionPane.PLAIN_MESSAGE);
+    }
+
+    /** Anyone whose last authenticated request was inside this window counts as online. */
+    private static final long ONLINE_WINDOW_MS = 15 * 60_000L;
+
+    private static int rankWeight(String tier) {
+        String t = tier == null ? "" : tier.toLowerCase();
+        if (t.equals("owner")) return 4;
+        if (t.equals("admin")) return 3;
+        if (t.equals("vip")) return 2;
+        return 1;
+    }
+
+    private static String ago(long ms) {
+        long mins = Math.max(1, (System.currentTimeMillis() - ms) / 60_000L);
+        if (mins < 60) return mins + "m ago";
+        long hrs = mins / 60;
+        if (hrs < 24) return hrs + "h ago";
+        return (hrs / 24) + "d ago";
+    }
+
+    private static long num(Object o) {
+        try { return (long) Double.parseDouble(String.valueOf(o)); }
+        catch (Throwable t) { return 0L; }
+    }
+
+    private static String when(Object o) {
+        long ms = num(o);
+        if (ms <= 0) return "\u2014";
+        return new java.text.SimpleDateFormat("yyyy-MM-dd").format(new java.util.Date(ms));
+    }
+
+    private static JLabel dim(String t) {
+        JLabel l = new JLabel(t);
+        l.setForeground(Theme.TEXT_DIM);
+        l.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        return l;
+    }
+
+    /**
+     * One moderation control. Flips label on success; on a 404 it reports that the server can't
+     * do this yet, which is the expected answer until the moderation endpoints ship.
+     */
+    private static JComponent modToggle(Component parent, ServerAccount server, String username,
+                                        String action, String label, String help) {
+        JPanel row = new JPanel(new BorderLayout(8, 0));
+        row.setOpaque(false);
+        JButton b = new Theme.ThemedButton(label);
+        final boolean[] on = {false};
+        b.addActionListener(e -> {
+            boolean want = !on[0];
+            try {
+                server.probe("POST", "/admin/users/" + username + "/" + action
+                        + (want ? "" : "/undo"));
+                on[0] = want;
+                b.setText(want ? undoLabel(label) : label);
+            } catch (Throwable ex) {
+                String m = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                boolean missing = m.contains("404") || m.toLowerCase().contains("not found");
+                JOptionPane.showMessageDialog(parent,
+                        missing
+                          ? "<html>Your server doesn't support this yet.<br><br>"
+                            + "The moderation endpoints land in the next server build \u2014 the "
+                            + "button is here so the flow<br>can be checked in the meantime. "
+                            + "Nothing was changed.</html>"
+                          : "Couldn't apply that: " + m,
+                        missing ? "Not available yet" : "Failed",
+                        missing ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.ERROR_MESSAGE);
+            }
+        });
+        row.add(b, BorderLayout.WEST);
+        JLabel h = dim(help);
+        row.add(h, BorderLayout.CENTER);
+        return row;
+    }
+
+    private static String undoLabel(String label) {
+        if (label.startsWith("Ban")) return "Unban";
+        if (label.startsWith("Mute")) return "Unmute";
+        return "Restore publishing";
     }
 
     private static final String RANK_HELP =
@@ -75,6 +259,13 @@ public final class DevConsole {
         // ── search row ──
         JTextField search = new JTextField();
         search.setToolTipText("Search all registered users by username or email");
+        // v1.84: sort + filter. "Online" is anyone seen in the last 15 minutes - last_seen is
+        // written on every authenticated request (server 1.7.0), so it's activity, not a socket.
+        JComboBox<String> sortBy = new JComboBox<>(new String[]{
+                "Recently seen", "A \u2192 Z", "Rank"});
+        JComboBox<String> showOnly = new JComboBox<>(new String[]{
+                "Everyone", "Online now", "Offline", "Admins + owner", "VIP", "Free",
+                "Banned", "Muted"});
         JButton btnSearch = new Theme.ThemedButton("Search");
         JLabel status = new JLabel(" ");
         status.setForeground(Theme.TEXT_DIM);
@@ -91,6 +282,17 @@ public final class DevConsole {
         JPanel header = new JPanel(new BorderLayout(0, 4));
         header.setOpaque(false);
         header.add(searchRow, BorderLayout.NORTH);
+        JPanel filters = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        filters.setOpaque(false);
+        JLabel sortLbl = new JLabel("Sort:");
+        sortLbl.setForeground(Theme.TEXT_DIM);
+        JLabel showLbl = new JLabel("Show:");
+        showLbl.setForeground(Theme.TEXT_DIM);
+        filters.add(sortLbl);
+        filters.add(sortBy);
+        filters.add(showLbl);
+        filters.add(showOnly);
+        header.add(filters, BorderLayout.CENTER);
         header.add(status, BorderLayout.SOUTH);
 
         // ── results table ──
@@ -125,45 +327,26 @@ public final class DevConsole {
 
         // v1.32b: the full connection diagnostic moved here from the Status tab (Status now has
         // a simple live green/red dot). Owners get the classified report on demand.
-        JButton btnTest = new Theme.ThemedButton("Test connection");
-        btnTest.setToolTipText("Run the full connection diagnostic against the configured server");
-        btnTest.addActionListener(e -> {
-            btnTest.setEnabled(false);
-            btnTest.setText("Testing\u2026");
-            final String target = url == null || url.isEmpty()
-                    ? "https://ghost-server.nz/ghost-bot" : url;
-            Thread t = new Thread(() -> {
-                main.tools.ConnectionDiagnostics.Result r =
-                        main.tools.ConnectionDiagnostics.probe(target);
-                SwingUtilities.invokeLater(() -> {
-                    btnTest.setEnabled(true);
-                    btnTest.setText("Test connection");
-                    JTextArea area = new JTextArea(r.detail);
-                    area.setEditable(false);
-                    area.setLineWrap(true);
-                    area.setWrapStyleWord(true);
-                    area.setColumns(46);
-                    area.setRows(Math.min(16, Math.max(6, r.detail.length() / 46 + 3)));
-                    area.setCaretPosition(0);
-                    area.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-                    JOptionPane.showMessageDialog(root, new JScrollPane(area),
-                            r.headline + "  (" + target + ")",
-                            r.ok() ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.ERROR_MESSAGE);
-                });
-            }, "DreamMan-ConnTest");
-            t.setDaemon(true);
-            t.start();
-        });
-
-        JPanel westActions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        // v1.83: "Test connection" removed - the Connection tab supersedes it entirely.
+        JPanel westActions = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         westActions.setOpaque(false);
-        westActions.add(btnTest);
         westActions.add(note);
+
+        // v1.83 FIX: the rank selector was created in v1.81 but never added to any visible
+        // container, so Apply always read its default and silently demoted people to free.
+        // It lives next to the button it drives.
+        JPanel rankGroup = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        rankGroup.setOpaque(false);
+        JLabel rankLbl = new JLabel("Set rank:");
+        rankLbl.setForeground(Theme.TEXT_DIM);
+        rankGroup.add(rankLbl);
+        rankGroup.add(rankBox);
+        rankGroup.add(btnPromote);
 
         JPanel actions = new JPanel(new BorderLayout(8, 0));
         actions.setOpaque(false);
         actions.add(westActions, BorderLayout.WEST);
-        actions.add(btnPromote, BorderLayout.EAST);
+        actions.add(rankGroup, BorderLayout.EAST);
 
         table.getSelectionModel().addListSelectionListener(e ->
                 btnPromote.setEnabled(table.getSelectedRow() >= 0));
@@ -194,14 +377,49 @@ public final class DevConsole {
                         status.setText("No users matched.");
                         return;
                     }
+                    // v1.84: filter, then sort, client-side. The server already returns
+                    // everything these need (lastSeen, muted, banned), so no extra round trips.
+                    List<Map<String, Object>> view = new java.util.ArrayList<>();
+                    String only = str(showOnly.getSelectedItem());
+                    long online = System.currentTimeMillis() - ONLINE_WINDOW_MS;
                     for (Map<String, Object> u : fRows) {
+                        String tier = str(u.get("tier")).toLowerCase();
+                        long seen = num(u.get("lastSeen"));
+                        boolean isOn = seen > online;
+                        boolean keep;
+                        switch (only) {
+                            case "Online now":     keep = isOn; break;
+                            case "Offline":        keep = !isOn; break;
+                            case "Admins + owner": keep = tier.equals("admin") || tier.equals("owner"); break;
+                            case "VIP":            keep = tier.equals("vip"); break;
+                            case "Free":           keep = tier.isEmpty() || tier.equals("free"); break;
+                            case "Banned":         keep = Boolean.TRUE.equals(u.get("banned")); break;
+                            case "Muted":          keep = Boolean.TRUE.equals(u.get("muted")); break;
+                            default:               keep = true;
+                        }
+                        if (keep) view.add(u);
+                    }
+                    String sort = str(sortBy.getSelectedItem());
+                    view.sort((x, y) -> {
+                        if ("A \u2192 Z".equals(sort))
+                            return str(x.get("username")).compareToIgnoreCase(str(y.get("username")));
+                        if ("Rank".equals(sort))
+                            return rankWeight(str(y.get("tier"))) - rankWeight(str(x.get("tier")));
+                        return Long.compare(num(y.get("lastSeen")), num(x.get("lastSeen")));
+                    });
+
+                    for (Map<String, Object> u : view) {
                         String name = str(u.get("username"));
                         String tier = str(u.get("tier"));
+                        long seen = num(u.get("lastSeen"));
+                        StringBuilder flags = new StringBuilder(
+                                seen > online ? "online" : (seen > 0 ? ago(seen) : "\u2014"));
+                        if (Boolean.TRUE.equals(u.get("banned"))) flags.append("  \u00b7 BANNED");
+                        if (Boolean.TRUE.equals(u.get("muted"))) flags.append("  \u00b7 muted");
                         model.addRow(new Object[]{name, tier.isEmpty() ? "free" : tier,
-                                "admin".equalsIgnoreCase(tier) || "owner".equalsIgnoreCase(tier)
-                                        ? "\u2014" : "promotable"});
+                                flags.toString()});
                     }
-                    status.setText(fRows.size() + " user(s).");
+                    status.setText(view.size() + " of " + fRows.size() + " user(s).");
                 });
             }, "DreamMan-AdminSearch");
             t.setDaemon(true);
@@ -209,6 +427,8 @@ public final class DevConsole {
         };
 
         btnSearch.addActionListener(e -> doSearch.run());
+        sortBy.addActionListener(e -> doSearch.run());
+        showOnly.addActionListener(e -> doSearch.run());
         search.addActionListener(e -> doSearch.run());
 
         btnPromote.addActionListener(e -> {
@@ -275,6 +495,28 @@ public final class DevConsole {
 
         // v1.81: load on open. The list used to start empty and only populate once you pressed
         // Search - with an empty query, which is exactly what the panel could have done itself.
+        // v1.82: double-click a user to open their profile.
+        table.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent me) {
+                if (me.getClickCount() < 2) return;
+                int r = table.getSelectedRow();
+                if (r < 0) return;
+                showUserProfile(root, server, str(model.getValueAt(r, 0)),
+                        str(model.getValueAt(r, 1)));
+            }
+        });
+
+        // Selecting a user shows THEIR current rank, so pressing Apply without touching the
+        // dropdown is a no-op instead of a demotion.
+        table.getSelectionModel().addListSelectionListener(ev -> {
+            int r = table.getSelectedRow();
+            if (r < 0) return;
+            String cur = str(model.getValueAt(r, 1));
+            if (cur.isBlank()) cur = Tier.FREE;
+            rankBox.setSelectedItem(Tier.OWNER.equalsIgnoreCase(cur) ? Tier.ADMIN : cur);
+            rankBox.setEnabled(!Tier.OWNER.equalsIgnoreCase(cur));
+        });
+
         doSearch.run();
 
         root.add(header, BorderLayout.NORTH);

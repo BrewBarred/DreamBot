@@ -69,6 +69,10 @@ public class MarketCard extends JPanel {
         /** v1.74: open a specific older version. */
         void onShowVersion(ScriptListing l);
         void onSetBuilt(ScriptListing l, boolean built);
+        /** v1.85: take a listing off the market AND return it to the local folder for editing. */
+        void onUnpublishToLocal(ScriptListing l);
+        /** v1.85: store a private copy on the user's server profile, subject to tier limits. */
+        void onVault(ScriptListing l);
         /** v1.71: true when the market is showing the server, false on the local folder page. */
         boolean isServerPage();
         boolean isOwn(ScriptListing l);
@@ -302,6 +306,10 @@ public class MarketCard extends JPanel {
             JButton build = smallButton(UIIcons.card(15, Theme.AMBER), "Edit this card");
             build.addActionListener(e -> cb.onBuildCard(listing));
             actions.add(build);
+            JButton vault = smallButton(UIIcons.folder(15, Theme.BLUE),
+                    "Vault \u2014 keep a private copy on your profile (uses your tier's space)");
+            vault.addActionListener(e -> cb.onVault(listing));
+            actions.add(vault);
             if (!listing.cardReady) {
                 JButton mark = smallButton(UIIcons.check(15, Theme.GREEN),
                         "Mark the card built \u2014 moves it down to My Market-Ready");
@@ -478,30 +486,28 @@ public class MarketCard extends JPanel {
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         actions.setOpaque(false);
-        // v1.61: build/edit the card - amber until a card exists, to pull the eye to step one
-        JButton card = smallButton(UIIcons.card(15, listing.cardReady ? Theme.TEXT_DIM : Theme.AMBER),
-                listing.cardReady ? "Edit this item's card" : "Build this item's card");
-        card.addActionListener(e -> cb.onBuildCard(listing));
-        // v1.61: publishing is gated on a finished card - the button says so before you click
-        // v1.71: the strip shows the SAME items on both pages; only this button differs.
-        // On the server page it publishes; on the local page it sends the card back to the
-        // local folder for more editing. That split is also the accidental-publish guard - you
-        // cannot reach Publish without having deliberately switched to the server page first.
+        // v1.85: no card editing from the market-ready strip. Editing a card while it sat in
+        // the publish queue was mixing up which copy you were changing; editing now happens in
+        // exactly one place - the local folder.
+        //
+        // The strip shows the SAME items on both pages; only this button differs. On the server
+        // page it publishes; on the local page it unpublishes back to the folder. That split is
+        // also the accidental-publish guard - you cannot reach Publish without having
+        // deliberately switched to the server page first.
         JButton act;
         if (cb.isServerPage()) {
             act = smallButton(
                     UIIcons.publish(16, listing.cardReady ? Theme.GREEN : Theme.TEXT_MUTED),
                     listing.cardReady ? "Publish to the market"
-                            : "A finished card is required first \u2014 click to open the card builder");
+                            : "A finished card is required first");
             act.addActionListener(e -> cb.onPublish(listing));
         } else {
-            act = smallButton(UIIcons.arrowUp(15, Theme.AMBER), "Not ready after all \u2014 "
-                    + "send this back to your local folder for more editing");
-            act.addActionListener(e -> cb.onSetBuilt(listing, false));
+            act = smallButton(UIIcons.arrowUp(15, Theme.AMBER),
+                    "Unpublish \u2014 take it off the market and back to your local folder to edit");
+            act.addActionListener(e -> cb.onUnpublishToLocal(listing));
         }
         JButton del = smallButton(UIIcons.cross(14, Theme.DANGER), "Remove from market-ready");
         del.addActionListener(e -> cb.onDeleteLocal(listing));
-        actions.add(card);
         actions.add(act);
         actions.add(del);
         add(actions, BorderLayout.SOUTH);

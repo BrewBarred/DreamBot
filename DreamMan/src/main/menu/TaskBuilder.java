@@ -419,7 +419,8 @@ public class TaskBuilder extends JPanel {
             return;
         }
 
-        Action newAction = selected.copy();
+        // v1.86: copyDeep, so duplicating a step keeps its on-start flag, chance and checks.
+        Action newAction = selected.copyDeep();
         main.tools.TargetHistory.record(newAction.getParamTarget());   // v1.31: MRU suggestions
         modelTaskBuilder.addElement(newAction);
         int addedIndex = modelTaskBuilder.getSize() - 1;   // B.17: reselect THIS row after add

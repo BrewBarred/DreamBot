@@ -552,5 +552,57 @@ public final class UIIcons {
             }
         };
     }
+
+    /**
+     * v1.86: a globe (circle + centre meridian ellipse + equator) for the minimap's world-map
+     * button - the drawn stand-in for the in-game world-map orb.
+     */
+    public static Icon globe(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                g2.setStroke(new BasicStroke(Math.max(1.3f, s / 13f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                int p = Math.round(s * 0.14f), d = s - 2 * p;
+                g2.drawOval(p, p, d, d);                                   // the sphere
+                g2.drawOval(p + Math.round(d * 0.30f), p, Math.round(d * 0.40f), d); // meridian
+                g2.drawLine(p, s / 2, p + d, s / 2);                       // equator
+            }
+        };
+    }
+
+    /** v1.86: a map flag (pole + banner) for the world-map view's flagged coordinates. */
+    public static Icon flag(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                g2.setStroke(new BasicStroke(Math.max(1.4f, s / 11f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                int px = Math.round(s * 0.30f);
+                g2.drawLine(px, Math.round(s * 0.16f), px, Math.round(s * 0.86f));  // pole
+                Path2D b = new Path2D.Float();                                       // banner
+                b.moveTo(px, s * 0.18f);
+                b.lineTo(s * 0.78f, s * 0.30f);
+                b.lineTo(px, s * 0.46f);
+                b.closePath();
+                g2.fill(b);
+            }
+        };
+    }
+
+    /**
+     * v1.86: a small filled caret pointing down, for dropdown-style buttons ("Select preset").
+     * Drawn, because the client font renders no reliable ▾ glyph (same lesson as v1.50's ✕).
+     */
+    public static Icon caretDown(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                Path2D t = new Path2D.Float();
+                t.moveTo(s * 0.22f, s * 0.38f);
+                t.lineTo(s * 0.78f, s * 0.38f);
+                t.lineTo(s * 0.50f, s * 0.68f);
+                t.closePath();
+                g2.fill(t);
+            }
+        };
+    }
 }
 

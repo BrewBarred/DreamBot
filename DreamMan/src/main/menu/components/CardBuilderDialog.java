@@ -412,6 +412,8 @@ public class CardBuilderDialog extends JDialog {
         }
         @Override public void onShowVersion(ScriptListing l) {}
         @Override public void onSetBuilt(ScriptListing l, boolean built) {}
+        @Override public void onUnpublishToLocal(ScriptListing l) {}
+        @Override public void onVault(ScriptListing l) {}
         // The preview is drawn inside the card builder, which is a local-folder surface.
         @Override public boolean isServerPage() { return false; }
         @Override public boolean isOwn(ScriptListing l) { return false; }

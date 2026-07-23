@@ -154,7 +154,10 @@ public class TaskRef extends Action {
         Runnable copy = () -> {
             if (task.getActions() != null)
                 for (Action a : task.getActions())
-                    if (a != null) steps.add(a.copy());
+                    // v1.86: copyDeep - copy() is a subclass hook and several subclasses
+                    // (Walk among them) never call copyTriggersFrom, so it drops chance,
+                    // triggers and the on-start flag.
+                    if (a != null) steps.add(a.copyDeep());
         };
         if (javax.swing.SwingUtilities.isEventDispatchThread()) {
             copy.run();

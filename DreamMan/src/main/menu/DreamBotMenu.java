@@ -525,8 +525,13 @@ public class DreamBotMenu extends JFrame {
     ///
     private final JTabbedPane mainTabs = new JTabbedPane();
     private final JPanel trackerList;
-    private final JLabel totalXpGainedLabel = new JLabel();
-    private final JLabel totalLevelsGainedLabel = new JLabel();
+    // v1.86: the side panel is the live PLAYER panel - a login card and a live card
+    private CardLayout sideCards;
+    private JPanel sideCardHost;
+    private final JLabel sidePlayerName = new JLabel(" ", SwingConstants.CENTER);
+    private final JLabel sidePlayerStats = new JLabel(" ", SwingConstants.CENTER);
+    /** One sleek line replacing the old green "xp gained / levels gained" pair (v1.86). */
+    private final JLabel sessionSummaryLabel = new JLabel(" ", SwingConstants.CENTER);
     private final JLabel totalLevelLabelP2P = new JLabel();
     private final JLabel totalLevelLabelF2P = new JLabel();
     // Patch B.1: the UI delegate is bound per-instance in updateUI(), so the bar can never be
@@ -626,6 +631,13 @@ public class DreamBotMenu extends JFrame {
         taskBuilder = new TaskBuilder(this);
         libraryPanel = new LibraryPanel();
 
+        // v1.86: the tracked-skill DETAIL panels leave the side panel (which becomes the live
+        // PLAYER panel below) for the Skill Tracker tab's east column - so the list must exist
+        // BEFORE the tabs build, because createSkillTrackerTab() now mounts it.
+        trackerList = new JPanel();
+        trackerList.setLayout(new BoxLayout(trackerList, BoxLayout.Y_AXIS));
+        trackerList.setBackground(PANEL_SURFACE);
+
         mainTabs.setBackground(Theme.SURFACE_1);
         mainTabs.setForeground(Theme.TEXT_DIM);
         mainTabs.setFont(Theme.font(13));
@@ -635,7 +647,8 @@ public class DreamBotMenu extends JFrame {
         mainTabs.addTab("Triggers", loadTabIcon("triggers_tab"), createWatchersTab());
         mainTabs.addTab("Skill Tracker", loadTabIcon("skills_tracker_tab"), createSkillTrackerTab());
         mainTabs.addTab("Loot Tracker", loadTabIcon("loot_tracker_tab"), createLootTrackerTab());
-        mainTabs.addTab("Equipment", loadTabIcon("equipment_tab"), createEquipmentTab());   // v1.31
+        // v1.86: the Equipment tab is gone - the doll, inventory and presets live in the
+        // always-reachable side panel now (buildSideLiveCard), per the sketch.
         mainTabs.addTab("Market", loadTabIcon("market_tab"), createMarketTab());
         mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
@@ -670,14 +683,9 @@ public class DreamBotMenu extends JFrame {
         projectionSpinner = new JSpinner(new SpinnerNumberModel(24, 1, 999, 1));
         styleSpinner(projectionSpinner);
 
-        trackerList = new JPanel();
-        trackerList.setLayout(new BoxLayout(trackerList, BoxLayout.Y_AXIS));
-        trackerList.setBackground(PANEL_SURFACE);
-        JScrollPane sScroll = Theme.thinScrollbars(new JScrollPane(trackerList));
-        sScroll.setBorder(null);
-        sScroll.getViewport().setBackground(PANEL_SURFACE);
-
-        ///  Define side panel
+        ///  Define side panel (v1.86: the Live Tracker becomes the live PLAYER panel - the
+        ///  player header, minimap, equipment doll, inventory and session totals, gated on
+        ///  being logged in; the tracked-skill details moved to the Skill Tracker tab)
         JPanel sidePanelContent = new JPanel(new BorderLayout());
         sidePanelContent.setPreferredSize(new Dimension(360, 0));
         sidePanelContent.setBackground(PANEL_SURFACE);
@@ -685,35 +693,16 @@ public class DreamBotMenu extends JFrame {
 
         ///  Add toggle button to show/hide side panel
         JButton btnToggleSidePanel = new Theme.ThemedButton();
-        styleHeaderLabel(totalXpGainedLabel);
-        styleHeaderLabel(totalLevelsGainedLabel);
 
-        JPanel totals = new JPanel(new GridLayout(3, 1, 5, 10));
-        totals.setOpaque(false);
+        sideCards = new CardLayout();
+        sideCardHost = new JPanel(sideCards);
+        sideCardHost.setOpaque(false);
+        sideCardHost.add(buildSideLoginCard(), "login");
+        sideCardHost.add(buildSideLiveCard(), "live");
 
-        JPanel topRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 5));
-        topRow.setOpaque(false);
-        topRow.add(totalXpGainedLabel);
-
-        JPanel middleRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 5));
-        middleRow.setOpaque(false);
-        middleRow.add(totalLevelsGainedLabel);
-
-        JPanel bottomRow = new JPanel(new GridLayout(1, 2));
-        bottomRow.setOpaque(false);
-        bottomRow.add(totalLevelLabelF2P);
-        bottomRow.add(totalLevelLabelP2P);
-
-        totals.add(topRow);
-        totals.add(middleRow);
-        totals.add(bottomRow);
-
-        ///  Add side panel controls
-        sidePanelContent.add(createSubtitle("Live Tracker"), BorderLayout.NORTH);
-        sidePanelContent.add(sScroll, BorderLayout.CENTER);
-        sidePanelContent.add(totals, BorderLayout.SOUTH);
+        sidePanelContent.add(sideCardHost, BorderLayout.CENTER);
         sidePanelContent.setVisible(false);
-        // cap the tracker width so it can never push the window wider
+        // cap the panel width so it can never push the window wider
         sidePanelContent.setMaximumSize(new Dimension(360, Integer.MAX_VALUE));
 
         this.sidePanel = new JPanel(new BorderLayout());
@@ -1062,17 +1051,11 @@ public class DreamBotMenu extends JFrame {
         btnMouseToggle = createIconButton("🖱", "Toggle mouse input", e -> toggleMouseInput());
         btnKeyboardToggle = createIconButton("⌨", "Toggle keyboard input", e -> toggleKeyboardInput());
 
-        JButton btnLogin = createButton("Login");
-        btnLogin.setToolTipText("Log in to the configured account");
-        btnLogin.addActionListener(e -> { if (scriptControls != null) scriptControls.requestLogin(); });
-        JButton btnLogout = createButton("Logout");
-        btnLogout.setToolTipText("Log out");
-        btnLogout.addActionListener(e -> { if (scriptControls != null) scriptControls.requestLogout(); });
+        // v1.86: Login/Logout left this bar for the side panel - the login card IS the Login
+        // button (logged out), and Log out sits under the live card's totals (logged in).
 
         controls.add(btnPlayPause);
         controls.add(btnStop);
-        controls.add(btnLogin);
-        controls.add(btnLogout);
         controls.add(btnMouseToggle);
         controls.add(btnKeyboardToggle);
 
@@ -3697,7 +3680,22 @@ public class DreamBotMenu extends JFrame {
 
         panelSkillTracker.add(header, BorderLayout.NORTH);
         panelSkillTracker.add(Theme.thinScrollbars(new JScrollPane(gridSkills)), BorderLayout.CENTER);
-        totalLevelLabelP2P.setForeground(TEXT_MAIN);
+
+        // v1.86: the tracked-skill DETAIL panels (gained / xp/h / TTL / projection) moved here
+        // from the old side panel - the east column, next to the grid that toggles them.
+        JLabel detailHead = new JLabel("Tracked details");
+        detailHead.setForeground(TEXT_DIM);
+        detailHead.setFont(Theme.fontBold(12));
+        detailHead.setBorder(new EmptyBorder(0, 4, 6, 0));
+        JScrollPane detailScroll = Theme.thinScrollbars(new JScrollPane(trackerList));
+        detailScroll.setBorder(null);
+        detailScroll.getViewport().setBackground(PANEL_SURFACE);
+        JPanel detailCol = new JPanel(new BorderLayout());
+        detailCol.setOpaque(false);
+        detailCol.setPreferredSize(new Dimension(300, 0));
+        detailCol.add(detailHead, BorderLayout.NORTH);
+        detailCol.add(detailScroll, BorderLayout.CENTER);
+        panelSkillTracker.add(detailCol, BorderLayout.EAST);
 
         return panelSkillTracker;
     }
@@ -4428,6 +4426,82 @@ public class DreamBotMenu extends JFrame {
         }, "DreamMan-RemoveListing").start();
     }
 
+    /**
+     * v1.85: unpublish. Takes the listing off the market AND returns it to the local folder
+     * unbuilt, so it can be edited. Previously this only cleared the built flag - a live listing
+     * went "back to local" while still being downloadable by everyone, which is the worst of both
+     * states and made it look like two different objects.
+     */
+    private void unpublishToLocal(main.market.ScriptListing l) {
+        if (l == null) return;
+        boolean live = marketRepo instanceof main.market.HttpRepository;
+        if (JOptionPane.showConfirmDialog(this,
+                "<html>Unpublish <b>" + escapeHtml(l.name) + "</b>?"
+                + "<br><br>It comes off the market and returns to your local folder, where you"
+                + "<br>can edit it and bump its version before publishing again."
+                + "<br>Only you will be able to see it.</html>",
+                "Unpublish", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+                != JOptionPane.YES_OPTION)
+            return;
+        new Thread(() -> {
+            String err = null;
+            try {
+                // Remove from the market FIRST. If that fails we leave the built flag alone,
+                // so the card never claims to be private while it's still listed.
+                if (live) marketRepo.remove(l.id);
+            } catch (Exception ex) {
+                err = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+            }
+            final String fErr = err;
+            SwingUtilities.invokeLater(() -> {
+                if (fErr != null) {
+                    showToast("Couldn't unpublish: " + fErr, marketAnchor(), false);
+                    return;
+                }
+                setCardBuilt(l, false);
+            });
+        }, "DreamMan-Unpublish").start();
+    }
+
+    /**
+     * v1.85: keep a private copy on the user's server profile. The endpoint doesn't exist yet, so
+     * this reports that plainly rather than pretending something was stored - the same fallback
+     * the moderation controls use.
+     */
+    private void vaultListing(main.market.ScriptListing l) {
+        if (l == null) return;
+        if (!main.market.ServerAccount.isLoggedIn()) {
+            showToast("Sign in first \u2014 vaulting stores the copy on your profile",
+                    marketAnchor(), false);
+            return;
+        }
+        new Thread(() -> {
+            String err = null;
+            try {
+                new main.market.ServerAccount(main.market.ServerAccount.session().baseUrl)
+                        .vaultScript(l);
+            } catch (Throwable ex) {
+                err = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+            }
+            final String fErr = err;
+            SwingUtilities.invokeLater(() -> {
+                if (fErr == null) {
+                    showToast("\"" + l.name + "\" vaulted to your profile", marketAnchor(), true);
+                    return;
+                }
+                boolean missing = fErr.contains("404") || fErr.toLowerCase().contains("not found");
+                if (missing)
+                    JOptionPane.showMessageDialog(this,
+                            "<html>Script vaulting isn't on your server yet.<br><br>"
+                            + "The button is here so the flow can be checked \u2014 <b>nothing was "
+                            + "stored</b>.<br>Your local copy is untouched.</html>",
+                            "Not available yet", JOptionPane.INFORMATION_MESSAGE);
+                else
+                    showToast("Couldn't vault that: " + fErr, marketAnchor(), false);
+            });
+        }, "DreamMan-Vault").start();
+    }
+
     // ── v1.71: the built/unbuilt gate ───────────────────────────────────────────────────────
 
     /** Shortest and longest description a card may have before it counts as built. */
@@ -4465,6 +4539,20 @@ public class DreamBotMenu extends JFrame {
                 return "The description still contains placeholder text (\"" + bad + "\").";
         if (l.bundle == null || l.bundle.tasks == null || l.bundle.tasks.isEmpty())
             return "There's nothing inside this card to publish.";
+        // v1.85: catch a version collision HERE, on the way into the queue, rather than at the
+        // publish call. The server would replace the live listing silently (1.6.0 stacking), so
+        // without this check you can mark a card ready believing it's a new version and quietly
+        // overwrite the one people already downloaded.
+        for (main.market.ScriptListing o : marketAll) {
+            if (o == null || o == l) continue;
+            if (!"server".equals(o.origin)) continue;
+            if (!isOwnListing(o)) continue;
+            if (o.name == null || !o.name.equalsIgnoreCase(l.name)) continue;
+            if (Math.abs(o.version - l.version) < 0.0001)
+                return "You already have \"" + o.name + "\" v" + String.format("%.1f", o.version)
+                        + " on the market. Bump this card's version, or unpublish that one first "
+                        + "\u2014 publishing at the same version replaces it, ratings and all.";
+        }
         return null;
     }
 
@@ -4755,6 +4843,12 @@ public class DreamBotMenu extends JFrame {
             // Showing another version is just opening its detail - the grid keeps showing the
             // newest, so picking an old build never silently changes what "the" card means.
             openListingDetail(l, false);
+        }
+        @Override public void onUnpublishToLocal(main.market.ScriptListing l) {
+            unpublishToLocal(l);
+        }
+        @Override public void onVault(main.market.ScriptListing l) {
+            vaultListing(l);
         }
         @Override public boolean isServerPage() {
             return marketRepo instanceof main.market.HttpRepository;
@@ -6653,7 +6747,9 @@ public class DreamBotMenu extends JFrame {
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (r != JOptionPane.OK_OPTION) return null;
         Action a = sel.getSelectedAction();
-        return a == null ? null : a.copy();
+        // v1.86: copyDeep(), not copy() - copy() relies on each subclass ctor remembering to
+        // carry chance/on-start/triggers, which is exactly the assumption that failed.
+        return a == null ? null : a.copyDeep();
     }
 
     /** v1.62: current library task names (sorted, de-duped) for the TaskRef param dropdown. */
@@ -8430,11 +8526,6 @@ public class DreamBotMenu extends JFrame {
         setKeyboardInput(!isKeyboardInput);
     }
 
-    private void styleHeaderLabel(JLabel l) {
-        l.setForeground(TEXT_MAIN); l.setFont(new Font("Consolas", Font.BOLD, 15));
-        l.setHorizontalAlignment(SwingConstants.RIGHT);
-    }
-
     private void styleSpinner(JSpinner s) {
         JFormattedTextField field = ((JSpinner.DefaultEditor) s.getEditor()).getTextField();
         field.setBackground(new Color(30, 30, 30));
@@ -8512,12 +8603,91 @@ public class DreamBotMenu extends JFrame {
         return panel;
     }
 
-    /** v1.31: the Equipment tab - live paper doll + presets that equip via a generated task. */
-    private JPanel createEquipmentTab() {
-        JPanel panel = new JPanel(new BorderLayout(0, 10));
-        panel.setOpaque(false);
-        panel.setBorder(BorderFactory.createEmptyBorder(12, 14, 12, 14));
-        panel.add(createSubtitle("Equipment"), BorderLayout.NORTH);
+    // ── v1.86: the live side panel ───────────────────────────────────────────
+
+    /**
+     * The side panel while LOGGED OUT: just the relocated Login button (auto-login through the
+     * script, exactly what the old control-bar button did) with a line saying what appears
+     * once you're in. The panel is gated because everything on the live card - position, worn
+     * gear, inventory, quest points - only exists with a logged-in player behind it.
+     */
+    private JPanel buildSideLoginCard() {
+        JPanel stack = new JPanel();
+        stack.setOpaque(false);
+        stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
+
+        JLabel head = new JLabel("Live Panel");
+        head.setForeground(COLOR_BLOOD);
+        head.setFont(new Font("Consolas", Font.BOLD, 20));
+
+        JLabel blurb = new JLabel("<html><div style='width:210px;text-align:center'>"
+                + "Log in and your player appears here - minimap, worn equipment, inventory "
+                + "and session totals.</div></html>");
+        blurb.setForeground(TEXT_DIM);
+        blurb.setFont(Theme.font(12));
+
+        JButton btnLogin = createButton("Login");
+        btnLogin.putClientProperty("accent", Boolean.TRUE);
+        btnLogin.setToolTipText("Log in to the configured account");
+        btnLogin.addActionListener(e -> { if (scriptControls != null) scriptControls.requestLogin(); });
+
+        for (JComponent c : new JComponent[]{head, blurb, btnLogin}) c.setAlignmentX(0.5f);
+        stack.add(head);
+        stack.add(Box.createVerticalStrut(10));
+        stack.add(blurb);
+        stack.add(Box.createVerticalStrut(18));
+        stack.add(btnLogin);
+
+        JPanel card = new JPanel(new GridBagLayout());   // centres the stack both ways
+        card.setOpaque(false);
+        card.add(stack);
+        return card;
+    }
+
+    /**
+     * The side panel while LOGGED IN (v1.86) - the sketch, top to bottom: username, then the
+     * "Cbt · Total · QP" line, the circular minimap (globe button opens the full Explv world
+     * map), the equipment doll + inventory with their preset bars (scrolling as one block),
+     * and at the bottom the session summary line, the F2P/P2P totals with their stars, and the
+     * relocated Log out.
+     */
+    private JPanel buildSideLiveCard() {
+        JPanel card = new JPanel(new BorderLayout(0, 6));
+        card.setOpaque(false);
+        card.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+        // ── header: who + the three numbers + the minimap ──
+        sidePlayerName.setForeground(TEXT_MAIN);
+        sidePlayerName.setFont(new Font("Consolas", Font.BOLD, 17));
+        sidePlayerStats.setForeground(TEXT_DIM);
+        sidePlayerStats.setFont(new Font("Consolas", Font.PLAIN, 12));
+
+        main.menu.components.MiniMapPanel miniMap = new main.menu.components.MiniMapPanel(() -> {
+            try {
+                if (!Client.isLoggedIn()) return null;
+                org.dreambot.api.wrappers.interactive.Player me = Players.getLocal();
+                if (me == null) return null;
+                Tile t = me.getTile();
+                return t == null ? null : new int[]{t.getX(), t.getY(), t.getZ()};
+            } catch (Throwable ignored) {
+                return null;
+            }
+        });
+        miniMap.setPreferredSize(new Dimension(200, 208));
+
+        JPanel head = new JPanel();
+        head.setOpaque(false);
+        head.setLayout(new BoxLayout(head, BoxLayout.Y_AXIS));
+        for (JComponent c : new JComponent[]{sidePlayerName, sidePlayerStats, miniMap})
+            c.setAlignmentX(0.5f);
+        head.add(sidePlayerName);
+        head.add(Box.createVerticalStrut(2));
+        head.add(sidePlayerStats);
+        head.add(Box.createVerticalStrut(6));
+        head.add(miniMap);
+        card.add(head, BorderLayout.NORTH);
+
+        // ── centre: the doll + inventory + preset bars, scrolling as one ──
         main.menu.components.EquipmentPanel eq = new main.menu.components.EquipmentPanel();
         // Equipping a preset = a real Task built from FindBank/Bank/Wield, injected at the
         // CURRENT queue position and started immediately. When it finishes, the queue simply
@@ -8532,8 +8702,42 @@ public class DreamBotMenu extends JFrame {
                     isMenuPaused(false);
                     showToast("Equipping now: " + task.getName(), listTaskList, true);
                 });
-        panel.add(eq, BorderLayout.CENTER);
-        return panel;
+        JScrollPane eqScroll = Theme.thinScrollbars(new JScrollPane(eq));
+        eqScroll.setBorder(null);
+        eqScroll.getViewport().setBackground(PANEL_SURFACE);
+        eqScroll.getVerticalScrollBar().setUnitIncrement(14);
+        card.add(eqScroll, BorderLayout.CENTER);
+
+        // ── bottom: session line, the starred totals, Log out ──
+        sessionSummaryLabel.setFont(new Font("Consolas", Font.PLAIN, 12));
+        sessionSummaryLabel.setForeground(TEXT_DIM);
+
+        for (JLabel star : new JLabel[]{totalLevelLabelF2P, totalLevelLabelP2P}) {
+            star.setForeground(TEXT_MAIN);
+            star.setFont(new Font("Consolas", Font.BOLD, 14));
+            star.setHorizontalAlignment(SwingConstants.CENTER);
+        }
+        JPanel stars = new JPanel(new GridLayout(1, 2));
+        stars.setOpaque(false);
+        stars.add(totalLevelLabelF2P);
+        stars.add(totalLevelLabelP2P);
+
+        JButton btnLogout = createButton("Log out");
+        btnLogout.setToolTipText("Log this character out");
+        btnLogout.addActionListener(e -> { if (scriptControls != null) scriptControls.requestLogout(); });
+        JPanel logoutRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
+        logoutRow.setOpaque(false);
+        logoutRow.add(btnLogout);
+
+        JPanel south = new JPanel(new GridLayout(3, 1, 0, 6));
+        south.setOpaque(false);
+        south.setBorder(BorderFactory.createEmptyBorder(4, 0, 2, 0));
+        south.add(sessionSummaryLabel);
+        south.add(stars);
+        south.add(logoutRow);
+        card.add(south, BorderLayout.SOUTH);
+
+        return card;
     }
 
     private ImageIcon loadTabIcon(String name) {
@@ -8587,28 +8791,8 @@ public class DreamBotMenu extends JFrame {
                 }
             }
 
-            ///  Update Live Tracker
-            //  Update level total display
-            totalLevelsGainedLabel.setText("▲ " + totalLevelsGained + " level(s) gained");
-            totalLevelsGainedLabel.setForeground(new Color(0, 180, 0));
-            totalLevelsGainedLabel.setFont(new Font("Consolas", Font.BOLD, 14));
-
-            //  Update XP total display
-            totalXpGainedLabel.setText("▲ " + totalXPGained + " xp gained");
-            totalXpGainedLabel.setForeground(new Color(0, 180, 0));
-            totalXpGainedLabel.setFont(new Font("Consolas", Font.BOLD, 14));
-
-            //  Update F2P total level display
-            totalLevelLabelF2P.setText("Total: " + f2pTotal);
-            totalLevelLabelF2P.setIcon(loadStatusIcon("F2P_icon"));
-            totalLevelLabelF2P.setIconTextGap(8);
-            totalLevelLabelF2P.setHorizontalAlignment(SwingConstants.CENTER);
-
-            //  Update P2P total level display
-            totalLevelLabelP2P.setText("Total: " + p2pTotal);
-            totalLevelLabelP2P.setIcon(loadStatusIcon("P2P_icon"));
-            totalLevelLabelP2P.setIconTextGap(8);
-            totalLevelLabelP2P.setHorizontalAlignment(SwingConstants.CENTER);
+            ///  Update the live side panel (v1.86)
+            updateSidePanel(totalXPGained, totalLevelsGained, f2pTotal, p2pTotal);
 
             ///  Update Status tab
             boolean isMember = Client.isMembers();
@@ -8640,6 +8824,103 @@ public class DreamBotMenu extends JFrame {
             setMouseInput(getMouseInput());
             setKeyboardInput(getKeyboardInput());
         });
+    }
+
+    /**
+     * Refreshes the live side panel each UI tick (v1.86): flips the login/live card on the
+     * actual login state, fills the player header (name; combat level computed from live
+     * stats; the P2P total the loop just summed; quest points via varp 101), rebuilds the
+     * session summary line, and keeps the starred F2P/P2P totals current. Fully guarded -
+     * a mid-hop client read can never take the UI timer down.
+     */
+    private void updateSidePanel(long totalXPGained, int totalLevelsGained,
+                                 int f2pTotal, int p2pTotal) {
+        boolean in = false;
+        try { in = Client.isLoggedIn(); } catch (Throwable ignored) {}
+        if (sideCards != null && sideCardHost != null)
+            sideCards.show(sideCardHost, in ? "live" : "login");
+
+        totalLevelLabelF2P.setText("Total: " + f2pTotal);
+        totalLevelLabelF2P.setIcon(loadStatusIcon("F2P_icon"));
+        totalLevelLabelF2P.setIconTextGap(8);
+        totalLevelLabelP2P.setText("Total: " + p2pTotal);
+        totalLevelLabelP2P.setIcon(loadStatusIcon("P2P_icon"));
+        totalLevelLabelP2P.setIconTextGap(8);
+
+        if (!in) return;
+
+        try {
+            org.dreambot.api.wrappers.interactive.Player me = Players.getLocal();
+            String name = me == null ? null : me.getName();
+            sidePlayerName.setText(name == null || name.isEmpty() ? "\u2014" : name);
+        } catch (Throwable t) {
+            sidePlayerName.setText("\u2014");
+        }
+
+        int qp = questPoints();
+        sidePlayerStats.setText("Cbt " + combatLevel() + "  \u00b7  Total " + p2pTotal
+                + "  \u00b7  QP " + (qp < 0 ? "\u2014" : qp));
+
+        // the sleek one-liner that replaced "▲ xp gained / ▲ levels gained" (v1.86): what this
+        // session's TRACKED skills earned, plus their combined pace (SkillData's own xp/h, so
+        // Reset trackers restarts this line too)
+        long xph = 0;
+        boolean tracking = false;
+        for (SkillData d : skillRegistry.values())
+            if (d.isTracking()) {
+                tracking = true;
+                xph += Math.max(0, d.getXpPerHour());
+            }
+        sessionSummaryLabel.setText(!tracking
+                ? "session: no skills tracked yet"
+                : "+" + String.format("%,d", totalXPGained) + " xp  \u00b7  +" + totalLevelsGained
+                        + " lvl  \u00b7  " + compact(xph) + " xp/h");
+    }
+
+    /** OSRS combat level from live stats; 0 when the client can't be read. */
+    private static int combatLevel() {
+        try {
+            int att = Skills.getRealLevel(Skill.ATTACK), str = Skills.getRealLevel(Skill.STRENGTH);
+            int def = Skills.getRealLevel(Skill.DEFENCE), hp = Skills.getRealLevel(Skill.HITPOINTS);
+            int pray = Skills.getRealLevel(Skill.PRAYER), rng = Skills.getRealLevel(Skill.RANGED);
+            int mag = Skills.getRealLevel(Skill.MAGIC);
+            double base = 0.25 * (def + hp + Math.floor(pray / 2.0));
+            double melee = 0.325 * (att + str);
+            double range = 0.325 * Math.floor(rng * 1.5);
+            double mage  = 0.325 * Math.floor(mag * 1.5);
+            return (int) Math.floor(base + Math.max(melee, Math.max(range, mage)));
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    // Quest points live in varp 101. PlayerSettings is resolved reflectively because its
+    // package has moved between client builds (same defensive pattern as BankPin, v1.44).
+    private static java.lang.reflect.Method qpGetConfig;
+    private static boolean qpLookupFailed;
+
+    /** Quest points from varp 101, or -1 when the client offers no way to read them. */
+    private static int questPoints() {
+        try {
+            if (qpGetConfig == null && !qpLookupFailed) {
+                Class<?> ps = Class.forName("org.dreambot.api.methods.settings.PlayerSettings");
+                qpGetConfig = ps.getMethod("getConfig", int.class);
+            }
+            if (qpGetConfig != null) {
+                Object v = qpGetConfig.invoke(null, 101);
+                if (v instanceof Number) return ((Number) v).intValue();
+            }
+        } catch (Throwable t) {
+            qpLookupFailed = true;
+        }
+        return -1;
+    }
+
+    /** 1234 -> "1.2k", 1480000 -> "1.48m" - the side panel's xp/h formatter. */
+    private static String compact(long n) {
+        if (n >= 1_000_000) return String.format("%.2fm", n / 1_000_000.0);
+        if (n >= 1_000) return String.format("%.1fk", n / 1_000.0);
+        return String.valueOf(n);
     }
 
     private JPanel createInfoCard(String title) {

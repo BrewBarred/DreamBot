@@ -56,6 +56,12 @@ public abstract class Action {
         for (main.watchers.Trigger t : other.getTriggers())
             if (t != null) triggers.add(new main.watchers.Trigger(t));
         this.chancePercent = other.chancePercent;
+        // v1.86 BUGFIX: on-start-only was NOT carried here. Chance-to-run was folded in when
+        // Patch B.7 landed and the v1.31 on-start flag never was, so every subclass copy ctor
+        // silently dropped it. Any copy - reloading the menu, duplicating a task, staging one for
+        // the market - reset a setup action to "runs every loop", which is what kept breaking
+        // scripts even after the v1.68 save fix. Separate path, separate bug.
+        this.onStartOnly = other.onStartOnly;
     }
 
     /** Reserved key under which attached triggers ride inside serialize()/deserialize(). */
@@ -153,6 +159,14 @@ public abstract class Action {
     ///
     public abstract boolean execute();
     public abstract String getParamTarget();
+    /**
+     * Subclass hook: duplicate this action's OWN fields. Not every subclass calls
+     * {@link #copyTriggersFrom}, so this alone is not guaranteed to carry chance-to-run, attached
+     * checks or the on-start flag.
+     *
+     * <p><b>Callers should use {@link #copyDeep()}</b>, which applies that shared state itself.
+     * Relying on copy() is what caused on-start-only to be lost on every menu reload (v1.86).
+     */
     public abstract Action copy();
 
     /**

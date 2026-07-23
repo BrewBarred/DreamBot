@@ -161,7 +161,7 @@ public class JActionSelector extends JComboBox<Action> {
             }
         }
 
-        selectedAction = action.copy();
+        selectedAction = action.copyDeep();   // v1.86
         currentPanel = selectedAction.getParamPanel();
     }
 
@@ -180,7 +180,7 @@ public class JActionSelector extends JComboBox<Action> {
      */
     public static Action createByType(String type) {
         Action prototype = REGISTRY.get(type);
-        return prototype != null ? prototype.copy() : null;
+        return prototype != null ? prototype.copyDeep() : null;   // v1.86
     }
 
     /**
@@ -194,7 +194,7 @@ public class JActionSelector extends JComboBox<Action> {
                 ? (Action) selection
                 : REGISTRY.get(REGISTRY.keySet().iterator().next());
 
-        selectedAction = prototype.copy();
+        selectedAction = prototype.copyDeep();   // v1.86
         currentPanel = selectedAction.getParamPanel();
         // v1.30 LAG FIX: no logging here. This runs on the EDT for EVERY dropdown change, and
         // DreamBot's Logger can block behind the client thread for seconds - which is exactly
