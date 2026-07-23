@@ -25,14 +25,24 @@ public final class ChatLog {
     /** One line in a log. */
     public static final class Entry {
         public final long at = System.currentTimeMillis();
-        public final String type;     // GAME, PUBLIC, PRIVATE, TRADE, CLAN, NOTE (player log)
+        public final String type;     // chat: GAME, PUBLIC, PRIVATE, TRADE, CLAN, CHANNEL, GROUP
+                                      // player log: NOTE, DIALOGUE, WIDGET, READ
         public final String who;      // sender ("" for game messages / notes)
         public final String text;
+        /**
+         * v1.87: what a double-click COPIES - the reusable piece of the line. A dialogue entry's
+         * payload is its option list ("Yes.|No thanks."), a widget read's is the raw text, so
+         * task builders paste exactly what they need instead of trimming timestamps by hand.
+         */
+        public final String payload;
 
-        Entry(String type, String who, String text) {
+        Entry(String type, String who, String text) { this(type, who, text, null); }
+
+        Entry(String type, String who, String text, String payload) {
             this.type = type == null ? "GAME" : type;
             this.who = who == null ? "" : who;
             this.text = text == null ? "" : text;
+            this.payload = payload == null || payload.isBlank() ? this.text : payload;
         }
 
         @Override public String toString() {
@@ -49,9 +59,24 @@ public final class ChatLog {
 
     // ── feeding ──────────────────────────────────────────────────────────────
 
+    /**
+     * v1.87: how far back {@link #chat} looks for an identical line before dropping the new one
+     * as a duplicate. The capture-all hook and the per-channel hooks can BOTH deliver the same
+     * message (that's how catching everything without missing anything works); the same
+     * sender + text landing twice inside this window is one message, not two.
+     */
+    private static final long DEDUPE_MS = 400;
+
     public static void chat(String type, String who, String text) {
         if (text == null || text.isBlank()) return;
         synchronized (CHAT) {
+            long now = System.currentTimeMillis();
+            java.util.Iterator<Entry> it = CHAT.descendingIterator();
+            while (it.hasNext()) {
+                Entry e = it.next();
+                if (now - e.at > DEDUPE_MS) break;
+                if (e.text.equals(text) && e.who.equals(who == null ? "" : who)) return;
+            }
             CHAT.addLast(new Entry(type, who, text));
             while (CHAT.size() > MAX) CHAT.removeFirst();
         }
@@ -60,12 +85,44 @@ public final class ChatLog {
 
     /** Appends a line to the Player Log (widget reads, script notes). */
     public static void note(String label, String text) {
+        playerLog("NOTE", label, text, null);
+    }
+
+    /** v1.87: the general Player Log appender - type, label, display text, copy payload. */
+    public static void playerLog(String type, String who, String text, String payload) {
         if (text == null || text.isBlank()) return;
         synchronized (PLAYER_LOG) {
-            PLAYER_LOG.addLast(new Entry("NOTE", label == null ? "" : label, text));
+            PLAYER_LOG.addLast(new Entry(type, who == null ? "" : who, text, payload));
             while (PLAYER_LOG.size() > MAX) PLAYER_LOG.removeFirst();
         }
         revision++;
+    }
+
+    /**
+     * v1.87: one dialogue moment - who said what, and which options appeared. Fed by the
+     * DialogueWatcher (automatic, whenever a dialogue changes on screen) and the Read action.
+     * The copy payload is the option list when there is one (that's what a Chat action wants
+     * pasted into it), otherwise the spoken line.
+     */
+    public static void dialogue(String npc, String text, String[] options) {
+        boolean hasOpts = options != null && options.length > 0;
+        String opts = hasOpts ? String.join("|", options) : "";
+        // the watcher extracts "Hans" FROM "Hans: line", so drop the prefix here or the log
+        // reads "Hans: Hans: line" - and the payload should be the clean spoken line anyway
+        String line = text == null ? "" : text.trim();
+        if (npc != null && !npc.isBlank() && line.regionMatches(true, 0, npc + ":", 0, npc.length() + 1))
+            line = line.substring(npc.length() + 1).trim();
+        String display = (line.isBlank() ? "" : line)
+                + (hasOpts ? (line.isBlank() ? "" : "  ")
+                        + "[options: " + String.join(" | ", options) + "]" : "");
+        if (display.isBlank()) return;
+        playerLog("DIALOGUE", npc, display, hasOpts ? opts : line);
+    }
+
+    /** v1.87: one widget read - the id path it came from and the text it held. */
+    public static void widget(String path, String text) {
+        if (text == null || text.isBlank()) return;
+        playerLog("WIDGET", path, "[" + path + "]  " + text, text);
     }
 
     // ── reading ──────────────────────────────────────────────────────────────

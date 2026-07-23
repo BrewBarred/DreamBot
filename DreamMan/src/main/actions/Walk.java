@@ -34,7 +34,7 @@ public class Walk extends Action {
         super();
         paramTarget = new JParamTextField(DEFAULT_TARGET);
         paramArrive = new JParamTextField("3");
-        chkArrive = new JCheckBox("Skip if already within (tiles):", true);
+        chkArrive = new JCheckBox("Skip if within (tiles):", true);   // v1.87: fits the 300px column
         chkArrive.setOpaque(false);
         chkArrive.setToolTipText("v1.31: when ticked, the walk is skipped entirely if you're"
                 + " already this close to the destination. Untick to always walk.");
@@ -165,19 +165,24 @@ public class Walk extends Action {
 
         // v1.31: the arrive gate is now an explicit checkbox (clarity ask) - the field greys
         // out when it's off, and off means "always walk, never skip".
-        JPanel arrive = new JPanel();
-        arrive.setLayout(new BoxLayout(arrive, BoxLayout.Y_AXIS));
+        // v1.87: checkbox and field share ONE row. The old vertical stack gave the checkbox
+        // the column's full width and let a narrow client CLIP its label to "Skip if already"
+        // (the Walk screenshot bug); a BorderLayout row keeps the shortened label whole and
+        // hands the field whatever width is left.
+        JPanel arrive = new JPanel(new java.awt.BorderLayout(6, 0));
         arrive.setOpaque(false);
-        chkArrive.setAlignmentX(0f);
-        paramArrive.setAlignmentX(0f);
-        paramArrive.setMaximumSize(new java.awt.Dimension(120, 28));
         paramArrive.setEnabled(chkArrive.isSelected());
-        arrive.add(chkArrive);
-        arrive.add(Box.createVerticalStrut(4));
-        arrive.add(paramArrive);
-        arrive.add(Box.createVerticalStrut(10));
+        arrive.add(chkArrive, java.awt.BorderLayout.WEST);
+        arrive.add(paramArrive, java.awt.BorderLayout.CENTER);
+        arrive.setMaximumSize(new java.awt.Dimension(280, 30));
+        JPanel arriveWrap = new JPanel();
+        arriveWrap.setLayout(new BoxLayout(arriveWrap, BoxLayout.Y_AXIS));
+        arriveWrap.setOpaque(false);
+        arrive.setAlignmentX(0f);
+        arriveWrap.add(arrive);
+        arriveWrap.add(Box.createVerticalStrut(10));
 
-        return main.actions.ActionUtil.stack(target, arrive);
+        return main.actions.ActionUtil.stack(target, arriveWrap);
     }
 
     @Override

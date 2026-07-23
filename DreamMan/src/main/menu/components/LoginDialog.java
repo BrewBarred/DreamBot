@@ -116,17 +116,7 @@ public final class LoginDialog {
                         doLoginAttempt(parent, url, cb, user, pass, show, error));
             },
             () -> {
-                ServerAccount server = new ServerAccount(url);
-                Map<String, Object> salts = server.vaultSalts(username);
-                String kekSalt = str(salts.get("kekSalt")), authSalt = str(salts.get("authSalt"));
-                String authHash = Vault.authHash(password.clone(), authSalt);
-                Map<String, Object> res = server.vaultLogin(username, authHash);
-                SecretKey kek = Vault.deriveKek(password.clone(), kekSalt);
-                String wrapped = str(res.get("wrappedByKek"));
-                SecretKey vaultKey = Vault.unwrapKey(wrapped, kek);
-                if (vaultKey == null) throw new IllegalStateException("Wrong password.");
-                String plain = Vault.decryptData(str(res.get("ciphertext")), vaultKey);
-                AccountVault.unlock(vaultKey, plain == null ? "[]" : plain);
+                performLogin(url, username, password);
                 return null;
             }, cb, "Signed in.");
     }
@@ -161,24 +151,7 @@ public final class LoginDialog {
         // all crypto up-front so we can show the recovery code, then register
         final String[] recoveryHolder = new String[1];
         runThen(parent, ex -> registerFailed(parent, url, cb, ex), () -> {
-            String authSalt = Vault.newSalt(), kekSalt = Vault.newSalt(), recSalt = Vault.newSalt();
-            String authHash = Vault.authHash(p1.clone(), authSalt);
-            SecretKey kek = Vault.deriveKek(p1.clone(), kekSalt);
-            SecretKey vaultKey = Vault.newVaultKey();
-            String recoveryCode = Vault.newRecoveryCode();
-            recoveryHolder[0] = recoveryCode;
-            String wrappedByKek = Vault.wrapKey(vaultKey, kek);
-            String wrappedByRec = Vault.wrapKey(vaultKey, Vault.recoveryKey(recoveryCode, recSalt));
-            String emptyAccounts = Vault.encryptData("[]", vaultKey);
-
-            Map<String, String> fields = new java.util.LinkedHashMap<>();
-            fields.put("authSalt", authSalt); fields.put("kekSalt", kekSalt);
-            fields.put("recoverySalt", recSalt); fields.put("authHash", authHash);
-            fields.put("wrappedByKek", wrappedByKek); fields.put("wrappedByRecovery", wrappedByRec);
-            fields.put("ciphertext", emptyAccounts);
-
-            new ServerAccount(url).vaultRegister(username, fields);
-            AccountVault.unlock(vaultKey, "[]");
+            recoveryHolder[0] = performRegister(url, username, p1);
             return null;
         }, () -> {
             showRecoveryCode(parent, username, recoveryHolder[0]);
@@ -187,7 +160,7 @@ public final class LoginDialog {
     }
 
     /** The one-time recovery-code screen: copy, download .txt, and an "I've saved it" gate. */
-    private static void showRecoveryCode(Component parent, String username, String code) {
+    static void showRecoveryCode(Component parent, String username, String code) {
         JPanel panel = new JPanel(new BorderLayout(0, 10));
         panel.setBorder(new EmptyBorder(6, 6, 6, 6));
 
@@ -273,35 +246,82 @@ public final class LoginDialog {
         }
 
         runAsync(parent, "Recovering...", ex -> recoveryFailed(parent, url, cb, ex), () -> {
-            ServerAccount server = new ServerAccount(url);
-            Map<String, Object> salts = server.vaultSalts(username);
-            String recSalt = str(salts.get("recoverySalt"));
-            Map<String, Object> rec = server.vaultRecovery(username);
-            SecretKey recKey = Vault.recoveryKey(code, recSalt);
-            SecretKey vaultKey = Vault.unwrapKey(str(rec.get("wrappedByRecovery")), recKey);
-            if (vaultKey == null) throw new IllegalStateException("Wrong recovery code.");
-            String plain = Vault.decryptData(str(rec.get("ciphertext")), vaultKey);
-
-            // the recovery response includes a token, so we can immediately re-wrap the SAME vault
-            // key under the NEW password. The data itself is never re-encrypted - only the key.
-            String token = str(rec.get("token"));
-            ServerAccount.session().baseUrl = url;
-            ServerAccount.session().token = token;
-            ServerAccount.session().username = username;
-
-            String newAuthSalt = Vault.newSalt(), newKekSalt = Vault.newSalt();
-            String newAuthHash = Vault.authHash(np.clone(), newAuthSalt);
-            SecretKey newKek = Vault.deriveKek(np.clone(), newKekSalt);
-            String newWrapped = Vault.wrapKey(vaultKey, newKek);
-
-            Map<String, String> fields = new java.util.LinkedHashMap<>();
-            fields.put("authSalt", newAuthSalt); fields.put("kekSalt", newKekSalt);
-            fields.put("authHash", newAuthHash); fields.put("wrappedByKek", newWrapped);
-            server.rewrap(fields);   // persist the new-password wrapping on the server
-
-            AccountVault.unlock(vaultKey, plain == null ? "[]" : plain);
+            performRecovery(url, username, code, np);
             return null;
         }, cb, "Recovered - your new password is now set. You're logged in.");
+    }
+
+    // ── v1.87: the flows themselves, extracted so the Account tab's in-tab sign-in UI
+    //    (AccountAuthPanel) and this dialog run the IDENTICAL crypto - one implementation,
+    //    two skins. All password handling stays exactly as audited in B.15. ──
+
+    /** The complete login: salts → auth hash → vault unlock. Throws with a classifiable cause. */
+    public static void performLogin(String url, String username, char[] password) throws Exception {
+        ServerAccount server = new ServerAccount(url);
+        Map<String, Object> salts = server.vaultSalts(username);
+        String kekSalt = str(salts.get("kekSalt")), authSalt = str(salts.get("authSalt"));
+        String authHash = Vault.authHash(password.clone(), authSalt);
+        Map<String, Object> res = server.vaultLogin(username, authHash);
+        SecretKey kek = Vault.deriveKek(password.clone(), kekSalt);
+        String wrapped = str(res.get("wrappedByKek"));
+        SecretKey vaultKey = Vault.unwrapKey(wrapped, kek);
+        if (vaultKey == null) throw new IllegalStateException("Wrong password.");
+        String plain = Vault.decryptData(str(res.get("ciphertext")), vaultKey);
+        AccountVault.unlock(vaultKey, plain == null ? "[]" : plain);
+    }
+
+    /** The complete registration. @return the one-time recovery code to show the person ONCE. */
+    public static String performRegister(String url, String username, char[] password) throws Exception {
+        String authSalt = Vault.newSalt(), kekSalt = Vault.newSalt(), recSalt = Vault.newSalt();
+        String authHash = Vault.authHash(password.clone(), authSalt);
+        SecretKey kek = Vault.deriveKek(password.clone(), kekSalt);
+        SecretKey vaultKey = Vault.newVaultKey();
+        String recoveryCode = Vault.newRecoveryCode();
+        String wrappedByKek = Vault.wrapKey(vaultKey, kek);
+        String wrappedByRec = Vault.wrapKey(vaultKey, Vault.recoveryKey(recoveryCode, recSalt));
+        String emptyAccounts = Vault.encryptData("[]", vaultKey);
+
+        Map<String, String> fields = new java.util.LinkedHashMap<>();
+        fields.put("authSalt", authSalt); fields.put("kekSalt", kekSalt);
+        fields.put("recoverySalt", recSalt); fields.put("authHash", authHash);
+        fields.put("wrappedByKek", wrappedByKek); fields.put("wrappedByRecovery", wrappedByRec);
+        fields.put("ciphertext", emptyAccounts);
+
+        new ServerAccount(url).vaultRegister(username, fields);
+        AccountVault.unlock(vaultKey, "[]");
+        return recoveryCode;
+    }
+
+    /** The complete recovery: code unlocks the vault, then re-wraps it under the new password. */
+    public static void performRecovery(String url, String username, String code,
+                                       char[] newPassword) throws Exception {
+        ServerAccount server = new ServerAccount(url);
+        Map<String, Object> salts = server.vaultSalts(username);
+        String recSalt = str(salts.get("recoverySalt"));
+        Map<String, Object> rec = server.vaultRecovery(username);
+        SecretKey recKey = Vault.recoveryKey(code, recSalt);
+        SecretKey vaultKey = Vault.unwrapKey(str(rec.get("wrappedByRecovery")), recKey);
+        if (vaultKey == null) throw new IllegalStateException("Wrong recovery code.");
+        String plain = Vault.decryptData(str(rec.get("ciphertext")), vaultKey);
+
+        // the recovery response includes a token, so we can immediately re-wrap the SAME vault
+        // key under the NEW password. The data itself is never re-encrypted - only the key.
+        String token = str(rec.get("token"));
+        ServerAccount.session().baseUrl = url;
+        ServerAccount.session().token = token;
+        ServerAccount.session().username = username;
+
+        String newAuthSalt = Vault.newSalt(), newKekSalt = Vault.newSalt();
+        String newAuthHash = Vault.authHash(newPassword.clone(), newAuthSalt);
+        SecretKey newKek = Vault.deriveKek(newPassword.clone(), newKekSalt);
+        String newWrapped = Vault.wrapKey(vaultKey, newKek);
+
+        Map<String, String> fields = new java.util.LinkedHashMap<>();
+        fields.put("authSalt", newAuthSalt); fields.put("kekSalt", newKekSalt);
+        fields.put("authHash", newAuthHash); fields.put("wrappedByKek", newWrapped);
+        server.rewrap(fields);   // persist the new-password wrapping on the server
+
+        AccountVault.unlock(vaultKey, plain == null ? "[]" : plain);
     }
 
     // ── helpers ──
@@ -359,7 +379,7 @@ public final class LoginDialog {
     }
 
     /** True when the failure means the username/password pair was rejected. */
-    private static boolean isBadCredentials(Throwable ex) {
+    static boolean isBadCredentials(Throwable ex) {
         if (ex instanceof ServerAccount.HttpError)
             return ((ServerAccount.HttpError) ex).looksLikeBadCredentials();
         // Vault.unwrapKey failing = right account, wrong password (thrown as this message)
@@ -367,7 +387,7 @@ public final class LoginDialog {
                 && String.valueOf(ex.getMessage()).toLowerCase().contains("wrong");
     }
 
-    private static String friendly(Throwable ex) {
+    static String friendly(Throwable ex) {
         if (isNetworkIssue(ex))
             return "Couldn't reach the DreamMan server.\nCheck your internet connection "
                     + "(or the server may be down) and try again.";

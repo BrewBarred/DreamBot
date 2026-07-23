@@ -25,8 +25,17 @@ import java.util.Locale;
 public class LogsPanel extends JPanel {
 
     private final JTextField search = new JTextField();
-    private final JComboBox<String> typeFilter = new JComboBox<>(
-            new String[]{"All", "GAME", "PUBLIC", "PRIVATE", "TRADE", "CLAN"});
+    /**
+     * v1.87: which chat channels are showing - the in-game chatbox filter strip, rebuilt here.
+     * Every channel starts ON; click a button to hide that channel, click again to bring it
+     * back, and All flips everything back on. (These filter the VIEW - capture is always
+     * everything, so flipping a channel back on reveals what it said while hidden.)
+     */
+    private final java.util.Set<String> shownChannels = new java.util.LinkedHashSet<>(
+            java.util.Arrays.asList(CHANNELS));
+    private static final String[] CHANNELS =
+            {"GAME", "PUBLIC", "PRIVATE", "CHANNEL", "CLAN", "GROUP", "TRADE", "OTHER"};
+    private final java.util.List<ChannelButton> channelButtons = new java.util.ArrayList<>();
     private final DefaultListModel<ChatLog.Entry> chatModel = new DefaultListModel<>();
     private final DefaultListModel<ChatLog.Entry> noteModel = new DefaultListModel<>();
     private final JList<ChatLog.Entry> chatList = new JList<>(chatModel);
@@ -45,9 +54,8 @@ public class LogsPanel extends JPanel {
             public void removeUpdate(javax.swing.event.DocumentEvent e)  { refresh(); }
             public void changedUpdate(javax.swing.event.DocumentEvent e) { refresh(); }
         });
-        typeFilter.addActionListener(e -> refresh());
-
-        JLabel note = new JLabel("memory only \u00b7 cleared when the client closes \u00b7 nothing is uploaded");
+        JLabel note = new JLabel("memory only \u00b7 cleared when the client closes \u00b7 nothing is uploaded"
+                + "  \u00b7  double-click a line to copy its text");
         note.setForeground(Theme.TEXT_MUTED);
         note.setFont(new Font("Segoe UI", Font.ITALIC, 11));
 
@@ -56,11 +64,36 @@ public class LogsPanel extends JPanel {
         JLabel searchIcon = new JLabel(UIIcons.search(15, Theme.TEXT_DIM));
         filters.add(searchIcon, BorderLayout.WEST);
         filters.add(search, BorderLayout.CENTER);
-        filters.add(typeFilter, BorderLayout.EAST);
+
+        // v1.87: the chat-filter strip, shaped like the in-game chatbox bar: an All button,
+        // then one two-line button per channel showing its name over a green On / red Off.
+        JPanel filterBar = new JPanel(new GridLayout(1, 0, 3, 0));
+        filterBar.setOpaque(false);
+        JButton all = new JButton("All");
+        all.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        all.setForeground(Theme.TEXT);
+        all.setBackground(new Color(0x2D, 0x2D, 0x2D));
+        all.setFocusPainted(false);
+        all.setBorder(BorderFactory.createLineBorder(new Color(0x46, 0x46, 0x46)));
+        all.setToolTipText("Show every channel again");
+        all.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        all.addActionListener(e -> {
+            shownChannels.clear();
+            shownChannels.addAll(java.util.Arrays.asList(CHANNELS));
+            for (ChannelButton b : channelButtons) b.repaint();
+            refresh();
+        });
+        filterBar.add(all);
+        for (String ch : CHANNELS) {
+            ChannelButton b = new ChannelButton(ch);
+            channelButtons.add(b);
+            filterBar.add(b);
+        }
 
         JPanel header = new JPanel(new BorderLayout(0, 4));
         header.setOpaque(false);
         header.add(filters, BorderLayout.NORTH);
+        header.add(filterBar, BorderLayout.CENTER);
         header.add(note, BorderLayout.SOUTH);
 
         // ── the two logs side by side ──
@@ -69,10 +102,12 @@ public class LogsPanel extends JPanel {
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
                 buildLogSide("Chat log", chatList,
                         () -> ChatLog.clearChat(),
-                        () -> selectedOrAllText(chatList, chatModel)),
-                buildLogSide("Player log (widget reads & notes)", noteList,
+                        () -> selectedOrAllText(chatList, chatModel), null),
+                buildLogSide("Player log (dialogue, widget reads & notes)", noteList,
                         () -> ChatLog.clearPlayerLog(),
-                        () -> selectedOrAllText(noteList, noteModel)));
+                        () -> selectedOrAllText(noteList, noteModel), snapshotButton()));
+        installCopyOnDoubleClick(chatList);
+        installCopyOnDoubleClick(noteList);
         split.setResizeWeight(0.55);
         split.setBorder(null);
         split.setOpaque(false);
@@ -109,18 +144,25 @@ public class LogsPanel extends JPanel {
 
     private static Color colorFor(String type) {
         switch (type) {
-            case "PUBLIC":  return new Color(0xE6, 0xE6, 0xE6);
-            case "PRIVATE": return new Color(0x7F, 0xD4, 0xFF);
-            case "TRADE":   return new Color(0xE0, 0x9A, 0xF0);
-            case "CLAN":    return new Color(0x9A, 0xF0, 0xA8);
-            case "NOTE":    return Theme.ACCENT;
-            default:        return Theme.TEXT_DIM;   // GAME
+            case "PUBLIC":   return new Color(0xE6, 0xE6, 0xE6);
+            case "PRIVATE":  return new Color(0x7F, 0xD4, 0xFF);
+            case "TRADE":    return new Color(0xE0, 0x9A, 0xF0);
+            case "CLAN":     return new Color(0x9A, 0xF0, 0xA8);
+            case "CHANNEL":  return new Color(0xC8, 0xE0, 0x7F);   // v1.87: friends channel
+            case "GROUP":    return new Color(0x7F, 0xE0, 0xC8);   // v1.87: group ironman
+            case "NOTE":     return Theme.ACCENT;
+            case "DIALOGUE": return new Color(0x9F, 0xC4, 0xF0);   // v1.87
+            case "WIDGET":   return new Color(0xF0, 0xC8, 0x7F);   // v1.87
+            case "READ":     return new Color(0xF0, 0xC8, 0x7F);   // v1.87
+            case "OTHER":    return Theme.TEXT_MUTED;              // v1.87
+            default:         return Theme.TEXT_DIM;   // GAME
         }
     }
 
     /** One log column: title + icon buttons (copy / save / clear) + the list. */
     private JPanel buildLogSide(String title, JList<ChatLog.Entry> list,
-                                Runnable clear, java.util.function.Supplier<String> textSupplier) {
+                                Runnable clear, java.util.function.Supplier<String> textSupplier,
+                                JComponent extraButton) {
         JLabel t = new JLabel(title);
         t.setForeground(Theme.ACCENT);
         t.setFont(new Font("Segoe UI", Font.BOLD, 12));
@@ -156,6 +198,7 @@ public class LogsPanel extends JPanel {
 
         JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         btns.setOpaque(false);
+        if (extraButton != null) btns.add(extraButton);   // v1.87: the widget snapshot
         btns.add(btnCopy);
         btns.add(btnSave);
         btns.add(btnClear);
@@ -198,6 +241,136 @@ public class LogsPanel extends JPanel {
         return sb.toString();
     }
 
+    /**
+     * v1.87: one channel toggle, drawn like the in-game chatbox buttons - the channel name over
+     * a green On / red Off. Click flips just that channel's visibility.
+     */
+    private final class ChannelButton extends JComponent {
+        private final String channel;
+
+        ChannelButton(String channel) {
+            this.channel = channel;
+            setPreferredSize(new Dimension(58, 30));
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            setToolTipText("Show or hide " + pretty() + " messages");
+            addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override public void mousePressed(java.awt.event.MouseEvent e) {
+                    if (!shownChannels.remove(channel)) shownChannels.add(channel);
+                    repaint();
+                    refresh();
+                }
+            });
+        }
+
+        private String pretty() {
+            return channel.charAt(0) + channel.substring(1).toLowerCase(Locale.ROOT);
+        }
+
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            boolean on = shownChannels.contains(channel);
+            g2.setColor(on ? new Color(0x33, 0x30, 0x28) : new Color(0x22, 0x22, 0x22));
+            g2.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 6, 6);
+            g2.setColor(on ? Theme.BORDER : new Color(0x3A, 0x3A, 0x3A));
+            g2.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 6, 6);
+            g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
+            g2.setColor(on ? Theme.TEXT : Theme.TEXT_MUTED);
+            FontMetrics fm = g2.getFontMetrics();
+            String name = pretty();
+            g2.drawString(name, (getWidth() - fm.stringWidth(name)) / 2, 13);
+            String state = on ? "On" : "Off";
+            g2.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+            fm = g2.getFontMetrics();
+            g2.setColor(on ? new Color(0x58, 0xC8, 0x50) : new Color(0xD0, 0x5A, 0x46));
+            g2.drawString(state, (getWidth() - fm.stringWidth(state)) / 2, 25);
+            g2.dispose();
+        }
+    }
+
+    /** v1.87: double-click any line to copy its PAYLOAD (options list, widget text, the line). */
+    private void installCopyOnDoubleClick(JList<ChatLog.Entry> list) {
+        list.setToolTipText("Double-click a line to copy its text (a dialogue line copies its "
+                + "options, a widget read copies the raw text)");
+        list.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getClickCount() != 2) return;
+                int i = list.locationToIndex(e.getPoint());
+                if (i < 0) return;
+                ChatLog.Entry entry = list.getModel().getElementAt(i);
+                if (entry == null) return;
+                Toolkit.getDefaultToolkit().getSystemClipboard()
+                        .setContents(new StringSelection(entry.payload), null);
+                flash(list, "Copied: " + (entry.payload.length() > 40
+                        ? entry.payload.substring(0, 40) + "\u2026" : entry.payload));
+            }
+        });
+    }
+
+    /**
+     * v1.87: the Player Log's "read the screen now" button - every visible widget holding text
+     * lands as a WIDGET entry with the ids it lives at. Read a clue, press this, and both the
+     * clue text and its widget address are on record for building the solver task.
+     */
+    private JComponent snapshotButton() {
+        JButton b = new JButton("Snapshot widgets");
+        b.setToolTipText("Capture every visible widget's text (with its widget ids) into the "
+                + "Player Log - open a clue scroll or interface first, then press this");
+        b.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        b.setForeground(Theme.TEXT_DIM);
+        b.setBackground(new Color(0x2D, 0x2D, 0x2D));
+        b.setFocusPainted(false);
+        b.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(0x46, 0x46, 0x46)),
+                new EmptyBorder(2, 8, 2, 8)));
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        b.addActionListener(e -> {
+            b.setEnabled(false);
+            Thread t = new Thread(() -> {   // widget walking is client work - keep it off the EDT
+                int n = 0;
+                try {
+                    for (String[] pair : main.tools.WidgetFinder.visibleTexts()) {
+                        ChatLog.widget(pair[0], pair[1]);
+                        n++;
+                    }
+                } catch (Throwable ignored) {}
+                final int captured = n;
+                SwingUtilities.invokeLater(() -> {
+                    b.setEnabled(true);
+                    flash(b, captured == 0 ? "Nothing readable on screen"
+                            : "Captured " + captured + " widget text(s)");
+                });
+            }, "DreamMan-WidgetSnapshot");
+            t.setDaemon(true);
+            t.start();
+        });
+        return b;
+    }
+
+    /** A small self-dismissing confirmation bubble by the anchor (copy / snapshot feedback). */
+    private static void flash(Component anchor, String msg) {
+        try {
+            JLabel l = new JLabel(msg);
+            l.setOpaque(true);
+            l.setBackground(new Color(0x2E, 0x2A, 0x1C));
+            l.setForeground(Theme.ACCENT);
+            l.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+            l.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Theme.BORDER), new EmptyBorder(4, 8, 4, 8)));
+            Point at = anchor.getLocationOnScreen();
+            JWindow w = new JWindow(SwingUtilities.getWindowAncestor(anchor));
+            w.add(l);
+            w.pack();
+            w.setLocation(at.x + 12, at.y + 12);
+            w.setVisible(true);
+            javax.swing.Timer t = new javax.swing.Timer(1400, e -> w.dispose());
+            t.setRepeats(false);
+            t.start();
+        } catch (Throwable ignored) {
+            // headless or the anchor left the screen - the copy still happened
+        }
+    }
+
     private void maybeRefresh() {
         if (ChatLog.revision() != lastRevision) refresh();
     }
@@ -205,11 +378,13 @@ public class LogsPanel extends JPanel {
     private void refresh() {
         lastRevision = ChatLog.revision();
         String q = search.getText() == null ? "" : search.getText().trim().toLowerCase(Locale.ROOT);
-        String type = String.valueOf(typeFilter.getSelectedItem());
 
         chatModel.clear();
         for (ChatLog.Entry e : ChatLog.chatEntries()) {
-            if (!"All".equals(type) && !e.type.equals(type)) continue;
+            // v1.87: unknown channel names ride with OTHER, so nothing can become unviewable
+            String ch = shownChannels.contains(e.type) ? e.type
+                    : java.util.Arrays.asList(CHANNELS).contains(e.type) ? e.type : "OTHER";
+            if (!shownChannels.contains(ch)) continue;
             if (!q.isEmpty() && !e.toString().toLowerCase(Locale.ROOT).contains(q)) continue;
             chatModel.addElement(e);
         }

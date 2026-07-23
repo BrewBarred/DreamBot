@@ -1,5 +1,6 @@
 package main.menu.components;
 
+import main.market.DonorRanks;
 import main.market.ServerAccount;
 import main.market.Tier;
 import main.menu.Theme;
@@ -47,6 +48,8 @@ public final class DevConsole {
         // v1.82: per-endpoint diagnostics, replacing the old "Test connection" button that
         // only proved something answered and then printed auth salts at you.
         tabs.addTab("Connection", ConnectionPanel.build());
+        // v1.87: the donor ladder editor - thresholds + the cosmetic names people wear.
+        tabs.addTab("Donor Ranks", buildDonorRanksPanel());
         return tabs;
     }
 
@@ -232,16 +235,25 @@ public final class DevConsole {
     }
 
     private static final String RANK_HELP =
-            "<html><b>free</b> \u2014 browse, download, publish within the free limits<br>"
-            + "<b>vip</b> \u2014 higher publish limits and access to VIP-only listings<br>"
-            + "<b>admin</b> \u2014 all of VIP, plus the Script Management tab: approve or deny "
+            "<html><b>free</b> \u2014 browse, download, publish within the free limits (8 presets)<br>"
+            + "<b>vip</b> \u2014 DreamBot VIPs / members: higher limits, VIP-only listings, 28 presets<br>"
+            + "<b>subscriber</b> \u2014 pays monthly for the menu: above VIP everywhere (64 presets)<br>"
+            + "<b>lifetime</b> \u2014 bought everything forever: the most valued rank below staff, no caps<br>"
+            + "<b>admin</b> \u2014 all of the above, plus the Script Management tab: approve or deny "
             + "submissions,<br>curate default tasks, and flip the moderation valve<br>"
-            + "<b>owner</b> \u2014 everything, plus user ranks. Set in the database only.</html>";
+            + "<b>owner</b> \u2014 everything, plus user ranks. Set in the database only.<br><br>"
+            + "The <b>Scripter</b> checkbox is separate from the ladder \u2014 its one power is "
+            + "removing the market upload limit.</html>";
 
     private static String describeRank(String rank) {
         if (Tier.ADMIN.equalsIgnoreCase(rank))
             return "Admins can approve or deny submissions, curate default tasks, and turn "
                  + "publish moderation on or off.";
+        if (Tier.LIFETIME.equalsIgnoreCase(rank))
+            return "Lifetime supporters bought every release forever - no preset or loop caps, "
+                 + "the most valued rank below staff.";
+        if (Tier.SUBSCRIBER.equalsIgnoreCase(rank))
+            return "Subscribers pay monthly for the menu - higher limits than VIP across the board.";
         if (Tier.VIP.equalsIgnoreCase(rank))
             return "VIP raises their publish limits and unlocks VIP-only listings.";
         return "Free is the default: browse, download, and publish within the free limits.";
@@ -296,7 +308,11 @@ public final class DevConsole {
         header.add(status, BorderLayout.SOUTH);
 
         // ── results table ──
-        String[] cols = {"Username", "Tier", "Action"};
+        // v1.87: the third column tracks DONATIONS now (total + the donor tag it earns), per
+        // the ranks rework - the old "Action" column only repeated online/banned flags, which
+        // fold into the Tier cell instead. The numbers come from the server when it sends
+        // donatedCents/donated per user; until then the column shows an honest dash.
+        String[] cols = {"Username", "Tier", "Donated"};
         javax.swing.table.DefaultTableModel model =
                 new javax.swing.table.DefaultTableModel(cols, 0) {
                     @Override public boolean isCellEditable(int r, int c) { return false; }
@@ -315,7 +331,7 @@ public final class DevConsole {
         // v1.81: a rank SELECTOR, not a one-way promote button. The old control could only ever
         // make admins - there was no way to grant VIP, and no way to demote anyone at all.
         JComboBox<String> rankBox = new JComboBox<>(new String[]{
-                Tier.FREE, Tier.VIP, Tier.ADMIN});
+                Tier.FREE, Tier.VIP, Tier.SUBSCRIBER, Tier.LIFETIME, Tier.ADMIN});
         rankBox.setToolTipText(RANK_HELP);
         JButton btnPromote = new Theme.ThemedButton("Apply rank");
         btnPromote.putClientProperty("fillColor", new Color(30, 70, 40));
@@ -342,6 +358,105 @@ public final class DevConsole {
         rankGroup.add(rankLbl);
         rankGroup.add(rankBox);
         rankGroup.add(btnPromote);
+
+        // ── v1.87: the orthogonal marks - Scripter grant + the donation ledger ──
+        JButton btnScripter = new Theme.ThemedButton("Scripter\u2026");
+        btnScripter.setToolTipText("Grant or remove the Scripter mark - its one power is "
+                + "removing the market upload limit. Separate from the tier ladder.");
+        btnScripter.addActionListener(e -> {
+            int row = table.getSelectedRow();
+            if (row < 0) {
+                JOptionPane.showMessageDialog(root, "Select a user in the list first.",
+                        "No user selected", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            String name = str(model.getValueAt(row, 0));
+            Object[] opts = {"Grant Scripter", "Remove Scripter", "Cancel"};
+            int pick = JOptionPane.showOptionDialog(root,
+                    "<html><b>" + name + "</b> \u2014 the Scripter mark lifts the market upload "
+                    + "cap entirely.<br>It's meant to be EARNED by posting scripts worth having, "
+                    + "so grant it sparingly.</html>",
+                    "Scripter mark", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE,
+                    null, opts, opts[0]);
+            if (pick != 0 && pick != 1) return;
+            final boolean on = pick == 0;
+            status.setText((on ? "Granting" : "Removing") + " Scripter for " + name + "\u2026");
+            Thread t = new Thread(() -> {
+                String err = null;
+                try {
+                    server.adminSetScripter(name, on);
+                } catch (ServerAccount.HttpError he) {
+                    err = he.status == 404
+                            ? "this server doesn't have the scripter endpoint yet "
+                              + "(POST /admin/users/{user}/scripter) - nothing was changed"
+                            : he.getMessage();
+                } catch (Throwable ex) {
+                    err = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                }
+                final String fErr = err;
+                SwingUtilities.invokeLater(() -> status.setText(fErr != null
+                        ? "Scripter: " + fErr
+                        : name + (on ? " is now a Scripter." : " is no longer a Scripter.")));
+            }, "DreamMan-AdminScripter");
+            t.setDaemon(true);
+            t.start();
+        });
+        rankGroup.add(btnScripter);
+
+        JButton btnDonated = new Theme.ThemedButton("Set donated\u2026");
+        btnDonated.setToolTipText("Record a user's lifetime donation total by hand - the manual "
+                + "ledger until a real donation system exists. Their donor tag follows the "
+                + "Donor Ranks ladder automatically.");
+        btnDonated.addActionListener(e -> {
+            int row = table.getSelectedRow();
+            if (row < 0) {
+                JOptionPane.showMessageDialog(root, "Select a user in the list first.",
+                        "No user selected", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            String name = str(model.getValueAt(row, 0));
+            String in = JOptionPane.showInputDialog(root,
+                    "Lifetime donation total for " + name + " (in dollars, e.g. 25 or 12.50):",
+                    "Set donated", JOptionPane.PLAIN_MESSAGE);
+            if (in == null || in.isBlank()) return;
+            final long cents;
+            try {
+                cents = Math.round(Double.parseDouble(in.trim().replace("$", "")) * 100);
+            } catch (NumberFormatException bad) {
+                status.setText("That's not a number: " + in);
+                return;
+            }
+            if (cents < 0) { status.setText("Donations can't be negative."); return; }
+            status.setText("Recording " + DonorRanks.dollars(cents) + " for " + name + "\u2026");
+            Thread t = new Thread(() -> {
+                String err = null;
+                try {
+                    server.adminSetDonated(name, cents);
+                } catch (ServerAccount.HttpError he) {
+                    err = he.status == 404
+                            ? "this server doesn't have the donations endpoint yet "
+                              + "(POST /admin/users/{user}/donated) - nothing was recorded"
+                            : he.getMessage();
+                } catch (Throwable ex) {
+                    err = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                }
+                final String fErr = err;
+                SwingUtilities.invokeLater(() -> {
+                    if (fErr != null) {
+                        status.setText("Donations: " + fErr);
+                    } else {
+                        String tag = DonorRanks.nameFor(cents);
+                        model.setValueAt(DonorRanks.dollars(cents)
+                                + (tag == null ? "" : "  \u00b7 " + tag), row, 2);
+                        status.setText(name + " \u2192 " + DonorRanks.dollars(cents)
+                                + (tag == null ? "" : " (" + tag + ")"));
+                    }
+                });
+            }, "DreamMan-AdminDonated");
+            t.setDaemon(true);
+            t.start();
+        });
+        rankGroup.add(btnDonated);
 
         JPanel actions = new JPanel(new BorderLayout(8, 0));
         actions.setOpaque(false);
@@ -412,12 +527,12 @@ public final class DevConsole {
                         String name = str(u.get("username"));
                         String tier = str(u.get("tier"));
                         long seen = num(u.get("lastSeen"));
-                        StringBuilder flags = new StringBuilder(
+                        StringBuilder tierCell = new StringBuilder(tier.isEmpty() ? "free" : tier);
+                        tierCell.append("  \u00b7 ").append(
                                 seen > online ? "online" : (seen > 0 ? ago(seen) : "\u2014"));
-                        if (Boolean.TRUE.equals(u.get("banned"))) flags.append("  \u00b7 BANNED");
-                        if (Boolean.TRUE.equals(u.get("muted"))) flags.append("  \u00b7 muted");
-                        model.addRow(new Object[]{name, tier.isEmpty() ? "free" : tier,
-                                flags.toString()});
+                        if (Boolean.TRUE.equals(u.get("banned"))) tierCell.append("  \u00b7 BANNED");
+                        if (Boolean.TRUE.equals(u.get("muted"))) tierCell.append("  \u00b7 muted");
+                        model.addRow(new Object[]{name, tierCell.toString(), donatedCell(u)});
                     }
                     status.setText(view.size() + " of " + fRows.size() + " user(s).");
                 });
@@ -439,7 +554,7 @@ public final class DevConsole {
                 return;
             }
             String name = str(model.getValueAt(row, 0));
-            String tier = str(model.getValueAt(row, 1));
+            String tier = tierOf(model.getValueAt(row, 1));   // v1.87: strip the folded flags
             String want = str(rankBox.getSelectedItem());
 
             // v1.81: say WHY nothing will happen, in a dialog. Previously an owner-targeted
@@ -484,7 +599,9 @@ public final class DevConsole {
                     if (fErr != null) {
                         status.setText("Couldn't change rank: " + fErr);
                     } else {
-                        model.setValueAt(want, row, 1);
+                        String cell = str(model.getValueAt(row, 1));
+                        int dot = cell.indexOf("  \u00b7");
+                        model.setValueAt(want + (dot >= 0 ? cell.substring(dot) : ""), row, 1);
                         status.setText(name + " is now " + want + ".");
                     }
                 });
@@ -502,7 +619,7 @@ public final class DevConsole {
                 int r = table.getSelectedRow();
                 if (r < 0) return;
                 showUserProfile(root, server, str(model.getValueAt(r, 0)),
-                        str(model.getValueAt(r, 1)));
+                        tierOf(model.getValueAt(r, 1)));
             }
         });
 
@@ -511,10 +628,13 @@ public final class DevConsole {
         table.getSelectionModel().addListSelectionListener(ev -> {
             int r = table.getSelectedRow();
             if (r < 0) return;
-            String cur = str(model.getValueAt(r, 1));
+            String cur = tierOf(model.getValueAt(r, 1));   // v1.87
             if (cur.isBlank()) cur = Tier.FREE;
-            rankBox.setSelectedItem(Tier.OWNER.equalsIgnoreCase(cur) ? Tier.ADMIN : cur);
-            rankBox.setEnabled(!Tier.OWNER.equalsIgnoreCase(cur));
+            if (!java.util.Arrays.asList(Tier.FREE, Tier.VIP, Tier.SUBSCRIBER, Tier.LIFETIME,
+                    Tier.ADMIN).contains(cur.toLowerCase(java.util.Locale.ROOT)))
+                cur = Tier.OWNER.equalsIgnoreCase(cur) ? Tier.ADMIN : Tier.FREE;
+            rankBox.setSelectedItem(cur.toLowerCase(java.util.Locale.ROOT));
+            rankBox.setEnabled(!Tier.OWNER.equalsIgnoreCase(tierOf(model.getValueAt(r, 1))));
         });
 
         doSearch.run();
@@ -523,6 +643,132 @@ public final class DevConsole {
         root.add(scroll, BorderLayout.CENTER);
         root.add(actions, BorderLayout.SOUTH);
         SwingUtilities.invokeLater(search::requestFocusInWindow);
+        return root;
+    }
+
+    /** v1.87: "$12.50 \u00b7 Generous Donor", or a dash when the server sends no ledger. */
+    private static String donatedCell(Map<String, Object> u) {
+        long cents = -1;
+        Object c = u.get("donatedCents");
+        Object d = u.get("donated");
+        if (c instanceof Number) cents = ((Number) c).longValue();
+        else if (d instanceof Number) cents = Math.round(((Number) d).doubleValue() * 100);
+        if (cents < 0) return "\u2014";
+        String tag = DonorRanks.nameFor(cents);
+        return DonorRanks.dollars(cents) + (tag == null ? "" : "  \u00b7 " + tag);
+    }
+
+    /** v1.87: the tier out of a Tier cell that may carry folded " \u00b7 online/BANNED" flags. */
+    private static String tierOf(Object cell) {
+        String s = str(cell);
+        int dot = s.indexOf("  \u00b7");
+        return (dot >= 0 ? s.substring(0, dot) : s).trim();
+    }
+
+    /**
+     * v1.87: the Donor Ranks tab - the ladder of donation thresholds and the cosmetic names
+     * they earn. Edit a threshold or a name in place, add or remove rungs, Save. Saving always
+     * persists LOCALLY (this client renders badges from it immediately) and then tries to
+     * publish to {@code PUT /admin/donor-ranks} so every client agrees; a server without the
+     * endpoint gets called out honestly rather than pretended at.
+     */
+    private static JComponent buildDonorRanksPanel() {
+        JPanel root = new JPanel(new BorderLayout(0, 10));
+        root.setBorder(new EmptyBorder(12, 12, 12, 12));
+        root.setBackground(Theme.SURFACE_1);
+
+        JLabel blurb = new JLabel("<html>Donor ranks are <b>cosmetic tags</b> shown beside a "
+                + "person's name once their donations pass each threshold \u2014 rename them to "
+                + "fit the community (\"$100 = The Quiet Donor\"). They're separate from the "
+                + "tier ladder: any tier can wear one. Donations themselves aren't set up yet; "
+                + "totals are recorded by hand from the Users tab until then.</html>");
+        blurb.setForeground(Theme.TEXT_DIM);
+        blurb.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+
+        String[] cols = {"Donated at least ($)", "Rank name (the tag they wear)"};
+        javax.swing.table.DefaultTableModel model = new javax.swing.table.DefaultTableModel(cols, 0);
+        for (DonorRanks.Level l : DonorRanks.levels())
+            model.addRow(new Object[]{String.format("%.2f", l.minCents / 100.0), l.name});
+        JTable table = new JTable(model);
+        table.setRowHeight(26);
+        table.setBackground(new Color(0x1A, 0x1A, 0x1A));
+        table.setForeground(Theme.TEXT);
+        table.setSelectionBackground(new Color(0x3A, 0x33, 0x18));
+        table.getTableHeader().setReorderingAllowed(false);
+        JScrollPane scroll = Theme.thinScrollbars(new JScrollPane(table));
+        scroll.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+
+        JLabel status = new JLabel(" ");
+        status.setForeground(Theme.TEXT_DIM);
+        status.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+
+        JButton btnAdd = new Theme.ThemedButton("Add rank");
+        btnAdd.addActionListener(e -> model.addRow(new Object[]{"500.00", "New rank"}));
+        JButton btnRemove = new Theme.ThemedButton("Remove selected");
+        btnRemove.addActionListener(e -> {
+            int r = table.getSelectedRow();
+            if (r >= 0) model.removeRow(r);
+        });
+        JButton btnSave = new Theme.ThemedButton("Save ladder");
+        btnSave.putClientProperty("fillColor", new Color(30, 70, 40));
+        btnSave.addActionListener(e -> {
+            if (table.isEditing()) table.getCellEditor().stopCellEditing();
+            java.util.List<DonorRanks.Level> ladder = new java.util.ArrayList<>();
+            for (int r = 0; r < model.getRowCount(); r++) {
+                try {
+                    long cents = Math.round(Double.parseDouble(
+                            str(model.getValueAt(r, 0)).replace("$", "").trim()) * 100);
+                    String name = str(model.getValueAt(r, 1)).trim();
+                    if (cents > 0 && !name.isEmpty()) ladder.add(new DonorRanks.Level(cents, name));
+                } catch (NumberFormatException skip) { /* row ignored, said below */ }
+            }
+            if (ladder.isEmpty()) {
+                status.setText("Nothing valid to save - every row needs a $ amount and a name.");
+                return;
+            }
+            DonorRanks.save(ladder);
+            status.setText("Saved locally (" + ladder.size() + " rank(s)). Publishing\u2026");
+            Thread t = new Thread(() -> {
+                String err = null;
+                try {
+                    ServerAccount server = new ServerAccount(ServerAccount.session().baseUrl);
+                    server.putDonorRanks(new com.google.gson.GsonBuilder().create()
+                            .toJson(DonorRanks.levels()));
+                } catch (ServerAccount.HttpError he) {
+                    err = he.status == 404
+                            ? "server has no donor-ranks endpoint yet (PUT /admin/donor-ranks) - "
+                              + "saved locally only"
+                            : he.getMessage();
+                } catch (Throwable ex) {
+                    err = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                }
+                final String fErr = err;
+                SwingUtilities.invokeLater(() -> status.setText(fErr == null
+                        ? "Ladder saved and published to the server."
+                        : "Ladder saved locally. " + fErr));
+            }, "DreamMan-DonorRanks");
+            t.setDaemon(true);
+            t.start();
+        });
+
+        JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        btns.setOpaque(false);
+        btns.add(btnAdd);
+        btns.add(btnRemove);
+        btns.add(btnSave);
+
+        JPanel south = new JPanel(new BorderLayout(0, 4));
+        south.setOpaque(false);
+        south.add(btns, BorderLayout.NORTH);
+        south.add(status, BorderLayout.SOUTH);
+
+        JPanel north = new JPanel(new BorderLayout(0, 8));
+        north.setOpaque(false);
+        north.add(blurb, BorderLayout.CENTER);
+
+        root.add(north, BorderLayout.NORTH);
+        root.add(scroll, BorderLayout.CENTER);
+        root.add(south, BorderLayout.SOUTH);
         return root;
     }
 

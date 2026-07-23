@@ -73,6 +73,15 @@ public class ScriptListing {
     /** v1.33: "task" (reusable building block) or "script" (full single-purpose routine). The
      *  server caps these separately (free: 5 + 5). Defaults to task; the staging UI will set it. */
     public String kind = "task";
+
+    // ── v1.87: author rank cosmetics ──
+    // The server doesn't send these yet; when it starts attaching the author's tier /
+    // scripter mark / donation total to listings, every card and detail view grows the
+    // matching RankBadge automatically (Gson ignores absent fields, so old servers cost
+    // nothing). Until then they stay null and nothing renders.
+    public String authorTier;
+    public Boolean authorScripter;
+    public Long authorDonatedCents;
     /**
      * v1.32b: where this row came from - "server" (uploaded; has live stats) or "local" (a
      * script in your local market folder that hasn't been uploaded yet). Transient: it's a view

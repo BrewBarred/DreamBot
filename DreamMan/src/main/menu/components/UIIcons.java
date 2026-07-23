@@ -604,5 +604,111 @@ public final class UIIcons {
             }
         };
     }
+
+    /**
+     * v1.87: the tier crown - three points and a band, filled, tinted per rank by the caller
+     * (RankBadge owns the colour ladder). The "cute lil crown" the rank system asked for.
+     */
+    public static Icon crown(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                Path2D p = new Path2D.Float();
+                p.moveTo(s * 0.14f, s * 0.30f);        // left point base
+                p.lineTo(s * 0.30f, s * 0.52f);
+                p.lineTo(s * 0.50f, s * 0.22f);        // centre point (tallest)
+                p.lineTo(s * 0.70f, s * 0.52f);
+                p.lineTo(s * 0.86f, s * 0.30f);
+                p.lineTo(s * 0.80f, s * 0.66f);        // down to the band
+                p.lineTo(s * 0.20f, s * 0.66f);
+                p.closePath();
+                g2.fill(p);
+                g2.fillRect(Math.round(s * 0.20f), Math.round(s * 0.72f),
+                        Math.round(s * 0.60f), Math.max(2, Math.round(s * 0.10f)));   // band
+            }
+        };
+    }
+
+    /**
+     * v1.87: the donor coin - a circle with a drawn $ (two strokes + bar), tinted bronze /
+     * silver / gold / platinum per donor level by RankBadge. Drawn, never a font glyph.
+     */
+    public static Icon coin(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                g2.setStroke(new BasicStroke(Math.max(1.3f, s / 12f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                int p = Math.round(s * 0.12f), d = s - 2 * p;
+                g2.drawOval(p, p, d, d);
+                // the S curve of the $
+                Path2D sp = new Path2D.Float();
+                sp.moveTo(s * 0.62f, s * 0.36f);
+                sp.curveTo(s * 0.60f, s * 0.26f, s * 0.38f, s * 0.28f, s * 0.38f, s * 0.42f);
+                sp.curveTo(s * 0.38f, s * 0.54f, s * 0.62f, s * 0.48f, s * 0.62f, s * 0.60f);
+                sp.curveTo(s * 0.62f, s * 0.74f, s * 0.38f, s * 0.74f, s * 0.37f, s * 0.63f);
+                g2.draw(sp);
+                g2.drawLine(s / 2, Math.round(s * 0.22f), s / 2, Math.round(s * 0.80f));   // bar
+            }
+        };
+    }
+
+    /**
+     * v1.87: the scripter quill - a nib-down feather stroke, for the rank whose one power is
+     * unlimited market uploads. Reads as "writes scripts" at 12px.
+     */
+    public static Icon quill(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                Path2D f = new Path2D.Float();
+                f.moveTo(s * 0.80f, s * 0.16f);                                   // feather tip
+                f.curveTo(s * 0.52f, s * 0.16f, s * 0.30f, s * 0.44f, s * 0.28f, s * 0.70f);
+                f.curveTo(s * 0.50f, s * 0.62f, s * 0.74f, s * 0.42f, s * 0.80f, s * 0.16f);
+                f.closePath();
+                g2.fill(f);
+                g2.setStroke(new BasicStroke(Math.max(1.2f, s / 13f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine(Math.round(s * 0.28f), Math.round(s * 0.70f),
+                        Math.round(s * 0.16f), Math.round(s * 0.84f));            // the nib
+            }
+        };
+    }
+
+    /**
+     * v1.87: planet earth for the world-map button - a blue disc with green landmasses, sitting
+     * where the in-game world-map orb sits so the minimap corner reads like the real one. The
+     * only two-colour icon in the set; the caller passes no colour because Earth has its own.
+     */
+    public static Icon earth(int s) {
+        return new Icon() {
+            @Override public int getIconWidth() { return s; }
+            @Override public int getIconHeight() { return s; }
+            @Override public void paintIcon(java.awt.Component comp, Graphics g, int x, int y) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.translate(x, y);
+                int p = Math.round(s * 0.08f), d = s - 2 * p;
+                g2.setColor(new Color(0x2E, 0x66, 0xA8));                          // ocean
+                g2.fillOval(p, p, d, d);
+                g2.setClip(new java.awt.geom.Ellipse2D.Float(p, p, d, d));
+                g2.setColor(new Color(0x4F, 0x8F, 0x3D));                          // land
+                Path2D land = new Path2D.Float();                                  // west blob
+                land.moveTo(s * 0.18f, s * 0.34f);
+                land.curveTo(s * 0.34f, s * 0.18f, s * 0.52f, s * 0.30f, s * 0.44f, s * 0.46f);
+                land.curveTo(s * 0.40f, s * 0.60f, s * 0.24f, s * 0.58f, s * 0.18f, s * 0.34f);
+                land.closePath();
+                g2.fill(land);
+                Path2D land2 = new Path2D.Float();                                 // east blob
+                land2.moveTo(s * 0.58f, s * 0.52f);
+                land2.curveTo(s * 0.76f, s * 0.42f, s * 0.86f, s * 0.58f, s * 0.72f, s * 0.72f);
+                land2.curveTo(s * 0.60f, s * 0.82f, s * 0.52f, s * 0.66f, s * 0.58f, s * 0.52f);
+                land2.closePath();
+                g2.fill(land2);
+                g2.setClip(null);
+                g2.setStroke(new BasicStroke(Math.max(1.1f, s / 15f)));
+                g2.setColor(new Color(0x18, 0x16, 0x12));                          // rim
+                g2.drawOval(p, p, d, d);
+                g2.dispose();
+            }
+        };
+    }
 }
 

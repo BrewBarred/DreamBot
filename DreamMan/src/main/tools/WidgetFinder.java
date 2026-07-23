@@ -220,4 +220,103 @@ public final class WidgetFinder {
             out.add((WidgetChild) r);
         }
     }
+
+    // ── v1.87: the Player Log's widget snapshot ───────────────────────────────
+
+    /**
+     * Every visible widget currently holding readable text, as {@code {idPath, cleanText}}
+     * pairs - the "Snapshot widgets" button and the Read action's capture. This is how a clue
+     * scroll's text arrives in the Player Log WITH the widget ids it lives at: read the clue
+     * once, and both the text and the address to find it by are on record for task building.
+     * Never null; empty when there's no client or nothing readable is open.
+     */
+    public static List<String[]> visibleTexts() {
+        resolve();
+        List<String[]> out = new ArrayList<>();
+        if (mRoots == null) return out;
+        try {
+            Object roots = mRoots.invoke(null);
+            Iterable<?> it = roots instanceof Collection<?> ? (Collection<?>) roots
+                    : roots instanceof Object[] ? java.util.Arrays.asList((Object[]) roots) : null;
+            if (it == null) return out;
+            for (Object root : it) snapshotRoot(root, out);
+        } catch (Throwable ignored) {}
+        return out;
+    }
+
+    private static void snapshotRoot(Object rootWidget, List<String[]> out) {
+        if (rootWidget == null) return;
+        try {
+            if (mWidgetChildren == null
+                    || !mWidgetChildren.getDeclaringClass().isAssignableFrom(rootWidget.getClass())) {
+                for (Method m : rootWidget.getClass().getMethods()) {
+                    if (m.getName().equals("getChildren") && m.getParameterCount() == 0) {
+                        mWidgetChildren = m;
+                        break;
+                    }
+                }
+            }
+            if (mWidgetChildren == null) return;
+            snapshotKids(mWidgetChildren.invoke(rootWidget), out);
+        } catch (Throwable ignored) {}
+    }
+
+    private static void snapshotKids(Object kids, List<String[]> out) {
+        if (kids == null || out.size() >= 400) return;   // hard cap - a snapshot, not a dump
+        Iterable<?> it = kids instanceof Collection<?> ? (Collection<?>) kids
+                : kids instanceof Object[] ? java.util.Arrays.asList((Object[]) kids) : null;
+        if (it == null) return;
+        for (Object o : it) {
+            if (!(o instanceof WidgetChild)) continue;
+            WidgetChild c = (WidgetChild) o;
+            try {
+                if (c.isVisible()) {
+                    String raw = c.getText();
+                    if (raw == null || raw.replaceAll("<[^>]*>", "").isBlank()) raw = nameOf(c);
+                    if (raw != null) {
+                        String clean = raw.replaceAll("<br>", " / ").replaceAll("<[^>]*>", "").trim();
+                        if (!clean.isBlank()) out.add(new String[]{idPathOf(c), clean});
+                    }
+                }
+                WidgetChild[] nested = c.getChildren();
+                if (nested != null) snapshotKids(nested, out);
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private static Method mChildParentId, mChildId, mChildIndex;   // resolved lazily
+
+    /**
+     * "parent,child" (or "parent,child,index") for a widget, via whichever id accessors this
+     * client build exposes - the paste-ready address a WidgetAction or Read action takes.
+     * Unknown parts show as "?", never a guess.
+     */
+    public static String idPathOf(WidgetChild c) {
+        String parent = "?", child = "?", idx = null;
+        try {
+            if (mChildParentId == null)
+                for (String n : new String[]{"getParentID", "getParentId", "getRootId"}) {
+                    try { mChildParentId = c.getClass().getMethod(n); break; } catch (Throwable ignored) {}
+                }
+            if (mChildParentId != null) parent = String.valueOf(mChildParentId.invoke(c));
+        } catch (Throwable ignored) {}
+        try {
+            if (mChildId == null)
+                for (String n : new String[]{"getID", "getId", "getChildId"}) {
+                    try { mChildId = c.getClass().getMethod(n); break; } catch (Throwable ignored) {}
+                }
+            if (mChildId != null) child = String.valueOf(mChildId.invoke(c));
+        } catch (Throwable ignored) {}
+        try {
+            if (mChildIndex == null) {
+                try { mChildIndex = c.getClass().getMethod("getIndex"); } catch (Throwable ignored) {}
+            }
+            if (mChildIndex != null) {
+                Object v = mChildIndex.invoke(c);
+                if (v instanceof Number && ((Number) v).intValue() >= 0)
+                    idx = String.valueOf(v);
+            }
+        } catch (Throwable ignored) {}
+        return parent + "," + child + (idx == null ? "" : "," + idx);
+    }
 }

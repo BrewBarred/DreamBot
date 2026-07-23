@@ -13,10 +13,12 @@ import java.awt.geom.Ellipse2D;
 import java.util.function.Supplier;
 
 /**
- * The side panel's minimap (v1.86): a circular, zoomed-in cut of Explv's OSRS map centred on
- * the player, mimicking the in-game minimap (minus rotation - the tiles are fixed north-up, so
- * north is simply always up, marked with a small N). Below the circle sit the world-map GLOBE
- * button - opening the full pan/zoom/flag map view - and the live coordinates, click-to-copy.
+ * The side panel's minimap (v1.86; orbs + earth v1.87): a circular, zoomed-in cut of Explv's
+ * map centred on the player, now dressed like the REAL in-game minimap - the four status orbs
+ * (hitpoints, prayer, run energy, special attack) arc down its left side with live numbers,
+ * and the world-map button is a little planet Earth tucked into the bottom-right of the rim,
+ * exactly where the game puts its globe. Tiles stay fixed north-up (marked with a small N),
+ * the white player dot sits dead centre, and the live coordinates below are click-to-copy.
  *
  * <p>Only the 1-4 tiles covering the circle are ever loaded (see {@link ExplvMap}), fetching is
  * gated behind the same online-images opt-in as the Loot Tracker's wiki icons, and while that's
@@ -27,8 +29,18 @@ public class MiniMapPanel extends JPanel {
 
     /** Supplies {x, y, plane} of the local player, or null when unknown. Reads must be cheap. */
     private final Supplier<int[]> position;
+    /**
+     * v1.87: supplies {hpCur, hpMax, prayerCur, prayerMax, runPct, specPct}, or null when the
+     * client can't be read. Injected so this component never touches the DreamBot API itself.
+     */
+    private final Supplier<int[]> stats;
 
     private final Circle circle = new Circle();
+    private final Orb orbHp     = new Orb("HP",   new Color(0x58, 0xC8, 0x50));
+    private final Orb orbPray   = new Orb("Pray", new Color(0x38, 0xB8, 0xC8));
+    private final Orb orbRun    = new Orb("Run",  new Color(0xE8, 0xC2, 0x4A));
+    private final Orb orbSpec   = new Orb("Spec", new Color(0x48, 0xC8, 0x88));
+    private final JButton earth = new JButton(UIIcons.earth(26));
     private final JLabel coords = new JLabel("-", SwingConstants.LEFT);
     private final javax.swing.Timer timer = new javax.swing.Timer(600, e -> tick());
     private final javax.swing.Timer copyFlash = new javax.swing.Timer(900, e -> {
@@ -39,22 +51,53 @@ public class MiniMapPanel extends JPanel {
     private WorldMapDialog worldMap;   // lazily created, then reused (flags survive re-opens)
     private int zoom = 10;
     private int[] lastPos;             // last known {x, y, plane}, kept while the read blips
+    private int[] lastStats;           // last known orb values, same idea
 
-    public MiniMapPanel(Supplier<int[]> position) {
+    /** v1.86 signature, kept for callers that only have a position. */
+    public MiniMapPanel(Supplier<int[]> position) { this(position, null); }
+
+    public MiniMapPanel(Supplier<int[]> position, Supplier<int[]> stats) {
         this.position = position;
-        try { lastPos = position.get(); } catch (Throwable ignored) {}   // paint frame 1, not tick 1
+        this.stats = stats;
         setOpaque(false);
         setLayout(new BorderLayout(0, 4));
 
-        circle.setPreferredSize(new Dimension(170, 170));
-        add(circle, BorderLayout.CENTER);
+        // ── the face: circle + orbs + earth, laid out by hand so the orbs can hug the rim ──
+        earth.setToolTipText("Open the world map (Explv) - pan, zoom, flag and copy coordinates");
+        earth.setContentAreaFilled(false);
+        earth.setBorder(BorderFactory.createEmptyBorder());
+        earth.setFocusPainted(false);
+        earth.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        earth.addActionListener(e -> openWorldMap());
 
-        JButton globe = new Theme.ThemedButton();
-        globe.setIcon(UIIcons.globe(16, Theme.ACCENT));
-        globe.setToolTipText("Open the world map (Explv) - pan, zoom, flag and copy coordinates");
-        globe.setPreferredSize(new Dimension(30, 26));
-        globe.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
-        globe.addActionListener(e -> openWorldMap());
+        JPanel face = new JPanel(null) {
+            @Override public void doLayout() {
+                int w = getWidth(), h = getHeight();
+                int orbW = 62, orbH = 22;
+                int d = Math.min(h - 4, w - orbW - 10);
+                int cx = orbW + 4 + (w - orbW - 8 - d) / 2;
+                int cy = (h - d) / 2;
+                circle.setBounds(cx, cy, d, d);
+                // the four orbs, spread down the circle's left flank like the game's
+                Orb[] orbs = {orbHp, orbPray, orbRun, orbSpec};
+                int span = (int) (d * 0.86);
+                int top = cy + (d - span) / 2;
+                int step = (span - orbH) / (orbs.length - 1);
+                for (int i = 0; i < orbs.length; i++)
+                    orbs[i].setBounds(2, top + i * step, orbW, orbH);
+                // planet earth on the bottom-right rim, where the game keeps its world map
+                int es = 32;
+                earth.setBounds(cx + d - es + 4, cy + d - es + 4, es, es);
+            }
+        };
+        face.setOpaque(false);
+        face.add(earth);          // added first = painted last-to-first? (Swing paints in
+        face.add(circle);         // reverse add order, so earth sits ABOVE the circle's rim)
+        face.add(orbHp);
+        face.add(orbPray);
+        face.add(orbRun);
+        face.add(orbSpec);
+        add(face, BorderLayout.CENTER);
 
         coords.setFont(Theme.mono(12));
         coords.setForeground(Theme.TEXT_DIM);
@@ -69,11 +112,9 @@ public class MiniMapPanel extends JPanel {
                 copyFlash.restart();
             }
         });
-
-        JPanel row = new JPanel(new BorderLayout(8, 0));
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
         row.setOpaque(false);
-        row.add(globe, BorderLayout.WEST);
-        row.add(coords, BorderLayout.CENTER);
+        row.add(coords);
         add(row, BorderLayout.SOUTH);
 
         // repaint on our own beat only while actually on screen (same pattern as the old
@@ -89,9 +130,19 @@ public class MiniMapPanel extends JPanel {
         int[] p = null;
         try { p = position.get(); } catch (Throwable ignored) {}
         if (p != null) lastPos = p;
+        if (stats != null) {
+            int[] s = null;
+            try { s = stats.get(); } catch (Throwable ignored) {}
+            if (s != null && s.length >= 6) lastStats = s;
+        }
         int[] show = lastPos;
         coords.setText(show == null ? "-" : show[0] + ", " + show[1] + ", " + show[2]);
-        circle.repaint();
+        int[] st = lastStats;
+        orbHp.set(st == null ? -1 : st[0], st == null ? 0 : st[1]);
+        orbPray.set(st == null ? -1 : st[2], st == null ? 0 : st[3]);
+        orbRun.set(st == null ? -1 : st[4], 100);
+        orbSpec.set(st == null ? -1 : st[5], 100);
+        repaint();
     }
 
     private void openWorldMap() {
@@ -129,6 +180,73 @@ public class MiniMapPanel extends JPanel {
             return true;
         }
         return false;
+    }
+
+    /**
+     * One in-game-style status orb (v1.87): the number on the left, the orb on the right,
+     * filling bottom-up with its colour as the fraction rises. HP shifts green → red as it
+     * drops, the way the real orb does; a value of -1 draws the "can't read it" empty state.
+     */
+    private static final class Orb extends JComponent {
+        private final String tip;
+        private final Color color;
+        private int value = -1, max = 0;
+
+        Orb(String tip, Color color) {
+            this.tip = tip;
+            this.color = color;
+            setToolTipText(tip);
+        }
+
+        void set(int value, int max) {
+            this.value = value;
+            this.max = Math.max(0, max);
+            if (value < 0) setToolTipText(tip);
+            else if (max == 100) setToolTipText(tip + ": " + value + "%");
+            else setToolTipText(tip + ": " + value + " / " + max);
+        }
+
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int h = getHeight(), w = getWidth();
+            int d = h;                                 // orb diameter = row height
+            int ox = w - d;
+
+            double frac = value < 0 || max <= 0 ? 0 : Math.max(0, Math.min(1, value / (double) max));
+            Color fill = color;
+            if ("HP".equals(tip) && value >= 0)        // green fades to red as HP drops
+                fill = new Color(
+                        (int) (0x58 + (0xD8 - 0x58) * (1 - frac)),
+                        (int) (0xC8 * frac + 0x40 * (1 - frac)),
+                        0x46);
+
+            Ellipse2D disc = new Ellipse2D.Float(ox, 0, d - 1, h - 1);
+            g2.setColor(new Color(0x14, 0x12, 0x0E));
+            g2.fill(disc);
+            if (frac > 0) {
+                Shape oldClip = g2.getClip();
+                g2.clip(disc);
+                int fillH = (int) Math.round((h - 2) * frac);
+                g2.setColor(fill);
+                g2.fillRect(ox, h - 1 - fillH, d, fillH);
+                g2.setClip(oldClip);
+            }
+            g2.setStroke(new BasicStroke(1.4f));
+            g2.setColor(new Color(0x18, 0x16, 0x12));
+            g2.draw(disc);
+
+            String txt = value < 0 ? "-" : String.valueOf(value);
+            g2.setFont(Theme.monoBold(11));
+            FontMetrics fm = g2.getFontMetrics();
+            int tx = ox - 5 - fm.stringWidth(txt);
+            int ty = (h + fm.getAscent() - fm.getDescent()) / 2;
+            g2.setColor(Color.BLACK);
+            g2.drawString(txt, tx + 1, ty + 1);
+            g2.setColor(value < 0 ? Theme.TEXT_MUTED : fill);
+            g2.drawString(txt, tx, ty);
+            g2.dispose();
+        }
     }
 
     /** The circular map itself. */

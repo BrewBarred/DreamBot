@@ -64,7 +64,6 @@ public final class TagFilterBar extends JPanel {
 
     private final JPanel pills = new JPanel(new WrapLayout(FlowLayout.LEFT, 5, 5));
     private final JLabel header = new JLabel();
-    private final JLabel caret = new JLabel();
     private final Set<String> selected;
     private final Consumer<String> onToggle;
     private final Runnable onClear;
@@ -91,13 +90,14 @@ public final class TagFilterBar extends JPanel {
         header.setIconTextGap(5);
         header.setFont(new Font("Segoe UI", Font.PLAIN, 10));
         header.setForeground(Theme.TEXT_DIM);
-        caret.setFont(new Font("Segoe UI", Font.PLAIN, 10));
-        caret.setForeground(Theme.TEXT_DIM);
 
+        // v1.87: the "show tags ▸" caret label is GONE - its arrow glyphs rendered as tofu
+        // boxes on the client font (the glitchy label report). The header text itself is the
+        // whole toggle now: it already sat in a clickable row, so collapsed it reads
+        // "FILTER BY TAG ..." and expanded it reads "HIDE TAGS" - one label, no glyphs.
         JPanel headRow = new JPanel(new BorderLayout(6, 0));
         headRow.setOpaque(false);
         headRow.add(header, BorderLayout.WEST);
-        headRow.add(caret, BorderLayout.EAST);
         headRow.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         headRow.setToolTipText("<html>Show or hide the tag filter.<br>While hidden, the search "
                 + "box <b>ignores tags</b> \u2014 useful when a common tag would otherwise "
@@ -129,11 +129,15 @@ public final class TagFilterBar extends JPanel {
 
     private void syncHeader() {
         int n = selected.size();
-        header.setText("FILTER BY TAG (all selected must match)" + (tagCount == 0 ? "" : "  \u00b7  " + tagCount + " available")
-                + (n == 0 ? "" : "  \u00b7  " + n + " active"));
+        // v1.87: while the pills are visible the header's one job is closing them again, so it
+        // says exactly that; collapsed, it advertises the feature (and any active filters).
+        header.setText(collapsed
+                ? "FILTER BY TAG (all selected must match)"
+                        + (tagCount == 0 ? "" : "  \u00b7  " + tagCount + " available")
+                        + (n == 0 ? "" : "  \u00b7  " + n + " active")
+                : "HIDE TAGS" + (n == 0 ? "" : "  \u00b7  " + n + " active"));
         header.setForeground(n > 0 ? Theme.ACCENT : Theme.TEXT_DIM);
         header.setIcon(UIIcons.tag(12, n > 0 ? Theme.ACCENT : Theme.TEXT_DIM));
-        caret.setText(collapsed ? "show tags \u25b8" : "hide tags \u25be");
     }
 
     /** Rebuilds from the tags actually present on the loaded listings. */

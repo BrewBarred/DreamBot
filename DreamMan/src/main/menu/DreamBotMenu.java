@@ -650,8 +650,14 @@ public class DreamBotMenu extends JFrame {
         // v1.86: the Equipment tab is gone - the doll, inventory and presets live in the
         // always-reachable side panel now (buildSideLiveCard), per the sketch.
         mainTabs.addTab("Market", loadTabIcon("market_tab"), createMarketTab());
-        mainTabs.addTab("Status", loadTabIcon("status_tab"), createStatusTab());
+        // v1.87: the Status tab is dismantled. Everything ABOUT THE PLAYER (character,
+        // membership, account type, bank PIN, Jagex-account switching) lives in the side
+        // Player panel now; the DreamMan-server half became the Account tab below; Privacy is
+        // its own tab; and the read-only Script/World/Session telemetry cards are gone - the
+        // bottom bar, the overlay and status.json already show all of it, live.
+        mainTabs.addTab("Account", loadTabIcon("status_tab"), createAccountTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
+        mainTabs.addTab("Privacy", loadTabIcon("privacy_tab"), createPrivacyTabStandalone());
         mainTabs.addTab("Logs", loadTabIcon("logs_tab"), createLogsTab());                  // v1.31
         // v1.77 BUGFIX: apply the RESTORED session to the UI at startup.
         //
@@ -1472,6 +1478,7 @@ public class DreamBotMenu extends JFrame {
         applyTierLimits();
         refreshAccountSwitcher();
         refreshTierStatusLabel();
+        refreshAccountTab();   // v1.87: flip auth <-> signed-in, rebuild limits + badges
         refreshAccountLogoutVisibility();   // v1.32b: show/hide the account Log out button
         refilterLibrary();   // VIP tasks may now be visible
         maybeAutoConnectMarket();   // Patch B.17: logging in grants consent -> market goes live
@@ -6773,169 +6780,225 @@ public class DreamBotMenu extends JFrame {
         return entries;
     }
 
-    private JPanel createStatusTab() {
-        JPanel panelStatus = new JPanel(new BorderLayout(15, 15));
-        panelStatus.setBorder(new EmptyBorder(15, 15, 15, 15));
-        panelStatus.setBackground(BG_BASE);
+    /**
+     * The Account tab (v1.87) - everything DREAMMAN-SERVER related, and only that. Logged out
+     * it IS the sign-in experience: the proper in-tab Sign in / Create account / Forgot
+     * password card ({@link main.menu.components.AccountAuthPanel}), replacing the old chain
+     * of option panes. Logged in it's your account at a glance: rank badges, your tier's
+     * actual limits, your donation ledger with the (placeholder) Donate button, your public
+     * profile, the account switcher and Log out.
+     *
+     * <p>The old Status tab this replaces was three things wearing one name; its pieces went
+     * where they belonged - the PLAYER half into the side Player panel, Privacy into its own
+     * tab, and the telemetry cards retired (the bottom bar / overlay / status.json already
+     * carry them).
+     */
+    private CardLayout accountCards;
+    private JPanel accountCardHost;
+    private JPanel accountMeContent;   // the signed-in view, rebuilt on account changes
 
-        // ── Patch B.17 overhaul ──────────────────────────────────────────────
-        // One rule: everything about YOU - who's logged in, your DreamMan account, your bank
-        // PIN, switching Jagex accounts - lives in the Player card. The old "Session" card
-        // (PIN + switching, orphaned on the far side of the grid) is gone. The read-only
-        // telemetry (Account / World / Game / Script) sits in a tidy 2x2 grid beside it.
-        JPanel player = buildPlayerCard();
+    private JPanel createAccountTab() {
+        JPanel panel = new JPanel(new BorderLayout(15, 15));
+        panel.setBorder(new EmptyBorder(15, 15, 15, 15));
+        panel.setBackground(BG_BASE);
 
-        JPanel account = createInfoCard("Account");
-        addInfoRow(account, "Username", lblUsername);
-        addInfoRow(account, "Nickname", lblNickname);
-        addInfoRow(account, "Identifier", lblAcctId);
-        addInfoRow(account, "Account status", lblAcctStatus);
+        accountCards = new CardLayout();
+        accountCardHost = new JPanel(accountCards);
+        accountCardHost.setOpaque(false);
 
-        JPanel world = createInfoCard("World");
-        addInfoRow(world, "World", lblWorld);
-        addInfoRow(world, "Coordinates (x, y, z)", lblCoords);
-        addInfoRow(world, "Game state", lblGameState);
+        main.menu.components.AccountAuthPanel auth = new main.menu.components.AccountAuthPanel(
+                new main.menu.components.AccountAuthPanel.Host() {
+                    @Override public String serverUrl() {
+                        String url = marketRepo instanceof main.market.HttpRepository
+                                ? ((main.market.HttpRepository) marketRepo).baseUrl()
+                                : main.market.ServerAccount.session().baseUrl;
+                        if (url == null || url.isEmpty()) url = marketServerUrl;
+                        if (url == null || url.isEmpty()) url = DEFAULT_MARKET_SERVER_URL;
+                        return url;
+                    }
+                    @Override public void onAccountChanged() {
+                        DreamBotMenu.this.onAccountChanged();
+                    }
+                });
 
-        // Patch B.3: everything a remote dashboard would want, live. The same snapshot is
-        // written to <home>/DreamMan/status.json every ~2s - a web UI can poll that file to
-        // show account status, live tile coordinates (map replica), current task and progress.
-        JPanel script = createInfoCard("Script");
-        addInfoRow(script, "Current task", lblScriptTask);
-        addInfoRow(script, "Activity", lblScriptActivity);
-        addInfoRow(script, "Queue", lblScriptQueue);
-        addInfoRow(script, "Loop", lblScriptLoop);
-        addInfoRow(script, "Uptime", lblScriptUptime);
-        addInfoRow(script, "Paused", lblScriptPaused);
+        accountMeContent = new JPanel(new GridBagLayout());
+        accountMeContent.setOpaque(false);
 
-        JPanel session = createInfoCard("Session");
-        session.add(createSessionSummary());
+        accountCardHost.add(auth, "auth");
+        accountCardHost.add(accountMeContent, "me");
 
-        JPanel dreamManAccount = buildDreamManAccountCard();
-
-        JPanel grid = new JPanel(new GridLayout(0, 2, 14, 14));
-        grid.setOpaque(false);
-        grid.add(dreamManAccount);   // v1.32b: DreamMan account moved out of the Player card
-        grid.add(account);
-        grid.add(world);
-        grid.add(script);
-        grid.add(session);
-
-        JPanel content = new JPanel(new BorderLayout(14, 14));
-        content.setOpaque(false);
-        player.setPreferredSize(new Dimension(340, 0));
-        content.add(player, BorderLayout.WEST);
-        content.add(grid, BorderLayout.CENTER);
-
-        // ── v1.30: responsive layout ─────────────────────────────────────────
-        // At full width: Player on the left, a 2x2 grid beside it. Squeezed (the client's
-        // docked/minimised widths), the fixed columns used to CLIP the right-hand cards - now
-        // the grid drops to one column below ~1000px and the Player card stacks on top below
-        // ~760px, so everything stays readable and the scrollbar does the rest.
-        java.awt.event.ComponentAdapter reflow = new java.awt.event.ComponentAdapter() {
-            private int mode = -1;   // 0 wide · 1 medium · 2 narrow
-            @Override public void componentResized(ComponentEvent e) {
-                int w = content.getWidth();
-                if (w <= 0) return;
-                int want = w >= 1000 ? 0 : w >= 760 ? 1 : 2;
-                if (want == mode) return;
-                mode = want;
-                content.remove(player);
-                ((GridLayout) grid.getLayout()).setColumns(want == 0 ? 2 : 1);
-                ((GridLayout) grid.getLayout()).setRows(0);
-                if (want == 2) {
-                    player.setPreferredSize(null);
-                    content.add(player, BorderLayout.NORTH);
-                } else {
-                    player.setPreferredSize(new Dimension(340, 0));
-                    content.add(player, BorderLayout.WEST);
-                }
-                content.revalidate();
-                content.repaint();
-            }
-        };
-        content.addComponentListener(reflow);
-
-        // Patch B.16: Privacy folded into Status (all "this account" info). Cards on top, the
-        // privacy panel below, scrollable so it fits.
-        JPanel stacked = new JPanel(new BorderLayout(0, 14));
-        stacked.setOpaque(false);
-        stacked.add(content, BorderLayout.NORTH);
-        JPanel privacySection = createPrivacyTab();
-        privacySection.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, COLOR_BORDER_DIM),
-                new EmptyBorder(12, 0, 0, 0)));
-        stacked.add(privacySection, BorderLayout.CENTER);
-
-        JScrollPane scroll = Theme.thinScrollbars(new JScrollPane(stacked));
+        panel.add(createSubtitle("Account"), BorderLayout.NORTH);
+        JScrollPane scroll = Theme.thinScrollbars(new JScrollPane(accountCardHost));
         scroll.setBorder(null);
         scroll.getViewport().setOpaque(false);
         scroll.setOpaque(false);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
+        panel.add(scroll, BorderLayout.CENTER);
 
-        panelStatus.add(createSubtitle("Status"),  BorderLayout.NORTH);
-        panelStatus.add(scroll, BorderLayout.CENTER);
-        return panelStatus;
+        refreshAccountTab();
+        return panel;
     }
 
-    /**
-     * The Player card (Patch B.17): the one place for everything that is about the person at
-     * the keyboard - character identity, the DreamMan account, this session's bank PIN, and
-     * Jagex-account switching. These used to be split between here and a separate "Session"
-     * card, which is exactly where nobody looked for them.
-     */
-    private JPanel buildPlayerCard() {
-        JPanel player = createInfoCard("Player");
+    /** Rebuilds the Account tab for the CURRENT sign-in state (called from onAccountChanged). */
+    private void refreshAccountTab() {
+        if (accountCardHost == null) return;
+        boolean in = main.market.ServerAccount.isLoggedIn();
+        if (in) rebuildAccountMeCard();
+        accountCards.show(accountCardHost, in ? "me" : "auth");
+    }
 
-        addInfoRow(player, "Character name", lblCharName);
-        addInfoRowWithIcon(player, "Membership", lblMemberText, lblMemberIcon);
+    /** The signed-in Account card: identity + badges, limits, donations, profile, log out. */
+    private void rebuildAccountMeCard() {
+        accountMeContent.removeAll();
 
-        // ── v1.31: account type (manual - the client can't reliably detect it) ──
-        // Gates the action picker: UIMs lose Bank (no bank to use), only GIMs see Group
-        // Storage. Changing it re-filters the Task Builder's action list immediately.
-        JComboBox<main.tools.AccountTypes> accountType =
-                new JComboBox<>(main.tools.AccountTypes.values());
-        accountType.setSelectedItem(main.tools.AccountTypes.current());
-        accountType.setToolTipText("<html>Your account's game mode. This is a manual setting "
-                + "(scripts can't reliably detect it) and it tailors the Task Builder:<br>"
-                + "\u2022 Ultimate Ironman - the Bank action is hidden; use the banker "
-                + "Note-Exchange action instead<br>"
-                + "\u2022 Group Ironman - unlocks the Group Storage action</html>");
-        accountType.addActionListener(e -> {
-            main.tools.AccountTypes picked =
-                    (main.tools.AccountTypes) accountType.getSelectedItem();
-            if (picked != null && picked != main.tools.AccountTypes.current()) {
-                main.tools.AccountTypes.set(picked);
-                refreshTaskLibrary();   // re-gates the action picker's built-in list
-                showToast("Account type: " + picked.label, accountType, true);
+        JPanel card = new JPanel();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(PANEL_SURFACE);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(COLOR_BORDER_DIM),
+                new EmptyBorder(18, 22, 18, 22)));
+
+        // ── who you are ──
+        JLabel name = new JLabel(main.market.ServerAccount.session().username);
+        name.setForeground(TEXT_MAIN);
+        name.setFont(new Font("Consolas", Font.BOLD, 22));
+        JComponent badges = main.menu.components.RankBadge.mine(13);
+        JPanel who = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        who.setOpaque(false);
+        who.add(name);
+        who.add(badges);
+        addLeft(card, who);
+
+        JLabel explain = new JLabel("<html><div style='width:430px'>Your DreamMan account - the "
+                + "market, cloud sync, your rank. Your RuneScape login is separate: it lives in "
+                + "the side <b>Player</b> panel and is never sent to this server.</div></html>");
+        explain.setForeground(TEXT_DIM);
+        explain.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        explain.setBorder(new EmptyBorder(6, 0, 10, 0));
+        addLeft(card, explain);
+
+        // ── the tier row (the shared label refreshTierStatusLabel keeps current) ──
+        JPanel tierRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        tierRow.setOpaque(false);
+        JLabel tierKey = new JLabel("Tier:");
+        tierKey.setForeground(TEXT_DIM);
+        lblAccountTier.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        tierRow.add(tierKey);
+        tierRow.add(lblAccountTier);
+        addLeft(card, tierRow);
+
+        // ── what your rank actually gets you, honestly labelled ──
+        addLeft(card, accountSectionHeader("Your limits"));
+        int presets = main.market.Tier.presetLimit();
+        int uploads = main.market.Tier.marketUploadLimit();
+        JLabel limits = new JLabel("<html><table cellpadding='2' cellspacing='0'>"
+                + "<tr><td>Queue loops</td><td><b>" + main.market.Tier.maxLoops()
+                + (main.market.Tier.allowsInfinite() ? " (\u221e allowed)" : "") + "</b></td></tr>"
+                + "<tr><td>Saved Jagex accounts&nbsp;&nbsp;</td><td><b>"
+                + main.market.Tier.maxExtraAccounts() + "</b></td></tr>"
+                + "<tr><td>Equipment presets</td><td><b>"
+                + (presets == Integer.MAX_VALUE ? "unlimited" : presets) + "</b></td></tr>"
+                + "<tr><td>Market uploads</td><td><b>"
+                + (uploads == Integer.MAX_VALUE ? "unlimited (Scripter)" : uploads)
+                + "</b></td></tr></table></html>");
+        limits.setForeground(TEXT_MAIN);
+        limits.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        addLeft(card, limits);
+        JLabel limitNote = new JLabel("<html><i>Shown from your login - the server enforces "
+                + "the real numbers either way.</i></html>");
+        limitNote.setForeground(TEXT_DIM);
+        limitNote.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+        addLeft(card, limitNote);
+
+        // ── donations: the ledger + the honest placeholder button ──
+        addLeft(card, accountSectionHeader("Donations"));
+        long donated = main.market.Tier.donatedCents();
+        String donorTag = main.market.DonorRanks.nameFor(donated);
+        JLabel donatedLbl = new JLabel(donated <= 0
+                ? "You haven't donated (nothing wrong with that - the app is meant to be free)."
+                : "Lifetime: " + main.market.DonorRanks.dollars(donated)
+                        + (donorTag == null ? "" : "  \u00b7  " + donorTag + " - thank you."));
+        donatedLbl.setForeground(TEXT_MAIN);
+        donatedLbl.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        addLeft(card, donatedLbl);
+        JButton btnDonate = createButton("Donate\u2026", new Color(45, 70, 45), null);
+        btnDonate.setToolTipText("Support DreamMan (not wired up yet)");
+        btnDonate.addActionListener(e -> JOptionPane.showMessageDialog(this,
+                "You can't donate yet - the donation system isn't set up.\n\n"
+                        + "Thank you for wanting to support DreamMan! When it exists, every\n"
+                        + "donation counts toward the donor ranks you can see in the market.",
+                "Donations aren't set up yet", JOptionPane.INFORMATION_MESSAGE));
+        addLeft(card, rowOf(btnDonate));
+
+        // ── account actions: profile, the multi-account switcher, log out ──
+        addLeft(card, accountSectionHeader("Account"));
+        addLeft(card, buildAccountSwitcherRow());
+        btnEditProfile = createButton("Public profile\u2026", new Color(45, 55, 70), null);
+        btnEditProfile.setToolTipText("View and edit the bio shown on your public scripter "
+                + "profile (what others see when they click your name on a market card)");
+        btnEditProfile.addActionListener(e -> openMyProfileEditor(btnEditProfile));
+        btnAccountLogout = createButton("Log out of DreamMan account");
+        btnAccountLogout.setToolTipText("Sign out of your DreamMan account (separate from the "
+                + "game logout in the side Player panel)");
+        btnAccountLogout.addActionListener(e -> {
+            if (!main.market.ServerAccount.isLoggedIn()) {
+                refreshAccountLogoutVisibility();
+                showToast("You're not signed in", lblAccountTier, false);
+                return;
             }
+            try {
+                String url = marketRepo instanceof main.market.HttpRepository
+                        ? ((main.market.HttpRepository) marketRepo).baseUrl()
+                        : main.market.ServerAccount.session().baseUrl;
+                new main.market.ServerAccount(url == null || url.isEmpty()
+                        ? DEFAULT_MARKET_SERVER_URL : url).logout();
+                main.market.AccountVault.lock();
+            } catch (Throwable ignored) {}
+            onAccountChanged();
+            showToast("Signed out of your DreamMan account", mainTabs, true);
         });
-        JPanel typeRow = new JPanel(new BorderLayout(8, 0));
-        typeRow.setOpaque(false);
-        JLabel typeLbl = new JLabel("Account type");
-        typeLbl.setForeground(TEXT_DIM);
-        typeRow.add(typeLbl, BorderLayout.WEST);
-        typeRow.add(accountType, BorderLayout.EAST);
-        typeRow.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40)));
-        player.add(typeRow);
+        addLeft(card, rowOf(btnEditProfile, btnAccountLogout));
+        refreshAccountLogoutVisibility();
 
-        // ── Bank PIN (session only) ──
-        player.add(playerSectionHeader("Bank PIN"));
-        addInfoRow(player, "This session", lblBankPin);
-        player.add(buildBankPinRow());
-        JLabel pinNote = new JLabel("<html><i>Kept in memory only - never saved to disk.</i></html>");
-        pinNote.setForeground(TEXT_DIM);
-        pinNote.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        player.add(pinNote);
-
-        // ── Switch Jagex account (DreamBot's Account Manager) ──
-        player.add(playerSectionHeader("Switch account"));
-        addInfoRow(player, "DreamBot accounts", lblAccountSupport);
-        player.add(buildAccountSwitchRow());
-
-        return player;
+        card.setMaximumSize(new Dimension(520, Integer.MAX_VALUE));
+        accountMeContent.add(card);
+        accountMeContent.revalidate();
+        accountMeContent.repaint();
     }
 
-    /** A small gold divider header inside the Player card. */
+    private static void addLeft(JPanel column, JComponent c) {
+        c.setAlignmentX(0f);
+        column.add(c);
+    }
+
+    private JComponent rowOf(JComponent... comps) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        row.setOpaque(false);
+        for (JComponent c : comps) row.add(c);
+        return row;
+    }
+
+    /** A gold divider header inside the Account card (same look the Player card had). */
+    private JComponent accountSectionHeader(String text) {
+        return playerSectionHeader(text);
+    }
+
+    /** v1.87: Privacy as its OWN tab - the same panel it always was, un-buried from Status. */
+    private JPanel createPrivacyTabStandalone() {
+        JPanel panel = new JPanel(new BorderLayout(15, 15));
+        panel.setBorder(new EmptyBorder(15, 15, 15, 15));
+        panel.setBackground(BG_BASE);
+        panel.add(createSubtitle("Privacy"), BorderLayout.NORTH);
+        JScrollPane scroll = Theme.thinScrollbars(new JScrollPane(createPrivacyTab()));
+        scroll.setBorder(null);
+        scroll.getViewport().setOpaque(false);
+        scroll.setOpaque(false);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        panel.add(scroll, BorderLayout.CENTER);
+        return panel;
+    }
+
+    /** A small gold divider header (the Player card look, reused by Account + side panel). */
     private JComponent playerSectionHeader(String text) {
         JLabel l = new JLabel(text.toUpperCase());
         l.setForeground(Theme.ACCENT);
@@ -7131,7 +7194,27 @@ public class DreamBotMenu extends JFrame {
                 btn.setSelected(true);
         }
 
-        panelSettings.add(createSubtitle("Settings"), BorderLayout.NORTH);
+        // v1.87: say what this tab actually IS, once, at the top - these switches drive the
+        // real in-game settings live, which surprised people when a toggle "did something".
+        JLabel warn = new JLabel("<html><b>These are your LIVE in-game settings.</b> Flipping a "
+                + "switch changes it in the game immediately \u2014 and if the bot is busy "
+                + "mid-action the game may briefly refuse (you'll see a toast; try again). "
+                + "Groups follow the same top-to-bottom order as the in-game settings menu. "
+                + "Only settings DreamBot's API exposes appear here.</html>");
+        warn.setForeground(new Color(220, 180, 100));
+        warn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        JPanel warnCard = new JPanel(new BorderLayout());
+        warnCard.setBackground(new Color(0x2A, 0x24, 0x16));
+        warnCard.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 3, 0, 0, new Color(220, 180, 100)),
+                new EmptyBorder(8, 10, 8, 10)));
+        warnCard.add(warn, BorderLayout.CENTER);
+        JPanel north = new JPanel(new BorderLayout(0, 10));
+        north.setOpaque(false);
+        north.add(createSubtitle("Settings"), BorderLayout.NORTH);
+        north.add(warnCard, BorderLayout.CENTER);
+
+        panelSettings.add(north, BorderLayout.NORTH);
         panelSettings.add(menuPanel, BorderLayout.WEST);
         panelSettings.add(settingGroup, BorderLayout.CENTER);
 
@@ -8662,6 +8745,10 @@ public class DreamBotMenu extends JFrame {
         sidePlayerStats.setForeground(TEXT_DIM);
         sidePlayerStats.setFont(new Font("Consolas", Font.PLAIN, 12));
 
+        // v1.87: the minimap face now matches the real one - HP / Prayer / Run / Spec orbs
+        // arc down its left side and the world-map button is a little planet Earth on the
+        // bottom-right rim. The orb numbers come from this supplier; every read is guarded so
+        // a logged-out tick just dims the orbs.
         main.menu.components.MiniMapPanel miniMap = new main.menu.components.MiniMapPanel(() -> {
             try {
                 if (!Client.isLoggedIn()) return null;
@@ -8672,8 +8759,19 @@ public class DreamBotMenu extends JFrame {
             } catch (Throwable ignored) {
                 return null;
             }
+        }, () -> {
+            try {
+                if (!Client.isLoggedIn()) return null;
+                return new int[]{
+                        Skills.getBoostedLevel(Skill.HITPOINTS), Skills.getRealLevel(Skill.HITPOINTS),
+                        Skills.getBoostedLevel(Skill.PRAYER), Skills.getRealLevel(Skill.PRAYER),
+                        (int) org.dreambot.api.methods.walking.impl.Walking.getRunEnergy(),
+                        specPercent()};
+            } catch (Throwable ignored) {
+                return null;
+            }
         });
-        miniMap.setPreferredSize(new Dimension(200, 208));
+        miniMap.setPreferredSize(new Dimension(210, 240));
 
         JPanel head = new JPanel();
         head.setOpaque(false);
@@ -8702,7 +8800,19 @@ public class DreamBotMenu extends JFrame {
                     isMenuPaused(false);
                     showToast("Equipping now: " + task.getName(), listTaskList, true);
                 });
-        JScrollPane eqScroll = Theme.thinScrollbars(new JScrollPane(eq));
+        // v1.87: the scroll column is the doll + inventory + presets AND, folded beneath
+        // them, the PLAYER DETAILS section - everything the old Status tab knew about the
+        // person at the keyboard (membership, account type, world, bank PIN, Jagex-account
+        // switching), collapsed by default so the tidy panel stays tidy.
+        JPanel scrollColumn = new JPanel();
+        scrollColumn.setOpaque(false);
+        scrollColumn.setLayout(new BoxLayout(scrollColumn, BoxLayout.Y_AXIS));
+        eq.setAlignmentX(0f);
+        scrollColumn.add(eq);
+        JComponent details = buildSidePlayerDetails();
+        details.setAlignmentX(0f);
+        scrollColumn.add(details);
+        JScrollPane eqScroll = Theme.thinScrollbars(new JScrollPane(scrollColumn));
         eqScroll.setBorder(null);
         eqScroll.getViewport().setBackground(PANEL_SURFACE);
         eqScroll.getVerticalScrollBar().setUnitIncrement(14);
@@ -8753,6 +8863,9 @@ public class DreamBotMenu extends JFrame {
 
     private void updateUI() {
         SwingUtilities.invokeLater(() -> {
+            // v1.87: automatic dialogue capture for the Player Log (self rate-limited,
+            // change-detected, every read guarded - see DialogueWatcher).
+            try { main.tools.DialogueWatcher.poll(); } catch (Throwable ignored) {}
             // ── Patch B.3: live Script card + status.json (the future web-UI's data feed) ──
             String taskName = getCurrentTaskName();
             lblScriptTask.setText(taskName == null || taskName.isEmpty() ? "—" : taskName);
@@ -8833,6 +8946,174 @@ public class DreamBotMenu extends JFrame {
      * session summary line, and keeps the starred F2P/P2P totals current. Fully guarded -
      * a mid-hop client read can never take the UI timer down.
      */
+    /** Hides side-panel detail rows whose values are unknown (set by buildSidePlayerDetails). */
+    private Runnable detailRowsSync;
+    /** The account-type combo in the side details (auto-detect updates it quietly). */
+    private JComboBox<main.tools.AccountTypes> sideAccountTypeCombo;
+    private boolean suppressAccountTypeEvents;
+    /** Login edge detection for the one-shot account-type auto-detect (v1.87). */
+    private boolean sideWasLoggedIn;
+
+    /**
+     * v1.87: the PLAYER DETAILS block under the equipment column - the Player half of the old
+     * Status tab, rehomed. Anything needing a logged-in character lives here on purpose: the
+     * login is what makes these rows mean something. Collapsed by default; the header is the
+     * toggle (plain words, no glyphs - the tag bar taught that lesson).
+     */
+    private JComponent buildSidePlayerDetails() {
+        JPanel section = new JPanel(new BorderLayout());
+        section.setOpaque(false);
+        section.setBorder(new EmptyBorder(10, 2, 4, 2));
+
+        JLabel header = new JLabel("SHOW PLAYER DETAILS");
+        header.setForeground(Theme.ACCENT);
+        header.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        header.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, COLOR_BORDER_DIM),
+                new EmptyBorder(8, 0, 4, 0)));
+        header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        header.setToolTipText("Membership, account type, world, bank PIN and Jagex-account "
+                + "switching - everything about the character you're logged in as");
+
+        JPanel content = new JPanel();
+        content.setOpaque(false);
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setVisible(false);
+
+        header.addMouseListener(new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent e) {
+                boolean show = !content.isVisible();
+                content.setVisible(show);
+                header.setText(show ? "HIDE PLAYER DETAILS" : "SHOW PLAYER DETAILS");
+                section.revalidate();
+                section.repaint();
+            }
+        });
+
+        // ── membership + world (live labels updateUI already feeds) ──
+        content.add(sideDetailRow("Membership", lblMemberText, lblMemberIcon));
+        content.add(sideDetailRow("World", lblWorld, null));
+
+        // ── account type: auto-detected on login when the client allows, manual always ──
+        sideAccountTypeCombo = new JComboBox<>(main.tools.AccountTypes.values());
+        sideAccountTypeCombo.setSelectedItem(main.tools.AccountTypes.current());
+        sideAccountTypeCombo.setToolTipText("<html>Your account's game mode. v1.87 tries to "
+                + "detect it automatically right after you log in;<br>picking one here always "
+                + "wins. It tailors the Task Builder:<br>"
+                + "\u2022 Ultimate Ironman - the Bank action is hidden; use the banker "
+                + "Note-Exchange action instead<br>"
+                + "\u2022 Group Ironman - unlocks the Group Storage action</html>");
+        sideAccountTypeCombo.addActionListener(e -> {
+            if (suppressAccountTypeEvents) return;
+            main.tools.AccountTypes picked =
+                    (main.tools.AccountTypes) sideAccountTypeCombo.getSelectedItem();
+            if (picked != null && picked != main.tools.AccountTypes.current()) {
+                main.tools.AccountTypes.set(picked);
+                refreshTaskLibrary();   // re-gates the action picker's built-in list
+                showToast("Account type: " + picked.label, sideAccountTypeCombo, true);
+            }
+        });
+        JPanel typeRow = new JPanel(new BorderLayout(8, 0));
+        typeRow.setOpaque(false);
+        JLabel typeLbl = new JLabel("Account type");
+        typeLbl.setForeground(TEXT_DIM);
+        typeRow.add(typeLbl, BorderLayout.WEST);
+        typeRow.add(sideAccountTypeCombo, BorderLayout.EAST);
+        typeRow.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40)));
+        typeRow.setAlignmentX(0f);
+        content.add(typeRow);
+
+        // ── the DreamBot account, shown only when the client actually tells us ──
+        JComponent rowUser = sideDetailRow("DreamBot user", lblUsername, null);
+        JComponent rowNick = sideDetailRow("Nickname", lblNickname, null);
+        JComponent rowId = sideDetailRow("Identifier", lblAcctId, null);
+        JComponent rowStatus = sideDetailRow("Account status", lblAcctStatus, null);
+        content.add(rowUser);
+        content.add(rowNick);
+        content.add(rowId);
+        content.add(rowStatus);
+        detailRowsSync = () -> {
+            // v1.87: no junk. A build that can't expose these reads leaves the rows hidden
+            // instead of parading "..." placeholders.
+            rowUser.setVisible(hasValue(lblUsername));
+            rowNick.setVisible(hasValue(lblNickname));
+            rowId.setVisible(hasValue(lblAcctId));
+            rowStatus.setVisible(hasValue(lblAcctStatus));
+        };
+        detailRowsSync.run();
+
+        // ── bank PIN: one Update input; still memory-only by design ──
+        content.add(playerSectionHeader("Bank PIN"));
+        content.add(sideDetailRow("Current", lblBankPin, null));
+        JComponent pinRow = buildBankPinRow();
+        pinRow.setAlignmentX(0f);
+        content.add(pinRow);
+        JLabel pinNote = new JLabel("<html><i>Held in memory and handed to the client when a "
+                + "PIN screen appears - never saved to disk or sent anywhere.</i></html>");
+        pinNote.setForeground(TEXT_DIM);
+        pinNote.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        pinNote.setAlignmentX(0f);
+        content.add(pinNote);
+
+        // ── Jagex-account switching (names come from the CLIENT's Account Manager - your
+        //    credentials never touch the DreamMan server) ──
+        content.add(playerSectionHeader("Switch account"));
+        content.add(sideDetailRow("DreamBot accounts", lblAccountSupport, null));
+        JComponent switchRow = buildAccountSwitchRow();
+        switchRow.setAlignmentX(0f);
+        content.add(switchRow);
+
+        section.add(header, BorderLayout.NORTH);
+        section.add(content, BorderLayout.CENTER);
+        return section;
+    }
+
+    private static boolean hasValue(JLabel l) {
+        String t = l.getText();
+        return t != null && !t.isBlank() && !"...".equals(t) && !"\u2014".equals(t)
+                && !"null".equalsIgnoreCase(t);
+    }
+
+    private JComponent sideDetailRow(String key, JLabel value, JLabel icon) {
+        JPanel row = new JPanel(new BorderLayout(8, 0));
+        row.setOpaque(false);
+        JLabel k = new JLabel(key);
+        k.setForeground(TEXT_DIM);
+        row.add(k, BorderLayout.WEST);
+        value.setForeground(TEXT_MAIN);
+        value.setHorizontalAlignment(SwingConstants.RIGHT);
+        if (icon != null) {
+            JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+            right.setOpaque(false);
+            right.add(icon);
+            right.add(value);
+            row.add(right, BorderLayout.EAST);
+        } else {
+            row.add(value, BorderLayout.EAST);
+        }
+        row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40)));
+        row.setAlignmentX(0f);
+        return row;
+    }
+
+    // Special attack energy lives in varp 300 (value/10 = percent). Same reflective pattern
+    // as questPoints below, for the same reason - PlayerSettings has moved between builds.
+    private static int specPercent() {
+        try {
+            if (qpGetConfig == null && !qpLookupFailed) {
+                Class<?> ps = Class.forName("org.dreambot.api.methods.settings.PlayerSettings");
+                qpGetConfig = ps.getMethod("getConfig", int.class);
+            }
+            if (qpGetConfig != null) {
+                Object v = qpGetConfig.invoke(null, 300);
+                if (v instanceof Number) return ((Number) v).intValue() / 10;
+            }
+        } catch (Throwable t) {
+            qpLookupFailed = true;
+        }
+        return -1;
+    }
+
     private void updateSidePanel(long totalXPGained, int totalLevelsGained,
                                  int f2pTotal, int p2pTotal) {
         boolean in = false;
@@ -8847,7 +9128,22 @@ public class DreamBotMenu extends JFrame {
         totalLevelLabelP2P.setIcon(loadStatusIcon("P2P_icon"));
         totalLevelLabelP2P.setIconTextGap(8);
 
-        if (!in) return;
+        if (!in) { sideWasLoggedIn = false; return; }
+
+        // v1.87: the moment a login lands, try the account-type auto-detect ONCE (varbit 1777,
+        // reflective, silent on builds that can't) and refresh which detail rows have values.
+        if (!sideWasLoggedIn) {
+            sideWasLoggedIn = true;
+            main.tools.AccountTypes found = main.tools.AccountTypes.applyDetected();
+            if (found != null && sideAccountTypeCombo != null) {
+                suppressAccountTypeEvents = true;
+                sideAccountTypeCombo.setSelectedItem(found);
+                suppressAccountTypeEvents = false;
+                refreshTaskLibrary();
+                showToast("Account type detected: " + found.label, sideAccountTypeCombo, true);
+            }
+        }
+        if (detailRowsSync != null) detailRowsSync.run();
 
         try {
             org.dreambot.api.wrappers.interactive.Player me = Players.getLocal();
@@ -8981,25 +9277,36 @@ public class DreamBotMenu extends JFrame {
     ///  Define Client Settings sub-tab
     private JPanel createClientPanel() {
         return createSettingsGroup("Client",
-                chkDisableRendering = createSettingCheck("Disable Rendering", Client.isRenderingDisabled(), e -> {
-                    Client.setRenderingDisabled(((JCheckBox)e.getSource()).isSelected());
-                })
+                settingRow("Disable rendering",
+                        "Stops the client drawing the game world - the biggest CPU and GPU "
+                                + "saver there is for long sessions. The bot keeps playing; "
+                                + "you just can't watch it.",
+                        chkDisableRendering = createSettingCheck("Disable Rendering", Client.isRenderingDisabled(), e -> {
+                            Client.setRenderingDisabled(((JCheckBox)e.getSource()).isSelected());
+                        }))
         );
     }
 
     private JPanel createScriptPanel() {
         return createSettingsGroup("Script",
-                settingClientChkStartScriptOnLoad = createSettingCheck("Start Script on Load",
-                        startScriptOnLoad, e ->
-                                // fixed: was inverted ("= !isSelected()"), so ticking DISABLED the feature
-                                startScriptOnLoad = settingClientChkStartScriptOnLoad.isSelected()
-                ),
+                settingRow("Start script on load",
+                        "Begins running your queue the moment the menu finishes loading - no "
+                                + "Play press needed. (A DreamMan setting; nothing in the game "
+                                + "changes when you flip it.)",
+                        settingClientChkStartScriptOnLoad = createSettingCheck("Start Script on Load",
+                                startScriptOnLoad, e ->
+                                        // fixed: was inverted ("= !isSelected()"), so ticking DISABLED the feature
+                                        startScriptOnLoad = settingClientChkStartScriptOnLoad.isSelected()
+                        )),
 
-                settingClientChkExitOnStopWarning = createSettingCheck("Warn Before Exit",
-                        exitOnStopWarning, e ->
-                                // fixed: was inverted; label renamed to match what it actually does
-                                exitOnStopWarning = settingClientChkExitOnStopWarning.isSelected()
-                )
+                settingRow("Warn before exit",
+                        "Asks for confirmation before exiting, so one stray click can't end a "
+                                + "long run unnoticed. (Also a DreamMan setting.)",
+                        settingClientChkExitOnStopWarning = createSettingCheck("Warn Before Exit",
+                                exitOnStopWarning, e ->
+                                        // fixed: was inverted; label renamed to match what it actually does
+                                        exitOnStopWarning = settingClientChkExitOnStopWarning.isSelected()
+                        ))
                 // v1.62: the "Auto Save" toggle is gone - autosave is always on now (the manual
                 // Save buttons were removed), so there's no opt-out to expose. Changes persist via
                 // requestAutosave() on edit plus a 60s backstop and a save on exit.
@@ -9009,28 +9316,42 @@ public class DreamBotMenu extends JFrame {
     ///  Define Display Settings sub-tab
     private JPanel createDisplayPanel() {
         return createSettingsGroup("Display",
-                chkHideRoofs = createSettingCheck("Hide Roofs",
-                        ClientSettings.areRoofsHidden(), e ->
-                                ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected())),
+                settingRow("Hide roofs",
+                        "Removes building roofs so indoor tiles stay visible - the classic "
+                                + "quality-of-life toggle, and it keeps scripts' clicks honest "
+                                + "inside buildings.",
+                        chkHideRoofs = createSettingCheck("Hide Roofs",
+                                ClientSettings.areRoofsHidden(), e ->
+                                        ClientSettings.toggleRoofs(((JCheckBox)e.getSource()).isSelected()))),
 
-                chkTransparentSidePanel = createSettingCheck("Transparent side panel",
-                        ClientSettings.isTransparentSidePanelEnabled(), e ->
-                                ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected()))
+                settingRow("Transparent side panel",
+                        "Makes the game's side panel see-through in resizable mode, so more of "
+                                + "the world shows behind your inventory and tabs.",
+                        chkTransparentSidePanel = createSettingCheck("Transparent side panel",
+                                ClientSettings.isTransparentSidePanelEnabled(), e ->
+                                        ClientSettings.toggleTransparentSidePanel(((JCheckBox)e.getSource()).isSelected())))
         );
     }
 
     ///  Define Gameplay Settings sub-tab
     private JPanel createGameplayPanel() {
         return createSettingsGroup("Gameplay",
-                chkDataOrbs = createSettingCheck("Show data orbs",
-                        ClientSettings.areDataOrbsEnabled(), e ->
-                                ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())
-                ),
+                settingRow("Show data orbs",
+                        "The in-game HP, prayer, run and special-attack orbs around the "
+                                + "minimap. (DreamMan's side panel draws its own copy of these "
+                                + "either way, so turning the game's off costs you nothing here.)",
+                        chkDataOrbs = createSettingCheck("Show data orbs",
+                                ClientSettings.areDataOrbsEnabled(), e ->
+                                        ClientSettings.toggleDataOrbs(((JCheckBox)e.getSource()).isSelected())
+                        )),
 
-                chkAmmoPickingBehaviour = createSettingCheck("Ammo-picking behaviour",
-                        ClientSettings.isAmmoAutoEquipping(), e ->
-                                ClientSettings.toggleAmmoAutoEquipping(((JCheckBox)e.getSource()).isSelected())
-                )
+                settingRow("Ammo auto-equip",
+                        "Picked-up ammo that matches what you're wielding goes straight back "
+                                + "into the equipped stack instead of your inventory.",
+                        chkAmmoPickingBehaviour = createSettingCheck("Ammo-picking behaviour",
+                                ClientSettings.isAmmoAutoEquipping(), e ->
+                                        ClientSettings.toggleAmmoAutoEquipping(((JCheckBox)e.getSource()).isSelected())
+                        ))
         );
     }
 
@@ -9041,42 +9362,62 @@ public class DreamBotMenu extends JFrame {
     ///  Define Audio Settings sub-tab
     private JPanel createAudioPanel() {
         return createSettingsGroup("Audio",
-                chkGameAudio = createSettingCheck("Game Audio", ClientSettings.isGameAudioOn(), e -> ClientSettings.toggleGameAudio(((JCheckBox)e.getSource()).isSelected()))
+                settingRow("Game audio",
+                        "All game sound. Off is the usual botting default - quieter for you, "
+                                + "lighter on the machine.",
+                        chkGameAudio = createSettingCheck("Game Audio", ClientSettings.isGameAudioOn(),
+                                e -> ClientSettings.toggleGameAudio(((JCheckBox)e.getSource()).isSelected())))
         );
     }
 
     ///  Define Chat Settings sub-tab
     private JPanel createChatPanel() {
         return createSettingsGroup("Chat",
-                chkTransparentChatbox = createSettingCheck("Transparent chatbox",
-                        ClientSettings.isTransparentChatboxEnabled(), e ->
-                                ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected())),
+                settingRow("Transparent chatbox",
+                        "See-through chatbox in resizable mode - more of the world shows "
+                                + "behind your messages. (The Logs tab captures every channel "
+                                + "regardless of how the game's box looks.)",
+                        chkTransparentChatbox = createSettingCheck("Transparent chatbox",
+                                ClientSettings.isTransparentChatboxEnabled(), e ->
+                                        ClientSettings.toggleTransparentChatbox(((JCheckBox)e.getSource()).isSelected()))),
 
-                chkClickThroughChatbox = createSettingCheck("Click through chatbox",
-                        ClientSettings.isClickThroughChatboxEnabled(), e ->
-                                ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected()))
+                settingRow("Click through chatbox",
+                        "With the transparent chatbox on, clicks pass through it to the world "
+                                + "behind - walk where the box is instead of poking it.",
+                        chkClickThroughChatbox = createSettingCheck("Click through chatbox",
+                                ClientSettings.isClickThroughChatboxEnabled(), e ->
+                                        ClientSettings.toggleClickThroughChatbox(((JCheckBox)e.getSource()).isSelected())))
         );
     }
 
     ///  Define Controls Settings sub-tab
     private JPanel createControlsPanel() {
         return createSettingsGroup("Controls",
-                chkShiftClickDrop = createSettingCheck("Shift click drop",
-                        ClientSettings.isShiftClickDroppingEnabled(), e ->
-                                ClientSettings.toggleShiftClickDropping(((JCheckBox)e.getSource()).isSelected())),
+                settingRow("Shift-click drop",
+                        "Hold Shift to left-click-drop items - the setting every powermining "
+                                + "and drop-heavy script assumes is on.",
+                        chkShiftClickDrop = createSettingCheck("Shift click drop",
+                                ClientSettings.isShiftClickDroppingEnabled(), e ->
+                                        ClientSettings.toggleShiftClickDropping(((JCheckBox)e.getSource()).isSelected()))),
 
-                chkEscClosesInterface = createSettingCheck("Esc closes interface",
-                        ClientSettings.isEscInterfaceClosingEnabled(), e ->
-                                ClientSettings.toggleEscInterfaceClosing(((JCheckBox)e.getSource()).isSelected()))
+                settingRow("Esc closes interface",
+                        "The Escape key closes whatever interface is open - the bank, shops, "
+                                + "the lot. Scripts close things faster with it on.",
+                        chkEscClosesInterface = createSettingCheck("Esc closes interface",
+                                ClientSettings.isEscInterfaceClosingEnabled(), e ->
+                                        ClientSettings.toggleEscInterfaceClosing(((JCheckBox)e.getSource()).isSelected())))
         );
     }
 
     ///  Define Activities Settings sub-tab
     private JPanel createActivitiesPanel() {
         return createSettingsGroup("Activities",
-                chkLevelUpInterface = createSettingCheck("Level-up interface",
-                        ClientSettings.isLevelUpInterfaceEnabled(), e ->
-                                ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected()))
+                settingRow("Level-up interface",
+                        "The congratulations popup when a skill levels. Off means one less "
+                                + "interruption for a script to click through mid-run.",
+                        chkLevelUpInterface = createSettingCheck("Level-up interface",
+                                ClientSettings.isLevelUpInterfaceEnabled(), e ->
+                                        ClientSettings.toggleLevelUpInterface(((JCheckBox)e.getSource()).isSelected())))
         );
     }
 
@@ -9084,9 +9425,12 @@ public class DreamBotMenu extends JFrame {
     private JPanel createWarningsPanel() {
         return createSettingsGroup(
                 "Warnings",
-                chkLootNotifications = createSettingCheck("Loot notifications",
-                        ClientSettings.areLootNotificationsEnabled(), e ->
-                                ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected()))
+                settingRow("Loot notifications",
+                        "Highlights valuable drops with a chat notification, so the good ones "
+                                + "don't vanish into the kill-loop unnoticed.",
+                        chkLootNotifications = createSettingCheck("Loot notifications",
+                                ClientSettings.areLootNotificationsEnabled(), e ->
+                                        ClientSettings.toggleLootNotifications(((JCheckBox)e.getSource()).isSelected())))
         );
     }
 
@@ -9152,7 +9496,85 @@ public class DreamBotMenu extends JFrame {
         }
     }
 
-    private JPanel createSettingsGroup(String title, Component... comps) { JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10)); p.setBackground(BG_BASE); JPanel list = new JPanel(new GridLayout(0, 1, 5, 5)); list.setBackground(BG_BASE); JLabel header = new JLabel(title); header.setForeground(COLOR_BLOOD); header.setFont(new Font("Segoe UI", Font.BOLD, 24)); JPanel wrapper = new JPanel(new BorderLayout()); wrapper.setBackground(BG_BASE); wrapper.add(header, BorderLayout.NORTH); for (Component c : comps) list.add(c); wrapper.add(list, BorderLayout.CENTER); return wrapper; }
+    /**
+     * v1.87: one settings group, restyled. The old version was a 24px header over bare
+     * checkboxes floating in a FlowLayout - "spaced out and plain and not well explained" was
+     * a fair review. Now it's a dense column of {@link #settingRow} cards (name, what it does,
+     * the switch), clamped to a readable width and scrolling when a group outgrows the tab.
+     * The group ORDER across the nav is untouched - it still mirrors the in-game settings
+     * menu top to bottom, so the two screens navigate the same.
+     */
+    private JPanel createSettingsGroup(String title, Component... comps) {
+        JLabel header = new JLabel(title);
+        header.setForeground(COLOR_BLOOD);
+        header.setFont(new Font("Segoe UI", Font.BOLD, 16));
+        header.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, COLOR_BORDER_DIM),
+                new EmptyBorder(0, 0, 6, 0)));
+        header.setAlignmentX(0f);
+        header.setMaximumSize(new Dimension(560, Short.MAX_VALUE));
+
+        JPanel column = new JPanel();
+        column.setOpaque(false);
+        column.setLayout(new BoxLayout(column, BoxLayout.Y_AXIS));
+        column.add(header);
+        column.add(Box.createVerticalStrut(4));
+        for (Component c : comps) {
+            if (c instanceof JComponent) ((JComponent) c).setAlignmentX(0f);
+            column.add(c);
+        }
+
+        JPanel wrap = new JPanel(new BorderLayout());
+        wrap.setBackground(BG_BASE);
+        wrap.setBorder(new EmptyBorder(4, 4, 4, 4));
+        wrap.add(column, BorderLayout.NORTH);
+        JScrollPane scroll = Theme.thinScrollbars(new JScrollPane(wrap));
+        scroll.setBorder(null);
+        scroll.getViewport().setBackground(BG_BASE);
+        scroll.getVerticalScrollBar().setUnitIncrement(14);
+        JPanel out = new JPanel(new BorderLayout());
+        out.setBackground(BG_BASE);
+        out.add(scroll, BorderLayout.CENTER);
+        return out;
+    }
+
+    /**
+     * v1.87: one setting as a proper row - bold name, a plain-words line on what it actually
+     * does, the switch on the right. The checkbox keeps ALL its live-toggle machinery from
+     * {@link #createSettingCheck} (the busy-bot semaphore, the toasts); only its label text
+     * moves into the row title so nothing reads twice.
+     */
+    private JComponent settingRow(String title, String description, JCheckBox check) {
+        JLabel t = new JLabel(title);
+        t.setForeground(TEXT_MAIN);
+        t.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        JLabel d = new JLabel("<html><div style='width:420px'>" + description + "</div></html>");
+        d.setForeground(TEXT_DIM);
+        d.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        JPanel text = new JPanel();
+        text.setOpaque(false);
+        text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
+        t.setAlignmentX(0f);
+        d.setAlignmentX(0f);
+        text.add(t);
+        text.add(Box.createVerticalStrut(2));
+        text.add(d);
+
+        check.setText("");   // the row names it; the box just flips it (toasts keep the name)
+        JPanel east = new JPanel(new GridBagLayout());   // vertically centres the switch
+        east.setOpaque(false);
+        east.add(check);
+
+        JPanel row = new JPanel(new BorderLayout(12, 0));
+        row.setOpaque(false);
+        row.add(text, BorderLayout.CENTER);
+        row.add(east, BorderLayout.EAST);
+        row.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40)),
+                new EmptyBorder(10, 0, 10, 4)));
+        row.setMaximumSize(new Dimension(560, Short.MAX_VALUE));
+        return row;
+    }
 
     private JCheckBox createSettingCheck(String text, boolean initialState, ActionListener l) {
         JCheckBox c = new JCheckBox(text);

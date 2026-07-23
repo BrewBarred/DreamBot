@@ -213,6 +213,22 @@ public class EquipmentPanel extends JPanel {
             String name = JOptionPane.showInputDialog(this, "Preset name:", "Save equipment preset",
                     JOptionPane.PLAIN_MESSAGE);
             if (name == null || name.isBlank()) return;
+            // v1.87: the tiered preset cap - overwriting an existing name is always allowed
+            // (no new slot), only NEW presets count against the limit. Free 8 · VIP 28 ·
+            // Subscriber 64 · Lifetime and staff unlimited (the server can override).
+            int cap = main.market.Tier.presetLimit();
+            boolean isNew = !EquipmentPresets.names().contains(name.trim());
+            if (isNew && EquipmentPresets.names().size() >= cap) {
+                status("Preset limit reached (" + cap + " on "
+                        + main.market.Tier.label() + ").", false);
+                JOptionPane.showMessageDialog(this,
+                        "You've used all " + cap + " preset slots your "
+                                + main.market.Tier.label() + " account gets.\n\n"
+                                + "Free accounts keep 8, VIPs 28, subscribers 64, and lifetime\n"
+                                + "supporters have no limit - or delete a preset you've outgrown.",
+                        "Preset limit", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
             EquipmentPresets.put(name.trim(), live);
             selectedPreset = name.trim();
             syncBars();

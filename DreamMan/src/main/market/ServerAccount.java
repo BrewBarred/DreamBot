@@ -56,10 +56,17 @@ public class ServerAccount {
         // reflects these in its UI, but the server is what actually enforces them - a tampered
         // client that sets tier="vip" here still can't get VIP content or extra loops, because
         // those are gated server-side.
-        public String tier = "guest";       // guest | free | vip | admin | moderator
+        public String tier = "guest";       // guest | free | vip | subscriber | lifetime | admin | moderator
         public int maxLoops = 50;
         public int maxExtraAccounts = 2;
         public boolean canPublishVip = false;
+        // ── v1.87 ranks ──
+        /** The orthogonal SCRIPTER mark (unlimited market uploads). Server-sent. */
+        public boolean scripter = false;
+        /** Lifetime donations in cents (0 until the donation system exists). Server-sent. */
+        public long donatedCents = 0;
+        /** Server override for the equipment-preset cap (0 = use the tier default). */
+        public int presetLimit = 0;
     }
 
     private static volatile Session session;
@@ -118,6 +125,9 @@ public class ServerAccount {
         s.tier = "guest";
         s.maxLoops = 50;           // back to the guest/free default, not zero
         s.canPublishVip = false;
+        s.scripter = false;        // v1.87: the marks are account properties too
+        s.donatedCents = 0;
+        s.presetLimit = 0;
         saveSession();
         Logger.log("[Account] Logged out (the token was revoked on the server too).");
     }
@@ -183,6 +193,17 @@ public class ServerAccount {
                 if (l.get("canPublishVip") instanceof Boolean) s.canPublishVip = (Boolean) l.get("canPublishVip");
             }
             if (u.get("canPublishVip") instanceof Boolean) s.canPublishVip = (Boolean) u.get("canPublishVip");
+            // ── v1.87: the orthogonal marks + preset override, wherever the server puts them ──
+            if (u.get("scripter") instanceof Boolean) s.scripter = (Boolean) u.get("scripter");
+            if (u.get("donatedCents") instanceof Number)
+                s.donatedCents = ((Number) u.get("donatedCents")).longValue();
+            else if (u.get("donated") instanceof Number)   // dollars, if the server prefers those
+                s.donatedCents = Math.round(((Number) u.get("donated")).doubleValue() * 100);
+            if (lim instanceof Map) {
+                Map<String, Object> l2 = (Map<String, Object>) lim;
+                if (l2.get("presetLimit") instanceof Number)
+                    s.presetLimit = ((Number) l2.get("presetLimit")).intValue();
+            }
         } catch (Throwable ignored) {}
     }
 
@@ -355,6 +376,52 @@ public class ServerAccount {
         String body = GSON.toJson(Map.of("tier", tier));
         String json = request("POST", "/admin/users/" + enc(username) + "/role", body, session().token);
         return GSON.fromJson(json, new TypeToken<Map<String, Object>>() {}.getType());
+    }
+
+    /**
+     * v1.87: grants or removes the SCRIPTER mark (unlimited market uploads). Owner-gated on the
+     * server. A server without the endpoint answers 404 and the console says so honestly.
+     *
+     * <p>Endpoint: {@code POST /admin/users/<username>/scripter} with body {@code {"on":true}}.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> adminSetScripter(String username, boolean on) throws Exception {
+        requireLoggedIn();
+        if (username == null || username.trim().isEmpty()) throw new IOException("No user given.");
+        String json = request("POST", "/admin/users/" + enc(username) + "/scripter",
+                GSON.toJson(Map.of("on", on)), session().token);
+        return GSON.fromJson(json, new TypeToken<Map<String, Object>>() {}.getType());
+    }
+
+    /**
+     * v1.87: records a user's lifetime donation total, in cents - the manual ledger until a
+     * real payment system exists. 404 on older servers; the console explains.
+     *
+     * <p>Endpoint: {@code POST /admin/users/<username>/donated} with body {@code {"cents":N}}.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> adminSetDonated(String username, long cents) throws Exception {
+        requireLoggedIn();
+        if (username == null || username.trim().isEmpty()) throw new IOException("No user given.");
+        String json = request("POST", "/admin/users/" + enc(username) + "/donated",
+                GSON.toJson(Map.of("cents", cents)), session().token);
+        return GSON.fromJson(json, new TypeToken<Map<String, Object>>() {}.getType());
+    }
+
+    /**
+     * v1.87: publishes the donor-rank ladder ({@code [{minCents,name},...]}) so every client
+     * shows the same names. 404 on older servers; DonorRanks keeps the local copy either way.
+     *
+     * <p>Endpoint: {@code PUT /admin/donor-ranks}.
+     */
+    public void putDonorRanks(String json) throws Exception {
+        requireLoggedIn();
+        request("PUT", "/admin/donor-ranks", json, session().token);
+    }
+
+    /** v1.87: fetches the shared donor-rank ladder (any signed-in user). 404 = not published. */
+    public String getDonorRanks() throws Exception {
+        return request("GET", "/donor-ranks", null, session().token);
     }
 
     // ── v1.66: moderation, submissions queue, and the server-side defaults library ──

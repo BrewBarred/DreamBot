@@ -47,6 +47,37 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
     @Override public void onClanMessage(org.dreambot.api.wrappers.widgets.message.Message m) {
         if (m != null) main.tools.ChatLog.chat("CLAN", m.getUsername(), m.getMessage());
     }
+
+    // ── v1.87: catch EVERYTHING ──────────────────────────────────────────────
+    // The five hooks above only hear the message types they're named after, which is why the
+    // Logs tab "missed a lot" - filtered game lines, friends-channel chat, group chat and the
+    // rest never had a listener. These three are declared WITHOUT @Override on purpose: when
+    // the running client's ChatListener interface has them (onMessage is its catch-all), they
+    // override and fire; on a build that lacks one, it's just an unused public method and the
+    // named hooks above still carry their channels. Either way the code compiles everywhere.
+    // The same message often arrives through BOTH a named hook and the catch-all - ChatLog's
+    // 400ms dedupe window collapses those into one line.
+    public void onMessage(org.dreambot.api.wrappers.widgets.message.Message m) {
+        if (m == null) return;
+        String type = String.valueOf(m.getType()).toUpperCase(java.util.Locale.ROOT);
+        String who = m.getUsername();
+        String channel;
+        if (type.contains("PUBLIC") || type.contains("AUTOTYPER")) channel = "PUBLIC";
+        else if (type.contains("PRIVATE")) channel = "PRIVATE";
+        else if (type.contains("TRADE")) channel = "TRADE";
+        else if (type.contains("GROUP") || type.contains("GIM")) channel = "GROUP";
+        else if (type.contains("CLAN")) channel = "CLAN";
+        else if (type.contains("FRIEND") || type.contains("CHANNEL")) channel = "CHANNEL";
+        else if (who != null && !who.isBlank()) channel = "OTHER";
+        else channel = "GAME";   // game text, filtered/spam lines, console, welcome - the lot
+        main.tools.ChatLog.chat(channel, who, m.getMessage());
+    }
+    public void onChannelMessage(org.dreambot.api.wrappers.widgets.message.Message m) {
+        if (m != null) main.tools.ChatLog.chat("CHANNEL", m.getUsername(), m.getMessage());
+    }
+    public void onGroupMessage(org.dreambot.api.wrappers.widgets.message.Message m) {
+        if (m != null) main.tools.ChatLog.chat("GROUP", m.getUsername(), m.getMessage());
+    }
     ///  Class scope fields
 
     /**

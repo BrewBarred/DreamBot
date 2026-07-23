@@ -196,6 +196,13 @@ public class MarketCard extends JPanel {
         metaRow.setOpaque(false);
         metaRow.setAlignmentX(LEFT_ALIGNMENT);
         metaRow.add(authorLink);
+        // v1.87: the author's rank badges, the moment the server starts sending them
+        if (listing.authorTier != null || Boolean.TRUE.equals(listing.authorScripter)
+                || (listing.authorDonatedCents != null && listing.authorDonatedCents > 0)) {
+            metaRow.add(RankBadge.of(listing.authorTier,
+                    Boolean.TRUE.equals(listing.authorScripter),
+                    listing.authorDonatedCents == null ? 0 : listing.authorDonatedCents, 11));
+        }
         metaRow.add(metaLabel);
         titleCol.add(titleLabel);
         titleCol.add(Box.createVerticalStrut(2));

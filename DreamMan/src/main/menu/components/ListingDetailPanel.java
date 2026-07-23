@@ -85,6 +85,13 @@ public class ListingDetailPanel extends JPanel {
         meta.setFont(Theme.font(12));
         meta.setForeground(Theme.TEXT_DIM);
         JPanel authorRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        // v1.87: rank badges beside the author, once the server sends listing rank fields
+        if (l.authorTier != null || Boolean.TRUE.equals(l.authorScripter)
+                || (l.authorDonatedCents != null && l.authorDonatedCents > 0)) {
+            authorRow.add(RankBadge.of(l.authorTier, Boolean.TRUE.equals(l.authorScripter),
+                    l.authorDonatedCents == null ? 0 : l.authorDonatedCents, 12));
+            authorRow.add(javax.swing.Box.createHorizontalStrut(8));
+        }
         authorRow.setOpaque(false);
         authorRow.setAlignmentX(LEFT_ALIGNMENT);
         authorRow.add(author);

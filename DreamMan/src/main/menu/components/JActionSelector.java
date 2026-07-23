@@ -57,6 +57,9 @@ public class JActionSelector extends JComboBox<Action> {
         REGISTRY.put("WaitForItems", new main.actions.WaitForItems());
         REGISTRY.put("GroupStorage", new main.actions.GroupStorage());
         REGISTRY.put("NoteExchange", new main.actions.NoteExchange());
+        // ── v1.87 ──
+        REGISTRY.put("Read", new main.actions.Read());
+        REGISTRY.put("Note", new main.actions.Note());
     }
 
     /**
@@ -83,7 +86,19 @@ public class JActionSelector extends JComboBox<Action> {
         Logger.log(Logger.LogType.DEBUG, "Rebuild complete!");
         currentPanel = selectedAction.getParamPanel();
         Logger.log(Logger.LogType.DEBUG, "Fetch params!");
-        addActionListener(e -> { if (!muted) rebuildTemplate(); });
+        // v1.87 SWAP FIX: this hook was an ActionListener - and Swing notifies ActionListeners
+        // most-recently-added FIRST, so the TaskBuilder's own selection listener (added later)
+        // ran BEFORE this rebuild. It asked getParamsPanel() for the new panel, got the STALE
+        // one, its equals() guard said "already mounted", and the freshly-built panel went
+        // nowhere - until the 4-second scan timer's refresh() happened to mount it, entity
+        // rescan and all. That was the whole "swapping actions takes forever" bug: not slow,
+        // just waiting for a timer. ItemListeners fire from the combo's internals BEFORE any
+        // ActionListener, so the rebuild is now guaranteed to finish first and every swap
+        // mounts instantly.
+        addItemListener(e -> {
+            if (!muted && e.getStateChange() == java.awt.event.ItemEvent.SELECTED)
+                rebuildTemplate();
+        });
         Logger.log(Logger.LogType.DEBUG, "Added listener!");
 
         // Patch B.3: the dropdown is split into the default actions and, below a divider,
