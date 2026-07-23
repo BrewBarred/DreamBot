@@ -750,6 +750,31 @@ public final class UIIcons {
         };
     }
 
+    /**
+     * v1.90: the Privacy tab - a shield with a keyhole. Drawn in the same flat, single-colour
+     * style as the rest of the tab strip so it doesn't read as a foreign asset next to them.
+     */
+    public static Icon shield(int s, Color c) {
+        return new Vec(s, c) {
+            void paintVec(Graphics2D g2) {
+                Path2D sh = new Path2D.Float();
+                sh.moveTo(s * 0.50f, s * 0.10f);
+                sh.lineTo(s * 0.86f, s * 0.26f);
+                sh.curveTo(s * 0.86f, s * 0.62f, s * 0.72f, s * 0.82f, s * 0.50f, s * 0.92f);
+                sh.curveTo(s * 0.28f, s * 0.82f, s * 0.14f, s * 0.62f, s * 0.14f, s * 0.26f);
+                sh.closePath();
+                g2.setStroke(new BasicStroke(Math.max(1.3f, s / 12f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.draw(sh);
+                // the keyhole: what privacy is actually about
+                int kd = Math.max(3, Math.round(s * 0.16f));
+                g2.fillOval(Math.round(s * 0.50f) - kd / 2, Math.round(s * 0.38f), kd, kd);
+                g2.fillRect(Math.round(s * 0.50f) - Math.max(1, kd / 4),
+                        Math.round(s * 0.44f), Math.max(2, kd / 2), Math.round(s * 0.18f));
+            }
+        };
+    }
+
     /** v1.88: a wastebasket, for the preset delete control. */
     public static Icon trash(int s, Color c) {
         return new Vec(s, c) {

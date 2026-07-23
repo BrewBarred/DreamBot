@@ -141,7 +141,10 @@ public final class Vault {
             System.arraycopy(ct, 0, out, iv.length, ct.length);
             return b64(out);
         } catch (Exception e) {
-            Logger.log(Logger.LogType.WARN, "[Vault] encrypt failed: " + e);
+            // v1.89 (SDN): log the failure TYPE only. An exception's message can carry
+            // parameter detail, and console logs get pasted into bug reports.
+            Logger.log(Logger.LogType.WARN, "[Vault] encrypt failed: "
+                    + e.getClass().getSimpleName());
             throw new IllegalStateException("Encryption failed", e);
         }
     }

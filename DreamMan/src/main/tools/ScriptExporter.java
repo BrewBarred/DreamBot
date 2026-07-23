@@ -307,9 +307,12 @@ public final class ScriptExporter {
      * Falls back to null when the usual location doesn't exist (the UI then asks where to save).
      */
     public static File dreamBotScriptsDir() {
-        String home = System.getProperty("user.home");
+        // v1.89 (SDN compliance): derived from scripts.path, never user.home. The
+        // guidelines name user.home explicitly as a path scripts must not use, so the
+        // exporter asks the CLIENT where its scripts live instead of guessing.
+        String home = System.getProperty("scripts.path");
         if (home == null) return null;
-        File dir = new File(new File(home, "DreamBot"), "Scripts");
+        File dir = new File(home.trim());
         return dir.isDirectory() ? dir : null;
     }
 

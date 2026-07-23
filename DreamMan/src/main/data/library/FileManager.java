@@ -45,14 +45,14 @@ public final class FileManager {
     private FileManager() {}
 
     /**
-     * Root library directory. Now an ABSOLUTE path under the user's home directory:
-     * {@code <user.home>/DreamMan/library/}.
-     * <p>
-     * Previously this was the relative path {@code "main/data/library/"}, which resolves against
-     * whatever working directory the DreamBot client launches from - so once the script ran as a
-     * packaged .jar, learned NPCs/objects were written somewhere unexpected (or lost). An absolute
-     * path fixes that regardless of how the script is launched, and keeps all DreamMan data
-     * (profiles + library) together in one place.
+     * Root library directory: {@code <scripts.path>/DreamMan/library/}.
+     *
+     * <p><b>v1.89 (SDN compliance).</b> This used to resolve under {@code user.home}, which the
+     * DreamBot scripter guidelines forbid outright - "Files can only be saved in a subdirectory
+     * of System.getProperty(\"scripts.path\"). Don't use any of the other alternatives such as
+     * user.home." It now goes through {@link main.data.store.LocalStore#getRoot()}, the single
+     * place in the codebase that knows where DreamMan is allowed to write, so the library sits
+     * beside profiles and market data instead of in its own off-limits corner.
      */
     public static final String DIR = resolveRootDir();
 
@@ -63,10 +63,8 @@ public final class FileManager {
     private static String activeCollection = "default";
 
     private static String resolveRootDir() {
-        String home = System.getProperty("user.home");
-        if (home == null || home.isEmpty())
-            home = ".";
-        String path = new java.io.File(home, "DreamMan/library").getPath();
+        // One source of truth for "where may DreamMan write" - see LocalStore.getRoot().
+        String path = new java.io.File(main.data.store.LocalStore.getRoot(), "library").getPath();
         return path.endsWith(java.io.File.separator) ? path : path + java.io.File.separator;
     }
 

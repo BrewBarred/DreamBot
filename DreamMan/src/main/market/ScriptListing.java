@@ -79,6 +79,15 @@ public class ScriptListing {
     // scripter mark / donation total to listings, every card and detail view grows the
     // matching RankBadge automatically (Gson ignores absent fields, so old servers cost
     // nothing). Until then they stay null and nothing renders.
+    /**
+     * v1.90: the rank required to DOWNLOAD this listing ("free" = anyone). The SERVER enforces
+     * it by withholding the bundle; this field exists so the card can say WHY it's locked
+     * instead of just showing an empty download.
+     */
+    public String minTier;
+    /** v1.90: set by the server when it withheld the bundle because of {@link #minTier}. */
+    public Boolean lockedByTier;
+
     public String authorTier;
     public Boolean authorScripter;
     public Long authorDonatedCents;

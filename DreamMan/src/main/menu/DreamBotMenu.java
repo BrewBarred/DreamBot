@@ -672,7 +672,12 @@ public class DreamBotMenu extends JFrame {
         // bottom bar, the overlay and status.json already show all of it, live.
         mainTabs.addTab("Account", loadTabIcon("status_tab"), createAccountTab());
         mainTabs.addTab("Settings", loadTabIcon("settings_tab"), createSettingsTab());
-        mainTabs.addTab("Privacy", loadTabIcon("privacy_tab"), createPrivacyTabStandalone());
+        // v1.90: a drawn shield-and-keyhole, matching the strip's flat style instead of
+        // falling back to whatever loadTabIcon() could find for "privacy_tab".
+        mainTabs.addTab("Privacy",
+                new javax.swing.ImageIcon(iconToImage(
+                        main.menu.components.UIIcons.shield(16, Theme.ACCENT), 16)),
+                createPrivacyTabStandalone());
         // v1.77 BUGFIX: apply the RESTORED session to the UI at startup.
         //
         // The session was being read back from session.json correctly all along - nothing ever
@@ -946,11 +951,17 @@ public class DreamBotMenu extends JFrame {
         lblWaitTo.setForeground(TEXT_DIM);
         JLabel lblWaitMs = new JLabel("ms");
         lblWaitMs.setForeground(TEXT_DIM);
-        left.add(chkQueueWait);
-        left.add(queueWaitMinInput);
-        left.add(lblWaitTo);
-        left.add(queueWaitMaxInput);
-        left.add(lblWaitMs);
+        // v1.90: "Pause between tasks" moved UP to the task-button row. It describes what
+        // happens between the TASKS in the list above, so it belongs with the controls that
+        // build that list - and moving it frees the width this row needed for the two
+        // script-level buttons coming down from there.
+        pauseBetweenGroup.setOpaque(false);
+        pauseBetweenGroup.removeAll();
+        pauseBetweenGroup.add(chkQueueWait);
+        pauseBetweenGroup.add(queueWaitMinInput);
+        pauseBetweenGroup.add(lblWaitTo);
+        pauseBetweenGroup.add(queueWaitMaxInput);
+        pauseBetweenGroup.add(lblWaitMs);
         // v1.64: script triggers - always-on checks that run only while THIS list/script runs.
         btnScriptTriggers = createButton("Script triggers\u2026", new Color(55, 45, 65), null);
         btnScriptTriggers.setToolTipText("Pick always-on checks that apply only while this task "
@@ -970,6 +981,12 @@ public class DreamBotMenu extends JFrame {
             openTimerDialog(sel, btnTaskListTimer);
         });
         left.add(btnTaskListTimer);
+        // v1.90: the two whole-script controls, arriving from the task row above.
+        if (btnPublishPresetRef != null) {
+            left.add(Box.createHorizontalStrut(10));
+            left.add(btnPublishPresetRef);
+        }
+        if (btnResetPresetRef != null) left.add(btnResetPresetRef);
 
         // ---- right: skip / run-from-here + live indicator ----
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
@@ -1028,8 +1045,18 @@ public class DreamBotMenu extends JFrame {
         right.add(btnSkip);
         right.add(lblLoopIndicator);
 
-        bar.add(left, BorderLayout.WEST);
-        bar.add(right, BorderLayout.EAST);
+        // v1.89b: WRAP instead of overlap. BorderLayout hands WEST and EAST their preferred
+        // widths and simply lets them collide once the window is narrower than the sum - which
+        // is the overlap in the report, and my own v1.88 regression: moving Timer next to
+        // Script triggers and adding a third icon to the right group pushed this row past the
+        // width a docked client gives it. WrapLayout (the same one the tag pills use) drops the
+        // right-hand group onto a second line instead, so the controls stay readable at any
+        // width and nothing ever sits on top of anything else.
+        JPanel wrapRow = new JPanel(new main.menu.components.WrapLayout(FlowLayout.LEFT, 10, 4));
+        wrapRow.setOpaque(false);
+        wrapRow.add(left);
+        wrapRow.add(right);
+        bar.add(wrapRow, BorderLayout.CENTER);
 
         // initialise widget state from current fields
         SwingUtilities.invokeLater(() -> { syncLoopControls(); syncTaskRepeatSpinner(); updateQueueProgress(); });
@@ -1342,6 +1369,15 @@ public class DreamBotMenu extends JFrame {
     private JButton btnEditProfile;      // v1.63: public-profile (bio) editor, login-gated
     private JButton btnScriptTriggers;   // v1.64: per-script trigger selection (Task List tab)
     private JButton btnTaskListTimer;    // v1.88: moved beside Script triggers (script-level)
+    /**
+     * v1.90: the "pause between tasks" controls. Created HERE rather than inside either builder,
+     * because the task-button row and the loop bar are built in the opposite order to the one
+     * you'd guess - the row that DISPLAYS this group is assembled before the method that used
+     * to create it, so building it there handed the row a null. Eager creation makes the order
+     * irrelevant, which is the only way this stays fixed.
+     */
+    private final JPanel pauseBetweenGroup = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+    private JButton btnPublishPresetRef, btnResetPresetRef;   // v1.90: hosted by the loop bar
     private boolean suppressAccountEvents = false;
 
     /** Builds the sign-in / account-switcher row for the Player card (Patch B.15). */
@@ -2149,8 +2185,11 @@ public class DreamBotMenu extends JFrame {
         // which is why the insert-mode icon sat in a button as wide as "Publish preset..." and
         // why a spacer was impossible. Now each control takes the width it needs and the gap
         // between the build half and the tools half is real.
-        JPanel southButtons = new JPanel();
-        southButtons.setLayout(new BoxLayout(southButtons, BoxLayout.X_AXIS));
+        // v1.89b: WrapLayout, not BoxLayout. X_AXIS keeps everything on one line forever and
+        // just squeezes components past legibility when the client is docked narrow; wrapping
+        // to a second row is what a toolbar should do. The 18px gap between the "build" half
+        // and the "tools" half still reads, because a wrap only ever happens between buttons.
+        JPanel southButtons = new JPanel(new main.menu.components.WrapLayout(FlowLayout.LEFT, 5, 3));
         southButtons.setOpaque(false);
         southButtons.setBorder(new EmptyBorder(0, 0, 2, 0));
 
@@ -2357,10 +2396,15 @@ public class DreamBotMenu extends JFrame {
         // the gap: everything left of it builds the queue, everything right of it acts on the
         // finished thing. A plain spacer, but it's what makes the row readable at a glance.
         southButtons.add(Box.createHorizontalStrut(18));
-        southButtons.add(btnPublishPreset);
+        // v1.90: Publish preset and Reset moved DOWN to the row under the presets. Both act on
+        // the whole preset - the saved script - not on the task you have selected, so sitting
+        // among Add / Duplicate / Remove implied a scope they never had. They trade places with
+        // "Pause between tasks", which came up here for the same reason in reverse.
+        southButtons.add(pauseBetweenGroup);
         southButtons.add(btnInsertToggle);
         southButtons.add(btnTaskListView);
-        southButtons.add(btnResetPreset);
+        btnPublishPresetRef = btnPublishPreset;
+        btnResetPresetRef = btnResetPreset;
 
         // ── v1.88: the three rows, reordered to match what they belong to ───────────────
         // The task BUTTONS act on the queue directly above them, so they sit closest to it.
@@ -3714,12 +3758,33 @@ public class DreamBotMenu extends JFrame {
                 + "xp/hr and time-to-level all restart from now");
         resetTrackers.addActionListener(e -> resetAllTrackers());
 
+        // v1.89: CLEAR is the other half of RESET, and they're deliberately different verbs.
+        // Reset keeps your selection and restarts the numbers; Clear keeps the numbers and drops
+        // the selection. Previously the only way to stop tracking six skills was to click all
+        // six tiles off one at a time - and doing that with Reset would also have thrown away
+        // the session's XP, which is usually the last thing you want.
+        JButton clearTrackers = createButton("Clear trackers", new Color(60, 60, 70), null);
+        clearTrackers.setToolTipText("Stop tracking every skill - the overlays and detail cards "
+                + "clear, but gained XP and xp/hr are left exactly as they are");
+        clearTrackers.addActionListener(e -> {
+            int n = 0;
+            for (SkillData sd : skillRegistry.values())
+                if (sd.isTracking()) { sd.setTracking(false); n++; }
+            syncSkillTileBorders();
+            refreshTrackerList();
+            requestAutosave();
+            showToast(n == 0 ? "Nothing was being tracked"
+                    : "Cleared " + n + " tracker" + (n == 1 ? "" : "s") + " (XP kept)",
+                    clearTrackers, true);
+        });
+
         JPanel header = new JPanel(new BorderLayout());
         header.setOpaque(false);
         header.add(createSubtitle("Skill Tracker"), BorderLayout.WEST);
         JPanel headerCtl = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         headerCtl.setOpaque(false);
         headerCtl.add(rememberTrackersCheck);
+        headerCtl.add(clearTrackers);
         headerCtl.add(resetTrackers);
         header.add(headerCtl, BorderLayout.EAST);
 
@@ -7074,7 +7139,8 @@ public class DreamBotMenu extends JFrame {
         JPanel panel = new JPanel(new BorderLayout(15, 15));
         panel.setBorder(new EmptyBorder(15, 15, 15, 15));
         panel.setBackground(BG_BASE);
-        panel.add(createSubtitle("Privacy"), BorderLayout.NORTH);
+        // v1.89: NO subtitle here. createPrivacyTab() already adds its own "Privacy" header, and
+        // wrapping it in v1.87 stacked a second one on top - the duplicate in the report.
         JScrollPane scroll = Theme.thinScrollbars(new JScrollPane(createPrivacyTab()));
         scroll.setBorder(null);
         scroll.getViewport().setOpaque(false);
@@ -7187,6 +7253,12 @@ public class DreamBotMenu extends JFrame {
         pinRow.setOpaque(false);
         pinRow.add(pinField, BorderLayout.CENTER);
         pinRow.add(pinSet, BorderLayout.EAST);
+        // v1.89: a BoxLayout column hands every child its MAXIMUM size, and a JPanel's default
+        // maximum is unbounded - so this little PIN row grew into a slab that shoved the whole
+        // details section apart (the tall teal block in the report). Capping the height is the
+        // fix; the width cap keeps the field from swallowing the column too.
+        pinRow.setMaximumSize(new Dimension(260, 30));
+        pinRow.setPreferredSize(new Dimension(220, 26));
         return pinRow;
     }
 
@@ -7935,7 +8007,8 @@ public class DreamBotMenu extends JFrame {
                 Set<String> want = new HashSet<>(data.trackedSkills);
                 for (SkillData sd : skillRegistry.values())
                     sd.setTracking(want.contains(sd.getSkill().name()));
-                refreshTrackerList();   // the side detail-list follows the restored set
+                refreshTrackerList();     // the side detail-list follows the restored set
+                syncSkillTileBorders();   // v1.89: and so do the tiles' highlights
             }
         }
 
@@ -8035,7 +8108,7 @@ public class DreamBotMenu extends JFrame {
 //            listTaskList.repaint();
 //        } catch (Exception e) {
 //            Logger.log(Logger.LogType.ERROR, "Failed to unpack Task List data: " + e.getMessage());
-//            e.printStackTrace();
+//            Logger.log(Logger.LogType.WARN, "[DreamMan] " + e.getClass().getSimpleName());   // v1.89 (SDN): no stack traces to console
 //        }
 //    }
 
@@ -8070,7 +8143,7 @@ public class DreamBotMenu extends JFrame {
             listTaskLibrary.repaint();
         } catch (Exception e) {
             Logger.log(Logger.LogType.ERROR, "Failed to unpack Task Library data: " + e.getMessage());
-            e.printStackTrace();
+            Logger.log(Logger.LogType.WARN, "[DreamMan] " + e.getClass().getSimpleName());   // v1.89 (SDN): no stack traces to console
         }
     }
 
@@ -8117,7 +8190,7 @@ public class DreamBotMenu extends JFrame {
             }
         } catch (Exception e) {
             Logger.log(Logger.LogType.ERROR, "Failed to unpack Task Builder data: " + e.getMessage());
-            e.printStackTrace();
+            Logger.log(Logger.LogType.WARN, "[DreamMan] " + e.getClass().getSimpleName());   // v1.89 (SDN): no stack traces to console
         }
     }
 
@@ -8189,7 +8262,7 @@ public class DreamBotMenu extends JFrame {
             }
         } catch (Exception e) {
             Logger.log(Logger.LogType.ERROR, "Failed to unpack settings: " + e.getMessage());
-            e.printStackTrace();
+            Logger.log(Logger.LogType.WARN, "[DreamMan] " + e.getClass().getSimpleName());   // v1.89 (SDN): no stack traces to console
         }
     }
 
@@ -8267,7 +8340,7 @@ public class DreamBotMenu extends JFrame {
 
             } catch (InterruptedException e) {
                 Logger.log(Logger.LogType.ERROR, "Error synchronizing in-game settings!");
-                e.printStackTrace();
+                Logger.log(Logger.LogType.WARN, "[DreamMan] " + e.getClass().getSimpleName());   // v1.89 (SDN): no stack traces to console
 
             } finally {
                 isSettingProcessing = false;
@@ -8869,7 +8942,10 @@ public class DreamBotMenu extends JFrame {
         head.add(sidePlayerStats);
         head.add(Box.createVerticalStrut(6));
         head.add(miniMap);
-        card.add(head, BorderLayout.NORTH);
+        // v1.89d: head is NOT pinned any more - it goes into the scroll below with everything
+        // else. A docked client is tall and narrow, and pinning the name + minimap + a
+        // three-row footer left the equipment doll fighting for whatever was left. Only Log
+        // out stays put now, because that's the one control you may need in a hurry.
 
         // ── centre: the doll + inventory + preset bars, scrolling as one ──
         main.menu.components.EquipmentPanel eq = new main.menu.components.EquipmentPanel();
@@ -8893,11 +8969,17 @@ public class DreamBotMenu extends JFrame {
         JPanel scrollColumn = new JPanel();
         scrollColumn.setOpaque(false);
         scrollColumn.setLayout(new BoxLayout(scrollColumn, BoxLayout.Y_AXIS));
+        head.setAlignmentX(0f);
+        scrollColumn.add(head);                    // v1.89d: name + stats + minimap scroll too
+        scrollColumn.add(Box.createVerticalStrut(8));
         eq.setAlignmentX(0f);
         scrollColumn.add(eq);
         JComponent details = buildSidePlayerDetails();
         details.setAlignmentX(0f);
         scrollColumn.add(details);
+        JComponent supportBlock = buildSupportPanel();   // v1.89d
+        supportBlock.setAlignmentX(0f);
+        scrollColumn.add(supportBlock);
         JScrollPane eqScroll = Theme.thinScrollbars(new JScrollPane(scrollColumn));
         eqScroll.setBorder(null);
         eqScroll.getViewport().setBackground(PANEL_SURFACE);
@@ -8925,15 +9007,137 @@ public class DreamBotMenu extends JFrame {
         logoutRow.setOpaque(false);
         logoutRow.add(btnLogout);
 
-        JPanel south = new JPanel(new GridLayout(3, 1, 0, 6));
-        south.setOpaque(false);
-        south.setBorder(BorderFactory.createEmptyBorder(4, 0, 2, 0));
-        south.add(sessionSummaryLabel);
-        south.add(stars);
-        south.add(logoutRow);
-        card.add(south, BorderLayout.SOUTH);
+        // v1.89d: the session line and the level totals join the scroll; ONLY Log out is
+        // pinned. Those two are glanceable status, not controls - losing them off the bottom
+        // of a scroll costs nothing, whereas losing the logout button when a script misbehaves
+        // is exactly the moment you want it.
+        JPanel scrollFooter = new JPanel(new GridLayout(2, 1, 0, 6));
+        scrollFooter.setOpaque(false);
+        scrollFooter.setBorder(BorderFactory.createEmptyBorder(8, 0, 2, 0));
+        scrollFooter.add(sessionSummaryLabel);
+        scrollFooter.add(stars);
+        scrollFooter.setAlignmentX(0f);
+        scrollColumn.add(scrollFooter);
+
+        logoutRow.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, COLOR_BORDER_DIM),
+                BorderFactory.createEmptyBorder(6, 0, 2, 0)));
+        card.add(logoutRow, BorderLayout.SOUTH);
 
         return card;
+    }
+
+    /**
+     * v1.89d: the two services DreamMan sits on top of, in a collapsible block at the bottom of
+     * the Player panel.
+     *
+     * <p>Deliberately <b>collapsed by default and out of the way</b>: an advert that interrupts
+     * you is one you resent, and this is the panel people keep open all session. Expanded, it
+     * explains what each service actually buys and - the part worth saying plainly - that these
+     * subscriptions are what fund the client and the game DreamMan is built on. Without them
+     * there is no botting API to write against, and no way for someone who can't code to build
+     * and share a script.
+     *
+     * <p>No affiliate tracking, no fetching, no per-user targeting. Two links and an honest
+     * explanation.
+     */
+    private JComponent buildSupportPanel() {
+        JPanel section = new JPanel(new BorderLayout());
+        section.setOpaque(false);
+        section.setBorder(new EmptyBorder(10, 2, 4, 2));
+
+        JLabel header = new JLabel("SUPPORTING THE TOOLS");
+        header.setForeground(Theme.ACCENT);
+        header.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        header.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, COLOR_BORDER_DIM),
+                new EmptyBorder(8, 0, 4, 0)));
+        header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        header.setToolTipText("What DreamBot VIP and Jagex membership are for");
+
+        JPanel content = new JPanel();
+        content.setOpaque(false);
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setVisible(false);
+
+        header.addMouseListener(new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent e) {
+                boolean show = !content.isVisible();
+                content.setVisible(show);
+                header.setText(show ? "HIDE" : "SUPPORTING THE TOOLS");
+                section.revalidate();
+                section.repaint();
+            }
+        });
+
+        JLabel why = new JLabel("<html><div style='width:200px'>DreamMan is free and always will "
+                + "be. It runs on two things that aren't:</div></html>");
+        why.setForeground(TEXT_DIM);
+        why.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        why.setAlignmentX(0f);
+        why.setBorder(new EmptyBorder(0, 0, 6, 0));
+        content.add(why);
+
+        content.add(supportRow("DreamBot VIP",
+                "The client DreamMan is a script for. VIP unlocks more accounts at once, "
+                        + "the script queue and better performance.",
+                "https://dreambot.org/vip"));
+        content.add(supportRow("Jagex membership",
+                "Members' skills, quests and areas. Some VIP DreamMan scripts in later "
+                        + "releases will need a members' world to run at all.",
+                "https://www.runescape.com/membership"));
+
+        JLabel closing = new JLabel("<html><div style='width:200px'><i>Paying for these keeps the "
+                + "client and the game going \u2014 which is what lets someone who has never "
+                + "written a line of code build a script here and share it.</i></div></html>");
+        closing.setForeground(Theme.TEXT_MUTED);
+        closing.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        closing.setAlignmentX(0f);
+        closing.setBorder(new EmptyBorder(6, 0, 2, 0));
+        content.add(closing);
+
+        section.add(header, BorderLayout.NORTH);
+        section.add(content, BorderLayout.CENTER);
+        return section;
+    }
+
+    /** One service: name (a link), and one line on what it actually buys. */
+    private JComponent supportRow(String name, String blurb, String url) {
+        JPanel row = new JPanel();
+        row.setOpaque(false);
+        row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
+        row.setBorder(new EmptyBorder(4, 0, 6, 0));
+        row.setAlignmentX(0f);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 90));
+
+        JLabel link = new JLabel(name);
+        link.setForeground(Theme.ACCENT);
+        link.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        link.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        link.setToolTipText(url);
+        link.setAlignmentX(0f);
+        link.addMouseListener(new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent e) {
+                try {
+                    Desktop.getDesktop().browse(new java.net.URI(url));
+                } catch (Throwable t) {
+                    // headless, or no browser - hand over the address instead of failing silently
+                    try {
+                        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                                new java.awt.datatransfer.StringSelection(url), null);
+                        showToast("Link copied: " + url, link, true);
+                    } catch (Throwable ignored) {}
+                }
+            }
+        });
+        row.add(link);
+
+        JLabel text = new JLabel("<html><div style='width:200px'>" + blurb + "</div></html>");
+        text.setForeground(TEXT_DIM);
+        text.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        text.setAlignmentX(0f);
+        row.add(text);
+        return row;
     }
 
     /** v1.88: renders any drawn {@link main.menu.components.UIIcons} glyph into a tab icon. */
@@ -9057,35 +9261,37 @@ public class DreamBotMenu extends JFrame {
      * login is what makes these rows mean something. Collapsed by default; the header is the
      * toggle (plain words, no glyphs - the tag bar taught that lesson).
      */
+    /**
+     * v1.90: the button that opens the player details. It used to be a collapsible section
+     * that pushed the whole side panel around every time you looked at it - and since these
+     * are reference values you check occasionally rather than watch, a floating card is the
+     * right shape. Same card proportions as the Account tab, so the two read as siblings.
+     */
     private JComponent buildSidePlayerDetails() {
         JPanel section = new JPanel(new BorderLayout());
         section.setOpaque(false);
         section.setBorder(new EmptyBorder(10, 2, 4, 2));
 
-        JLabel header = new JLabel("SHOW PLAYER DETAILS");
-        header.setForeground(Theme.ACCENT);
-        header.setFont(new Font("Segoe UI", Font.BOLD, 11));
-        header.setBorder(BorderFactory.createCompoundBorder(
+        JButton open = createButton("Player details\u2026", new Color(40, 48, 62), null);
+        open.setToolTipText("Membership, account type, world, DreamBot account and bank PIN "
+                + "- everything about the character you're logged in as");
+        open.addActionListener(e -> openPlayerDetailsDialog());
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
+        row.setOpaque(false);
+        row.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(1, 0, 0, 0, COLOR_BORDER_DIM),
-                new EmptyBorder(8, 0, 4, 0)));
-        header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        header.setToolTipText("Membership, account type, world, bank PIN and Jagex-account "
-                + "switching - everything about the character you're logged in as");
+                new EmptyBorder(8, 0, 2, 0)));
+        row.add(open);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
+        section.add(row, BorderLayout.CENTER);
+        return section;
+    }
 
+    /** The floating player-details card (v1.90). Built fresh each time so it's always current. */
+    private void openPlayerDetailsDialog() {
         JPanel content = new JPanel();
         content.setOpaque(false);
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-        content.setVisible(false);
-
-        header.addMouseListener(new MouseAdapter() {
-            @Override public void mousePressed(MouseEvent e) {
-                boolean show = !content.isVisible();
-                content.setVisible(show);
-                header.setText(show ? "HIDE PLAYER DETAILS" : "SHOW PLAYER DETAILS");
-                section.revalidate();
-                section.repaint();
-            }
-        });
 
         // ── membership + world (live labels updateUI already feeds) ──
         content.add(sideDetailRow("Membership", lblMemberText, lblMemberIcon));
@@ -9118,6 +9324,7 @@ public class DreamBotMenu extends JFrame {
         typeRow.add(sideAccountTypeCombo, BorderLayout.EAST);
         typeRow.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40)));
         typeRow.setAlignmentX(0f);
+        typeRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));   // v1.89
         content.add(typeRow);
 
         // ── the DreamBot account, shown only when the client actually tells us ──
@@ -9152,17 +9359,54 @@ public class DreamBotMenu extends JFrame {
         pinNote.setAlignmentX(0f);
         content.add(pinNote);
 
-        // ── Jagex-account switching (names come from the CLIENT's Account Manager - your
-        //    credentials never touch the DreamMan server) ──
-        content.add(playerSectionHeader("Switch account"));
-        content.add(sideDetailRow("DreamBot accounts", lblAccountSupport, null));
-        JComponent switchRow = buildAccountSwitchRow();
-        switchRow.setAlignmentX(0f);
-        content.add(switchRow);
+        // ── v1.89: account switching is NOT duplicated here ──────────────────────────
+        // DreamBot's own Account Manager owns this and can't be removed from the client, so
+        // mirroring it in DreamMan just meant two controls for one job - and it was the widest
+        // block in the column, which is half of why the section grew so much. The client's
+        // switcher is where switching lives; buildAccountSwitchRow() stays in the file for the
+        // Account tab and anything that wants it later.
 
-        section.add(header, BorderLayout.NORTH);
-        section.add(content, BorderLayout.CENTER);
-        return section;
+        JPanel card = new JPanel(new BorderLayout(0, 10));
+        card.setBackground(PANEL_SURFACE);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(COLOR_BORDER_DIM),
+                new EmptyBorder(16, 20, 16, 20)));
+        card.setPreferredSize(new Dimension(420, 430));   // the Account tab's proportions
+
+        JLabel title = new JLabel("Player details");
+        title.setForeground(Theme.ACCENT);
+        title.setFont(new Font("Consolas", Font.BOLD, 18));
+        JLabel sub = new JLabel("<html><div style='width:360px'>Everything about the character "
+                + "you're logged in as. These are read from the client, so they fill in once "
+                + "you're in game.</div></html>");
+        sub.setForeground(TEXT_DIM);
+        sub.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        JPanel head = new JPanel(new BorderLayout(0, 6));
+        head.setOpaque(false);
+        head.add(title, BorderLayout.NORTH);
+        head.add(sub, BorderLayout.CENTER);
+        card.add(head, BorderLayout.NORTH);
+
+        JScrollPane sp = Theme.thinScrollbars(new JScrollPane(content));
+        sp.setBorder(null);
+        sp.getViewport().setOpaque(false);
+        sp.setOpaque(false);
+        sp.getVerticalScrollBar().setUnitIncrement(14);
+        card.add(sp, BorderLayout.CENTER);
+
+        JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(this),
+                "Player details", Dialog.ModalityType.MODELESS);
+        JButton close = createButton("Close");
+        close.addActionListener(a -> dlg.dispose());
+        JPanel foot = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        foot.setOpaque(false);
+        foot.add(close);
+        card.add(foot, BorderLayout.SOUTH);
+
+        dlg.setContentPane(card);
+        dlg.pack();
+        dlg.setLocationRelativeTo(this);
+        dlg.setVisible(true);
     }
 
     private static boolean hasValue(JLabel l) {
@@ -9190,6 +9434,9 @@ public class DreamBotMenu extends JFrame {
         }
         row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40)));
         row.setAlignmentX(0f);
+        // v1.89: same lesson as the PIN row - unbounded maximums are what let this column
+        // balloon. A detail row is one line of text; it never needs more than this.
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
         return row;
     }
 
@@ -9720,10 +9967,36 @@ public class DreamBotMenu extends JFrame {
 
     private JToggleButton createMenuButton(String text) { JToggleButton btn = new JToggleButton(text) { protected void paintComponent(Graphics g) { g.setColor(isSelected() ? TAB_SELECTED : PANEL_SURFACE); g.fillRect(0, 0, getWidth(), getHeight()); super.paintComponent(g); } }; btn.setFocusPainted(false); btn.setContentAreaFilled(false); btn.setForeground(TEXT_MAIN); btn.setFont(new Font("Segoe UI", Font.BOLD, 14)); btn.setHorizontalAlignment(SwingConstants.LEFT); btn.setBorder(new EmptyBorder(0, 20, 0, 0)); return btn; }
 
+    /**
+     * v1.89: every skill tile, by skill, so their borders can be re-synced to the tracking data.
+     *
+     * <p>THE BUG this fixes: restoring a profile called {@code setTracking(...)} on the DATA, and
+     * the overlays duly appeared - but a tile's border is only ever painted at creation (dim) or
+     * inside its own click handler. So after a reload every tile LOOKED untracked while actually
+     * being tracked. Clicking one to "highlight" it therefore toggled tracking OFF, the overlay
+     * vanished, and the side panel's session line fell back to "no skills tracked yet" - which is
+     * why the XP counters looked like they'd stopped. One missing repaint, two reported bugs.
+     */
+    private final Map<Skill, JPanel> skillTiles = new EnumMap<>(Skill.class);
+
+    /** Repaints every tile's border from its live tracking state. Safe to call any time. */
+    private void syncSkillTileBorders() {
+        for (Map.Entry<Skill, JPanel> e : skillTiles.entrySet()) {
+            SkillData d = skillRegistry.get(e.getKey());
+            if (d == null || e.getValue() == null) continue;
+            e.getValue().setBorder(new LineBorder(
+                    d.isTracking() ? COLOR_BLOOD : COLOR_BORDER_DIM, 1));
+        }
+    }
+
     private JPanel createSkillTile(SkillData data) {
         JPanel tile = new JPanel(new GridBagLayout());
         tile.setBackground(PANEL_SURFACE);
-        tile.setBorder(new LineBorder(COLOR_BORDER_DIM));
+        // v1.89: start from the DATA, not always-dim - a tile built after a profile restore
+        // (or after Clear trackers) now shows the truth immediately.
+        tile.setBorder(new LineBorder(
+                data.isTracking() ? COLOR_BLOOD : COLOR_BORDER_DIM, 1));
+        skillTiles.put(data.getSkill(), tile);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0; gbc.gridx = 0;
@@ -10691,7 +10964,7 @@ public class DreamBotMenu extends JFrame {
 
         } catch (IndexOutOfBoundsException i) {
             Logger.log(Logger.LogType.ERROR, i.getMessage());
-            i.printStackTrace();
+            Logger.log(Logger.LogType.WARN, "[DreamMan] " + i.getClass().getSimpleName());   // v1.89 (SDN): no stack traces to console
         }
     }
 

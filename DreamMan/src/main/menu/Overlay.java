@@ -241,6 +241,8 @@ public final class Overlay {
     }
 
     // ── Tracked-skill overlay cards (Patch B.5: v2 with icons, bars & ETAs) ──
+    /** v1.89: goal progress reads cyan; level progress reads gold. The chip relies on this. */
+    private static final Color GOAL_COLOR = new Color(0x5A, 0xC8, 0xD8);
     private static final int SKILL_W = 176, SKILL_GAP = 5;
     private static final int CHIP_W = 118, CHIP_H = 22;
     /**
@@ -342,20 +344,24 @@ public final class Overlay {
                 if (icon != null)
                     g2.drawImage(icon, cx + 4, cy + 3, 16, 16, null);
                 double f = hasGoal ? sd.getGoalFraction() : sd.getLevelFraction();
-                int barX = cx + 24, barW = 48;
+                // v1.89: the chip's text used to run straight off the right edge - "5.5k to lvl"
+                // simply didn't fit beside a 48px bar in a 118px card. Rather than widen the
+                // chip (they should all stay one tidy column width), the words are gone and
+                // COLOUR carries the meaning: gold = xp to the next level, cyan = xp to your
+                // goal. The expanded card spells the legend out, so one click explains it.
+                int barX = cx + 22, barW = 34;
                 g2.setColor(new Color(60, 60, 60));
                 g2.fillRoundRect(barX, cy + 9, barW, 5, 4, 4);
-                g2.setColor(hasGoal ? ACCENT : VALUE);
+                g2.setColor(hasGoal ? GOAL_COLOR : ACCENT);
                 g2.fillRoundRect(barX, cy + 9, (int) (barW * clamp01(f)), 5, 4, 4);
                 g2.setFont(fBody);
-                g2.setColor(ACCENT);
-                // v1.88: minimized shows XP TO LEVEL, not xp gained. Gained is the number you
-                // check when you're looking at the session; to-level is the one worth keeping
-                // on screen when you've collapsed the card to get on with playing.
-                String toLvl = hasGoal
-                        ? fmt(sd.getGoalRemainingXp()) + " to goal"
-                        : fmt(sd.getRemainingXp()) + " to lvl";
-                g2.drawString(toLvl, barX + barW + 6, cy + 15);
+                g2.setColor(hasGoal ? GOAL_COLOR : ACCENT);
+                String toLvl = fmt(hasGoal ? sd.getGoalRemainingXp() : sd.getRemainingXp());
+                // hard-clip to the card so a big number can never bleed past the border again
+                Shape prevClip = g2.getClip();
+                g2.clipRect(cx, cy, w - 3, h);
+                g2.drawString(toLvl, barX + barW + 5, cy + 15);
+                g2.setClip(prevClip);
                 hit(box, () -> SKILL_MIN.put(key, Boolean.FALSE));   // click chip -> expand
             } else {
                 // ── expanded mini canvas ──

@@ -220,6 +220,77 @@ public enum Condition {
 
     // v1.33: multi-item equipped check - fires only when EVERY listed item is worn. Comma list,
     // counts ignored (you either wear it or you don't): "Bronze pickaxe, Bronze full helm".
+    // ══ v1.89: DIALOGUE ══════════════════════════════════════════════════════
+    // React to what an NPC is actually saying. Both of these read the LIVE dialogue (the spoken
+    // line and any options on screen) and each distinct dialogue fires ONCE - a dialogue box
+    // sits there for as long as you leave it, so an un-deduped check would re-fire every single
+    // tick it stayed open.
+
+    DIALOGUE_CONTAINS("NPC dialogue contains phrase(s)") {
+        @Override public boolean test(String arg) {
+            return dialogueMatches(arg, false);
+        }
+        @Override public String describe(String arg) { return "dialogue has \"" + arg + "\""; }
+        @Override public String argHint() {
+            return "phrase, or several: \"quest|reward|would you like\"";
+        }
+    },
+
+    DIALOGUE_EQUALS("NPC dialogue is exactly") {
+        @Override public boolean test(String arg) {
+            return dialogueMatches(arg, true);
+        }
+        @Override public String describe(String arg) { return "dialogue is \"" + arg + "\""; }
+        @Override public String argHint() {
+            return "the exact line or option, e.g. \"Yes, I'm ready.\"";
+        }
+    },
+
+    // ══ v1.89: WHO ELSE IS AROUND ════════════════════════════════════════════
+    // "Is anyone in my spot?" as a condition. The argument is a name and an area separated by
+    // an @ - the name is OPTIONAL, so "@3200,3200,3220,3220" means ANYONE, and
+    // "Guard @ 3200,3200,3220,3220" means that specific NPC. Leaving the area off entirely
+    // falls back to a radius around you, because "is a Guard near me" is the other half of the
+    // question people actually ask.
+
+    NPC_IN_AREA("NPC is in area (name @ x1,y1,x2,y2)") {
+        @Override public boolean test(String arg) { return npcPresent(arg); }
+        @Override public String describe(String arg) { return "NPC in [" + arg + "]"; }
+        @Override public String argHint() {
+            return "\"Guard @ 3200,3200,3220,3220\" \u00b7 name optional \u00b7 or \"Guard @ 10\" for a radius";
+        }
+    },
+
+    NPC_NOT_IN_AREA("NPC is NOT in area (name @ x1,y1,x2,y2)") {
+        @Override public boolean test(String arg) {
+            if (arg == null || arg.isBlank()) return false;
+            return !npcPresent(arg);
+        }
+        @Override public String describe(String arg) { return "no NPC in [" + arg + "]"; }
+        @Override public String argHint() {
+            return "same format \u2014 fires while nothing matching is there";
+        }
+    },
+
+    PLAYER_IN_AREA("Another player is in area (name @ x1,y1,x2,y2)") {
+        @Override public boolean test(String arg) { return playerPresent(arg); }
+        @Override public String describe(String arg) { return "player in [" + arg + "]"; }
+        @Override public String argHint() {
+            return "\"@ 3200,3200,3220,3220\" for anyone \u00b7 or \"Zezima @ 12\" for a radius";
+        }
+    },
+
+    PLAYER_NOT_IN_AREA("No player is in area (name @ x1,y1,x2,y2)") {
+        @Override public boolean test(String arg) {
+            if (arg == null || arg.isBlank()) return false;
+            return !playerPresent(arg);
+        }
+        @Override public String describe(String arg) { return "no player in [" + arg + "]"; }
+        @Override public String argHint() {
+            return "same format \u2014 fires while your spot is clear";
+        }
+    },
+
     EQUIPMENT_SET("Wearing all of (set)") {
         @Override public boolean test(String arg) {
             java.util.Map<String, Integer> want = main.actions.ActionUtil.parseItemList(arg);
@@ -312,6 +383,159 @@ public enum Condition {
             }
         } catch (NumberFormatException e) { return null; }
         return null;
+    }
+
+    // ── v1.89: dialogue matching ──────────────────────────────────────────────
+
+    /** The last dialogue this condition type acted on, so one dialogue fires once. */
+    private static volatile String consumedDialogue = "";
+
+    /**
+     * True when the live dialogue matches. {@code exact} compares whole strings (after stripping
+     * colour tags and trimming); otherwise it's a case-insensitive contains. Several phrases can
+     * be given separated by "|". The spoken line AND the option list are both searched, so
+     * "Yes, I'm ready." matches whether the NPC says it or offers it as a choice.
+     *
+     * <p>A match CONSUMES that dialogue: the same on-screen text can't fire again until the
+     * dialogue actually changes. Without this, a check would re-fire every tick the box was up.
+     */
+    static boolean dialogueMatches(String arg, boolean exact) {
+        if (arg == null || arg.isBlank()) return false;
+        try {
+            if (!org.dreambot.api.methods.dialogues.Dialogues.inDialogue()) {
+                consumedDialogue = "";   // box closed - the next one is fresh
+                return false;
+            }
+            String line = clean(org.dreambot.api.methods.dialogues.Dialogues.getNPCDialogue());
+            String[] options = null;
+            try {
+                if (org.dreambot.api.methods.dialogues.Dialogues.areOptionsAvailable())
+                    options = org.dreambot.api.methods.dialogues.Dialogues.getOptions();
+            } catch (Throwable ignored) {}
+
+            StringBuilder key = new StringBuilder(line);
+            java.util.List<String> haystack = new java.util.ArrayList<>();
+            if (!line.isEmpty()) haystack.add(line);
+            if (options != null)
+                for (String o : options) {
+                    String c = clean(o);
+                    if (!c.isEmpty()) { haystack.add(c); key.append('\u0001').append(c); }
+                }
+            if (haystack.isEmpty()) return false;
+            if (key.toString().equals(consumedDialogue)) return false;   // already acted on
+
+            for (String phrase : arg.split("\\|")) {
+                String needle = phrase.trim();
+                if (needle.isEmpty()) continue;
+                for (String hay : haystack) {
+                    boolean hit = exact
+                            ? hay.equalsIgnoreCase(needle)
+                            : hay.toLowerCase(java.util.Locale.ROOT)
+                                 .contains(needle.toLowerCase(java.util.Locale.ROOT));
+                    if (hit) {
+                        consumedDialogue = key.toString();
+                        return true;
+                    }
+                }
+            }
+            return false;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** Strips OSRS colour/format tags and collapses whitespace. */
+    static String clean(String s) {
+        if (s == null) return "";
+        return s.replaceAll("<br>", " ").replaceAll("<[^>]*>", "")
+                .replaceAll("\\s+", " ").trim();
+    }
+
+    // ── v1.89: who else is in a place ─────────────────────────────────────────
+
+    /**
+     * Splits "name @ area" into {name, areaSpec}. Either side may be empty: "@3200,3200,3220,3220"
+     * is "anyone, here"; "Guard" alone is "a Guard, anywhere nearby". The @ is what makes a name
+     * containing digits or commas unambiguous.
+     */
+    static String[] splitNameAndArea(String arg) {
+        if (arg == null) return new String[]{"", ""};
+        int at = arg.indexOf('@');
+        if (at < 0) {
+            // no @: digits-and-commas means it's an area, anything else is a name
+            String t = arg.trim();
+            return t.matches("[0-9,\\s]+") ? new String[]{"", t} : new String[]{t, ""};
+        }
+        return new String[]{arg.substring(0, at).trim(), arg.substring(at + 1).trim()};
+    }
+
+    /**
+     * True when {@code t} is inside the area spec. The spec is either a full box
+     * ("x1,y1,x2,y2[,z]"), a bare number meaning "within N tiles of ME", or empty meaning
+     * "within 15 tiles of me" - the sensible reading of "is anyone around".
+     */
+    static boolean inSpec(Tile t, String areaSpec) {
+        if (t == null) return false;
+        String spec = areaSpec == null ? "" : areaSpec.trim();
+        if (spec.isEmpty()) return withinRadius(t, 15);
+        if (spec.matches("[0-9]+")) return withinRadius(t, parseInt(spec, 15));
+        Area a = parseArea(spec);
+        if (a == null) return false;
+        try { return a.contains(t); } catch (Throwable x) { return false; }
+    }
+
+    private static boolean withinRadius(Tile t, int radius) {
+        Tile me = playerTile();
+        if (me == null || t == null) return false;
+        if (me.getZ() != t.getZ()) return false;
+        int dx = Math.abs(me.getX() - t.getX()), dy = Math.abs(me.getY() - t.getY());
+        return Math.max(dx, dy) <= Math.max(0, radius);
+    }
+
+    /** True when a matching NPC (name optional) stands inside the given area. */
+    static boolean npcPresent(String arg) {
+        if (arg == null || arg.isBlank()) return false;
+        String[] parts = splitNameAndArea(arg);
+        final String want = parts[0], areaSpec = parts[1];
+        try {
+            for (org.dreambot.api.wrappers.interactive.NPC n
+                    : org.dreambot.api.methods.interactive.NPCs.all()) {
+                if (n == null) continue;
+                if (!want.isEmpty()) {
+                    String nm = n.getName();
+                    if (nm == null || !nm.equalsIgnoreCase(want)) continue;
+                }
+                if (inSpec(n.getTile(), areaSpec)) return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    /**
+     * True when another player (name optional) stands inside the given area. YOU are never a
+     * match - "is someone in my spot" must not be answered "yes, you are".
+     */
+    static boolean playerPresent(String arg) {
+        if (arg == null || arg.isBlank()) return false;
+        String[] parts = splitNameAndArea(arg);
+        final String want = parts[0], areaSpec = parts[1];
+        String myName = null;
+        try {
+            org.dreambot.api.wrappers.interactive.Player me =
+                    org.dreambot.api.methods.interactive.Players.getLocal();
+            myName = me == null ? null : me.getName();
+        } catch (Throwable ignored) {}
+        try {
+            for (org.dreambot.api.wrappers.interactive.Player pl
+                    : org.dreambot.api.methods.interactive.Players.all()) {
+                if (pl == null) continue;
+                String nm = pl.getName();
+                if (myName != null && nm != null && nm.equalsIgnoreCase(myName)) continue;   // not me
+                if (!want.isEmpty() && (nm == null || !nm.equalsIgnoreCase(want))) continue;
+                if (inSpec(pl.getTile(), areaSpec)) return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
     }
 
     /** Safe valueOf for persistence - unknown names map to null. */

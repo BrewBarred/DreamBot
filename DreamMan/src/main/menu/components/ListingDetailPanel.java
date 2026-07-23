@@ -102,9 +102,12 @@ public class ListingDetailPanel extends JPanel {
         JPanel chips = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         chips.setOpaque(false);
         chips.setAlignmentX(LEFT_ALIGNMENT);
-        chips.add(chip(l.vipOnly ? "VIP" : "FREE",
-                l.vipOnly ? Theme.ACCENT : Theme.GREEN,
-                l.vipOnly ? Theme.ACCENT_TINT : Theme.BG_APP));
+        // v1.90: the exact rank, not a VIP/FREE binary
+        String needTier = l.minTier == null ? (l.vipOnly ? "vip" : "free") : l.minTier;
+        boolean ranked = !"free".equalsIgnoreCase(needTier);
+        chips.add(chip(ranked ? main.market.Tier.labelFor(needTier).toUpperCase() : "FREE",
+                ranked ? main.menu.components.RankBadge.tierColor(needTier) : Theme.GREEN,
+                ranked ? Theme.ACCENT_TINT : Theme.BG_APP));
         chips.add(chip(l.kind == null ? "task" : l.kind, Theme.BLUE, Theme.BG_APP));
         idCol.add(chips);
         idCol.add(Box.createVerticalStrut(5));
@@ -139,7 +142,8 @@ public class ListingDetailPanel extends JPanel {
         close.setToolTipText("Back to the market grid (Esc works too)");
         close.addActionListener(e -> onClose.run());
         close.setAlignmentX(RIGHT_ALIGNMENT);
-        boolean lockedVip = l.vipOnly && l.bundle == null;
+        boolean lockedVip = (l.vipOnly || Boolean.TRUE.equals(l.lockedByTier))
+                && l.bundle == null;   // v1.90
         JButton download = new JButton(lockedVip ? "VIP only" : "Download",
                 UIIcons.arrowUp(13, lockedVip ? Theme.TEXT_MUTED : Theme.GREEN));
         download.setFont(Theme.fontBold(12));

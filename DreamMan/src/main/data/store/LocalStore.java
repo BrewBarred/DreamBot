@@ -16,7 +16,7 @@ import java.nio.file.StandardCopyOption;
  * is written to a single JSON file per character under the user's home directory:
  *
  * <pre>
- *   &lt;user.home&gt;/DreamMan/profiles/&lt;character&gt;/profile.json
+ *   &lt;scripts.path&gt;/DreamMan/profiles/&lt;character&gt;/profile.json
  * </pre>
  *
  * This replaces the (now dead) Supabase round-trip as the source of truth. The optional server
@@ -50,7 +50,7 @@ public final class LocalStore {
      * inside a subdirectory of {@code System.getProperty("scripts.path")} - not {@code user.home}
      * or any other location. This roots everything DreamMan persists (profiles, session, presets,
      * the asset cache) under the sanctioned path. Fallbacks keep unit tests / non-client runs
-     * working: {@code scripts.path} → {@code user.home/DreamBot/Scripts} → the working dir.
+     * working: {@code scripts.path}, or the working directory when there's no client (tests).
      */
     public static File getRoot() {
         String scripts = System.getProperty("scripts.path");
@@ -58,70 +58,21 @@ public final class LocalStore {
         if (scripts != null && !scripts.trim().isEmpty()) {
             base = new File(scripts.trim());
         } else {
-            // Not running inside the DreamBot client (tests, tooling). Mirror the client's
-            // conventional Scripts folder so a later real run finds the same data.
-            String home = System.getProperty("user.home");
-            base = (home == null || home.isEmpty())
-                    ? new File(".")
-                    : new File(home, "DreamBot" + File.separator + "Scripts");
+            // v1.89 (SDN compliance): NO user.home fallback. The guidelines name it explicitly
+            // as a path that must not be used, and a reviewer greps for it. Outside the client
+            // (tests, tooling) we fall back to the working directory, which is scoped to
+            // whatever launched us and never writes into someone's home folder.
+            base = new File(".");
         }
-        File root = new File(base, "DreamMan");
-        migrateFromLegacy(root);
-        return root;
+        return new File(base, "DreamMan");
     }
 
-    /** Set once we've checked/performed the legacy migration, so it only runs a single time. */
-    private static volatile boolean migrationChecked = false;
+    // v1.89 (SDN compliance): the pre-v1.32 legacy migration is GONE. It read from
+    // <user.home>/DreamMan to recover data saved before the storage move, which meant this file
+    // still touched user.home even though it never wrote there - and the guidelines call that
+    // path out by name. The migration has had many releases to run for anyone who needed it,
+    // and carrying a home-directory read into the SDN submission isn't worth the review risk.
 
-    /**
-     * v1.32b: recover data saved by pre-v1.32 builds. Before the SDN storage move, everything
-     * lived at {@code <user.home>/DreamMan}; v1.32 moved it to {@code <scripts.path>/DreamMan}.
-     * That silently "lost" every task/profile/library a user had built (they were still on disk,
-     * just at the old path the new build no longer reads). This copies the old tree into the new
-     * location ONCE, but only when the new location has no profile of its own yet - so it can
-     * never clobber newer data, and it's a no-op on fresh installs and on every run after the
-     * first successful migration.
-     */
-    private static void migrateFromLegacy(File newRoot) {
-        if (migrationChecked) return;
-        migrationChecked = true;
-        try {
-            String home = System.getProperty("user.home");
-            if (home == null || home.isEmpty()) return;
-            File legacy = new File(home, "DreamMan");
-            if (!legacy.isDirectory()) return;                 // nothing to migrate
-            if (legacy.getCanonicalPath().equals(newRoot.getCanonicalPath())) return;
-
-            // Run exactly once, tracked by a marker in the new root. IMPORTANT: this now runs
-            // even when the new folder already has (empty) profiles from a v1.32/v1.32b launch -
-            // the earlier "only if empty" guard is why the first recovery attempt did nothing.
-            File marker = new File(newRoot, ".legacy-migrated");
-            if (marker.exists()) return;
-
-            newRoot.mkdirs();
-            // Back up whatever the new folder currently holds, then copy the legacy tree over
-            // it. The copy OVERWRITES, so a real old profile.json replaces the empty one the new
-            // build created - which is what actually brings your tasks/library/presets back.
-            File backup = new File(newRoot, ".pre-migrate-backup");
-            try {
-                File curProfile = new File(newRoot, "profile.json");
-                if (curProfile.isFile()) {
-                    backup.mkdirs();
-                    java.nio.file.Files.copy(curProfile.toPath(),
-                            new File(backup, "profile.json").toPath(),
-                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                }
-            } catch (Throwable ignored) {}
-
-            copyTree(legacy, newRoot);
-            try { marker.createNewFile(); } catch (Throwable ignored) {}
-            org.dreambot.api.utilities.Logger.log(
-                    "[DreamMan] Recovered your earlier tasks from " + legacy.getAbsolutePath()
-                    + " into " + newRoot.getAbsolutePath());
-        } catch (Throwable ignored) {
-            // migration is best-effort; a failure must never stop the script from starting
-        }
-    }
 
     /** Recursively copies {@code src} into {@code dst}, OVERWRITING existing files. */
     private static void copyTree(File src, File dst) throws java.io.IOException {

@@ -48,6 +48,41 @@ public class MiniMapPanel extends JPanel {
         ((javax.swing.Timer) e.getSource()).stop();
     });
 
+    /**
+     * v1.89d: the compass. The real minimap rotates with the camera, so this one does too -
+     * read reflectively because the camera class has moved between client builds and a
+     * hard reference would refuse to compile on the ones that name it differently.
+     *
+     * <p>When nothing can be read the map simply stays north-up, exactly as it was in v1.86,
+     * and the N marker keeps telling the truth. A rotating map that guessed its angle wrong
+     * would be worse than one that never rotates.
+     */
+    private static java.lang.reflect.Method camYawMethod;
+    private static boolean camLookupFailed;
+
+    /** Camera yaw in degrees (0 = north, clockwise), or -1 when this build won't say. */
+    static double cameraYawDegrees() {
+        if (camLookupFailed) return -1;
+        try {
+            if (camYawMethod == null) {
+                Class<?> cam = Class.forName("org.dreambot.api.methods.camera.Camera");
+                for (String n : new String[]{"getYaw", "getRotation", "getAngle", "getYawAngle"}) {
+                    try { camYawMethod = cam.getMethod(n); break; } catch (Throwable ignored) {}
+                }
+                if (camYawMethod == null) { camLookupFailed = true; return -1; }
+            }
+            Object v = camYawMethod.invoke(null);
+            if (!(v instanceof Number)) { camLookupFailed = true; return -1; }
+            double raw = ((Number) v).doubleValue();
+            // OSRS reports yaw in 0..2047 units; anything already in degrees passes through.
+            double deg = raw > 360 ? raw * 360.0 / 2048.0 : raw;
+            return ((deg % 360) + 360) % 360;
+        } catch (Throwable t) {
+            camLookupFailed = true;
+            return -1;
+        }
+    }
+
     private WorldMapDialog worldMap;   // lazily created, then reused (flags survive re-opens)
     private int zoom = 10;
     private int[] lastPos;             // last known {x, y, plane}, kept while the read blips
@@ -297,6 +332,11 @@ public class MiniMapPanel extends JPanel {
             } else {
                 // the map, centred on the middle of the player's tile
                 Graphics2D world = (Graphics2D) g2.create(ox, oy, d, d);
+                // v1.89d: rotate the WORLD under the player, the way the game does. -yaw
+                // because turning the camera right sweeps the world left past you.
+                double yaw = cameraYawDegrees();
+                if (yaw >= 0)
+                    world.rotate(Math.toRadians(-yaw), d / 2.0, d / 2.0);
                 ExplvMap.paintWorld(world, d, d, p[0] + 0.5, p[1] + 0.5, p[2], zoom, this::repaint);
                 world.dispose();
 
@@ -316,9 +356,20 @@ public class MiniMapPanel extends JPanel {
             g2.setStroke(new BasicStroke(1.2f));
             g2.setColor(Theme.BORDER);
             g2.draw(disc);
+            // v1.89d: N follows the compass. When the camera can't be read it stays at the top
+            // and the map stays unrotated, so the marker is never lying about which way is up.
+            double yawN = cameraYawDegrees();
             g2.setFont(Theme.fontBold(10));
             g2.setColor(Theme.ACCENT);
-            g2.drawString("N", cx - 3, oy + 12);
+            if (yawN < 0) {
+                g2.drawString("N", cx - 3, oy + 12);
+            } else {
+                double a = Math.toRadians(-yawN - 90);      // -90: 0 deg should sit at the top
+                int r = d / 2 - 9;
+                int nx = cx + (int) Math.round(Math.cos(a) * r);
+                int ny = cy + (int) Math.round(Math.sin(a) * r);
+                g2.drawString("N", nx - 3, ny + 4);
+            }
 
             g2.dispose();
         }

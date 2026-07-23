@@ -508,7 +508,7 @@ public abstract class DreamBotMan extends AbstractScript implements GameStateLis
         } catch (Exception e) {
             String error = e.getMessage();
             Logger.log(error == null || error.isEmpty() ? "Error executing main loop!" : error);
-            e.printStackTrace();
+            Logger.log(Logger.LogType.WARN, "[DreamMan] " + e.getClass().getSimpleName());   // v1.89 (SDN): no stack traces to console
         }
 
         int gap = pendingTaskGapMs;

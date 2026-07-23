@@ -267,7 +267,10 @@ public class MarketCard extends JPanel {
         structureBtn.addActionListener(e -> cb.onOpenDetails(listing, false));
         actions.add(structureBtn);
         // Patch B.16 carried forward: the server sends VIP bundles as null to non-VIP callers
-        boolean lockedVip = listing.vipOnly && listing.bundle == null;
+        // v1.90: locked when the SERVER withheld the payload - either the old vipOnly rule or
+        // the new per-rank one. The server is the authority; this only renders its decision.
+        boolean lockedVip = (listing.vipOnly || Boolean.TRUE.equals(listing.lockedByTier))
+                && listing.bundle == null;
         JButton dl = smallButton(UIIcons.importIcon(15, lockedVip ? Theme.TEXT_MUTED : Theme.GREEN),
                 lockedVip ? "VIP only \u2014 upgrade to download"
                           : "Download (or double-click the card)");
@@ -542,7 +545,12 @@ public class MarketCard extends JPanel {
                 + "  \u00b7  " + shortDate(listing.publishedAt));
 
         badgeRow.removeAll();
-        if (listing.vipOnly) badgeRow.add(chip("VIP", Theme.ACCENT, Theme.ACCENT_TINT));
+        // v1.90: name the rank a listing needs, rather than a blanket "VIP"
+        String need = listing.minTier == null ? (listing.vipOnly ? "vip" : "free")
+                : listing.minTier;
+        if (!"free".equalsIgnoreCase(need))
+            badgeRow.add(chip(main.market.Tier.labelFor(need).toUpperCase(),
+                    main.menu.components.RankBadge.tierColor(need), Theme.ACCENT_TINT));
         else badgeRow.add(chip("FREE", Theme.GREEN, Theme.BG_APP));
         String kind = (listing.kind == null ? "task" : listing.kind);
         badgeRow.add(chip(kind, Theme.BLUE, Theme.BG_APP));

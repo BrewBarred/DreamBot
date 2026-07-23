@@ -59,12 +59,16 @@ public final class ConnectionPanel {
         // right - a 200 carrying an empty array looks identical to a healthy one.
         final String[] bodies = new String[ENDPOINTS.length];
 
-        String[] cols = {"Endpoint", "Path", "Result", "Time", "What it's for", ""};
+        // v1.89b: no per-row Test column. A button in every row duplicated "Test selected"
+        // exactly, cost a column of width, and needed a cell editor + renderer to fake a
+        // button that a JTable never really wanted to hold. Select a row and press the button
+        // below - or just double-click the row.
+        String[] cols = {"Endpoint", "Path", "Result", "Time", "What it's for"};
         DefaultTableModel model = new DefaultTableModel(cols, 0) {
             @Override public boolean isCellEditable(int r, int c) { return false; }
         };
         for (String[] e : ENDPOINTS)
-            model.addRow(new Object[]{e[0], e[2], "\u2014", "\u2014", e[4], "Test"});
+            model.addRow(new Object[]{e[0], e[2], "\u2014", "\u2014", e[4]});
 
         JTable table = new JTable(model);
         table.setRowHeight(24);
@@ -73,75 +77,101 @@ public final class ConnectionPanel {
         table.getTableHeader().setReorderingAllowed(false);
         table.getColumnModel().getColumn(1).setPreferredWidth(210);
         table.getColumnModel().getColumn(4).setPreferredWidth(240);
-        // v1.83: a real Test button on every row, as well as the bulk actions below.
-        javax.swing.table.TableColumn testCol = table.getColumnModel().getColumn(5);
-        testCol.setPreferredWidth(64);
-        testCol.setMaxWidth(80);
-        testCol.setCellRenderer((t, val, sel, foc, r, c) -> {
-            JButton b = new JButton("Test");
-            b.setMargin(new Insets(1, 4, 1, 4));
-            return b;
-        });
-        testCol.setCellEditor(new javax.swing.DefaultCellEditor(new JCheckBox()) {
-            private final JButton b = new JButton("Test");
-            {
-                b.setMargin(new Insets(1, 4, 1, 4));
-                b.addActionListener(a -> {
-                    fireEditingStopped();
-                    int r = table.getSelectedRow();
-                    if (r >= 0) probe(server, model, table.convertRowIndexToModel(r),
-                            status, bodies);
-                });
-            }
-            @Override public Component getTableCellEditorComponent(JTable t, Object v,
-                    boolean sel, int r, int c) { return b; }
-        });
-
         JScrollPane scroll = Theme.thinScrollbars(new JScrollPane(table));
         scroll.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
 
         JButton testAll = new Theme.ThemedButton("Test all");
         JButton testOne = new Theme.ThemedButton("Test selected");
 
-        JButton viewBody = new Theme.ThemedButton("View response\u2026");
-        viewBody.setToolTipText("Show exactly what the server sent back for the selected row");
+        // ── v1.89b: the response is ALWAYS on screen ────────────────────────────────
+        // "View response..." hid the single most useful thing this panel produces behind a
+        // modal you had to remember to open. Now the body of whatever row you select is just
+        // there, underneath the table, and "Test all" fills it with a full scrollable sheet -
+        // every endpoint, its timing and its reply in one pass you can read top to bottom.
+        JTextArea out = new JTextArea();
+        out.setEditable(false);
+        out.setLineWrap(true);
+        out.setWrapStyleWord(true);
+        out.setFont(new Font("Consolas", Font.PLAIN, 12));
+        out.setBackground(new Color(0x14, 0x14, 0x14));
+        out.setForeground(Theme.TEXT_DIM);
+        out.setBorder(new EmptyBorder(6, 8, 6, 8));
+        out.setText("Select an endpoint to see its reply, or press \u201cTest all\u201d for the "
+                + "full sheet.");
+        JScrollPane outScroll = Theme.thinScrollbars(new JScrollPane(out));
+        outScroll.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+        outScroll.setPreferredSize(new Dimension(10, 190));
+
+        // selecting a row shows that row's last reply, with no click required
+        table.getSelectionModel().addListSelectionListener(ev -> {
+            if (ev.getValueIsAdjusting()) return;
+            int r = table.getSelectedRow();
+            if (r < 0) return;
+            int i2 = table.convertRowIndexToModel(r);
+            String body = bodies[i2];
+            out.setText(ENDPOINTS[i2][0] + "  \u00b7  " + ENDPOINTS[i2][2] + "\n"
+                    + "\u2500".repeat(60) + "\n"
+                    + (body == null ? "Not tested yet." : body));
+            out.setCaretPosition(0);
+        });
+
+        // double-click a row to test just that one - the per-row button's job, without the column
+        table.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent ev) {
+                if (ev.getClickCount() != 2) return;
+                int r = table.getSelectedRow();
+                if (r >= 0) probe(server, model, table.convertRowIndexToModel(r), status, bodies);
+            }
+        });
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         actions.setOpaque(false);
         actions.add(testAll);
         actions.add(testOne);
-        actions.add(viewBody);
-
-        viewBody.addActionListener(e -> {
-            int r = table.getSelectedRow();
-            if (r < 0) { status.setText("Select an endpoint first."); return; }
-            int i = table.convertRowIndexToModel(r);
-            String body = bodies[i];
-            JTextArea ta = new JTextArea(body == null
-                    ? "Nothing recorded yet - run the test for this endpoint first." : body);
-            ta.setEditable(false);
-            ta.setLineWrap(true);
-            ta.setWrapStyleWord(true);
-            ta.setFont(new Font("Consolas", Font.PLAIN, 12));
-            ta.setCaretPosition(0);
-            JScrollPane sp = new JScrollPane(ta);
-            sp.setPreferredSize(new Dimension(680, 380));
-            JOptionPane.showMessageDialog(root, sp,
-                    ENDPOINTS[i][0] + "  \u00b7  " + ENDPOINTS[i][2], JOptionPane.PLAIN_MESSAGE);
-        });
+        JLabel hint = new JLabel("double-click a row to test just that one");
+        hint.setForeground(Theme.TEXT_MUTED);
+        hint.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+        actions.add(hint);
 
         JPanel header = new JPanel(new GridLayout(0, 1, 0, 5));
         header.setOpaque(false);
         header.add(where);
         header.add(status);
 
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, scroll, outScroll);
+        split.setResizeWeight(0.68);   // the table gets the room, the output keeps a floor
+        split.setBorder(null);
+        split.setOpaque(false);
+
         root.add(header, BorderLayout.NORTH);
-        root.add(scroll, BorderLayout.CENTER);
+        root.add(split, BorderLayout.CENTER);
         root.add(actions, BorderLayout.SOUTH);
 
         testAll.addActionListener(e -> {
             status.setText("Testing " + ENDPOINTS.length + " endpoints\u2026");
             for (int i = 0; i < ENDPOINTS.length; i++) probe(server, model, i, status, bodies);
+            // v1.89b: assemble the sheet once every probe has had a chance to land. Each probe
+            // is its own SwingWorker, so this waits rather than racing them.
+            javax.swing.Timer sheet = new javax.swing.Timer(1200, a -> {
+                StringBuilder sb = new StringBuilder();
+                sb.append("FULL ENDPOINT SHEET  \u00b7  ")
+                  .append(new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date()))
+                  .append('\n').append("\u2550".repeat(60)).append("\n\n");
+                for (int i = 0; i < ENDPOINTS.length; i++) {
+                    sb.append(ENDPOINTS[i][0]).append("   ").append(ENDPOINTS[i][1])
+                      .append(' ').append(ENDPOINTS[i][2]).append('\n')
+                      .append("   result : ").append(model.getValueAt(i, 2)).append('\n')
+                      .append("   time   : ").append(model.getValueAt(i, 3)).append('\n')
+                      .append("   for    : ").append(ENDPOINTS[i][4]).append('\n')
+                      .append("   reply  : ")
+                      .append(bodies[i] == null ? "(nothing recorded)" : bodies[i]).append('\n')
+                      .append("\u2500".repeat(60)).append('\n');
+                }
+                out.setText(sb.toString());
+                out.setCaretPosition(0);
+            });
+            sheet.setRepeats(false);
+            sheet.start();
         });
         testOne.addActionListener(e -> {
             int r = table.getSelectedRow();

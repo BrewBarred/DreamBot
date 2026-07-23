@@ -54,8 +54,10 @@ public class EquipmentPanel extends JPanel {
     /** The 28 inventory cells, index = in-game slot (top-left across, then down). */
     private final InvCell[] invCells = new InvCell[28];
 
-    private final PresetBar barTop = new PresetBar();
+    // v1.89b: one bar, not two (see the layout note below). barTop is gone entirely.
     private final PresetBar barBottom = new PresetBar();
+    /** v1.89b: include the inventory in the next save, not just worn equipment. */
+    private final JCheckBox chkIncludeWorn = new JCheckBox("Include inventory when saving");
     private final JLabel status = new JLabel(" ");
     private final javax.swing.Timer timer = new javax.swing.Timer(2000, e -> refreshLive());
 
@@ -87,7 +89,6 @@ public class EquipmentPanel extends JPanel {
             }
         add(section(" Equipment ", doll));
         add(Box.createVerticalStrut(6));
-        add(align(barTop));
         add(Box.createVerticalStrut(10));
 
         // ── the inventory ──
@@ -99,7 +100,21 @@ public class EquipmentPanel extends JPanel {
         }
         add(section(" Inventory ", grid));
         add(Box.createVerticalStrut(6));
+        // v1.89b: ONE control bar, at the bottom. The sketch had an identical pair - one under
+        // the doll, one under the inventory - and since they shared all their state they were
+        // literally the same control drawn twice, which is what made them look "linked".
+        // The surviving bar sits under everything it acts on.
         add(align(barBottom));
+        add(Box.createVerticalStrut(4));
+        // v1.89b: what a save captures. Worn gear is the point of a preset, so it's on by
+        // default; ticking this in also records the inventory (runes, food, tools) for setups
+        // where what you're CARRYING is half the loadout.
+        chkIncludeWorn.setOpaque(false);
+        chkIncludeWorn.setForeground(Theme.TEXT_DIM);
+        chkIncludeWorn.setFont(Theme.font(11));
+        chkIncludeWorn.setToolTipText("When saving a preset, also record what's in your "
+                + "inventory - not just what you're wearing");
+        add(align(chkIncludeWorn));
         add(Box.createVerticalStrut(6));
 
         status.setForeground(Theme.TEXT_DIM);
@@ -145,8 +160,10 @@ public class EquipmentPanel extends JPanel {
     // ── presets ───────────────────────────────────────────────────────────────
 
     /**
-     * One [Equip] [<preset> v] control bar - the sketch puts an identical pair under the doll
-     * and under the inventory, so this exists twice with shared selection state.
+     * The [Equip] [<preset> v] control bar. v1.89b: exactly one of these. It used to be drawn
+     * twice (under the doll and under the inventory) sharing one selection, which meant two
+     * controls that always moved together - indistinguishable from one control, but twice the
+     * UI and twice the confusion.
      */
     private final class PresetBar extends JPanel {
         final JButton btnEquip = small(new Theme.ThemedButton("Equip"));
@@ -177,7 +194,7 @@ public class EquipmentPanel extends JPanel {
 
     private void syncBars() {
         String label = selectedPreset == null ? "Select preset" : selectedPreset;
-        for (PresetBar bar : new PresetBar[]{barTop, barBottom}) {
+        for (PresetBar bar : new PresetBar[]{barBottom}) {
             bar.btnSelect.setText(label);
             bar.btnEquip.setEnabled(selectedPreset != null);
         }
@@ -205,7 +222,24 @@ public class EquipmentPanel extends JPanel {
 
         JMenuItem save = new JMenuItem("Save current as...");
         save.addActionListener(e -> {
+            // v1.89b: worn gear always; the inventory only when the checkbox asks for it.
             Map<String, String> live = EquipmentPresets.readLive();
+            if (chkIncludeWorn.isSelected()) {
+                try {
+                    int slot = 0;
+                    for (Object it : org.dreambot.api.methods.container.impl.Inventory.all()) {
+                        if (it == null) continue;
+                        String nm = null;
+                        try {
+                            nm = String.valueOf(it.getClass().getMethod("getName").invoke(it));
+                        } catch (Throwable ignored) {}
+                        if (nm != null && !nm.isBlank() && !"null".equals(nm))
+                            live.put("INV" + (slot++), nm);
+                    }
+                } catch (Throwable ignored) {
+                    // no client behind us - the worn half still saves, which is the main event
+                }
+            }
             if (live.isEmpty()) {
                 status("Nothing worn to save - log in first.", false);
                 return;

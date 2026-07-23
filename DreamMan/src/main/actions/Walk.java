@@ -27,6 +27,8 @@ public class Walk extends Action {
     private JParamTextField paramArrive;
     /** v1.31: explicit "skip when already close" toggle - unticked disables the field. */
     private JCheckBox chkArrive;
+    /** v1.89: how to move - leave it alone, force walking, auto-run, or run flat out. */
+    private JComboBox<main.tools.RunControl.Mode> cmbMove;
     private transient long lastWalkIssueAt;
 
     // Existing empty constructor for initial UI setup
@@ -39,6 +41,34 @@ public class Walk extends Action {
         chkArrive.setToolTipText("v1.31: when ticked, the walk is skipped entirely if you're"
                 + " already this close to the destination. Untick to always walk.");
         chkArrive.addActionListener(e -> paramArrive.setEnabled(chkArrive.isSelected()));
+
+        // v1.89: the movement mode. AUTO is first and default, so every task saved before this
+        // patch keeps behaving exactly as it did.
+        cmbMove = new JComboBox<>(main.tools.RunControl.Mode.values());
+        cmbMove.setSelectedItem(main.tools.RunControl.Mode.AUTO);
+        cmbMove.setToolTipText("<html><b>Auto</b> \u2014 don't touch run; the client decides.<br>"
+                + "<b>Force walk</b> \u2014 run is switched off and kept off.<br>"
+                + "<b>Auto-run</b> \u2014 run switches on once you have "
+                + main.tools.RunControl.AUTO_RUN_ON_AT + "% energy, then it's left alone as it "
+                + "drains.<br><b>Force run</b> \u2014 run every step that's possible: re-enabled "
+                + "the moment there's any energy at all,<br>and stamina / energy potions in your "
+                + "inventory are drunk to keep it going (it will spend them).</html>");
+        cmbMove.setRenderer(new DefaultListCellRenderer() {
+            @Override public java.awt.Component getListCellRendererComponent(
+                    JList<?> l, Object v, int i, boolean sel, boolean foc) {
+                java.awt.Component c = super.getListCellRendererComponent(l, v, i, sel, foc);
+                if (v instanceof main.tools.RunControl.Mode)
+                    setText(((main.tools.RunControl.Mode) v).label);
+                return c;
+            }
+        });
+    }
+
+    /** The chosen movement mode (AUTO when the control hasn't been built yet). */
+    private main.tools.RunControl.Mode moveMode() {
+        Object v = cmbMove == null ? null : cmbMove.getSelectedItem();
+        return v instanceof main.tools.RunControl.Mode
+                ? (main.tools.RunControl.Mode) v : main.tools.RunControl.Mode.AUTO;
     }
 
     // New constructor for the actual functional action
@@ -53,6 +83,7 @@ public class Walk extends Action {
         this.paramArrive.setParam(w.paramArrive.getParam());
         this.chkArrive.setSelected(w.chkArrive.isSelected());
         this.paramArrive.setEnabled(this.chkArrive.isSelected());
+        this.cmbMove.setSelectedItem(w.moveMode());   // v1.89
     }
 
     private void load(String target) {
@@ -182,7 +213,23 @@ public class Walk extends Action {
         arriveWrap.add(arrive);
         arriveWrap.add(Box.createVerticalStrut(10));
 
-        return main.actions.ActionUtil.stack(target, arriveWrap);
+        // v1.89: the movement row, under the arrive gate - both are "how this walk behaves"
+        JPanel moveRow = new JPanel(new java.awt.BorderLayout(6, 0));
+        moveRow.setOpaque(false);
+        JLabel moveLbl = new JLabel("Movement:");
+        moveLbl.setForeground(main.menu.Theme.TEXT_DIM);
+        moveLbl.setFont(new java.awt.Font("Segoe UI", java.awt.Font.BOLD, 12));
+        moveRow.add(moveLbl, java.awt.BorderLayout.WEST);
+        moveRow.add(cmbMove, java.awt.BorderLayout.CENTER);
+        moveRow.setMaximumSize(new java.awt.Dimension(280, 30));
+        moveRow.setAlignmentX(0f);
+        JPanel moveWrap = new JPanel();
+        moveWrap.setLayout(new BoxLayout(moveWrap, BoxLayout.Y_AXIS));
+        moveWrap.setOpaque(false);
+        moveWrap.add(moveRow);
+        moveWrap.add(Box.createVerticalStrut(10));
+
+        return main.actions.ActionUtil.stack(target, arriveWrap, moveWrap);
     }
 
     @Override
@@ -190,6 +237,11 @@ public class Walk extends Action {
         // already there? don't click again
         if (isComplete())
             return true;
+
+        // v1.89: put movement in the state this step asked for BEFORE walking, so the very
+        // first step of the trip already runs (or already doesn't). RunControl rate-limits
+        // itself, so calling it every loop costs nothing and never spams toggles.
+        main.tools.RunControl.apply(moveMode());
 
         // Only (re)issue a walk when the player is idle - previously this fired a fresh
         // Walking.walk() every single loop, spamming clicks while mid-path. Each idle re-issue
@@ -231,7 +283,8 @@ public class Walk extends Action {
         return Map.of(
                 "Target", paramTarget.getParam(),
                 // v1.31: "off" = the checkbox is unticked (always walk)
-                "Arrive", chkArrive.isSelected() ? paramArrive.getParam() : "off"
+                "Arrive", chkArrive.isSelected() ? paramArrive.getParam() : "off",
+                "Move", moveMode().name()   // v1.89
         );
     }
 
@@ -252,5 +305,8 @@ public class Walk extends Action {
             }
             paramArrive.setEnabled(chkArrive.isSelected());
         }
+        // v1.89: absent on tasks saved before this patch, which Mode.from() reads as AUTO -
+        // so an old profile keeps its exact old behaviour.
+        cmbMove.setSelectedItem(main.tools.RunControl.Mode.from(data.get("Move")));
     }
 }
